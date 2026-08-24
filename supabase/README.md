@@ -13,6 +13,14 @@ dev-доменов), поэтому миграции нужно применит
    вставьте и нажмите **Run**.
 4. Новым запросом — то же самое с `supabase/migrations/0002_rls_and_storage.sql`.
 5. Проверка: **Table Editor** должен показать все таблицы из раздела 4 спеки
+
+### Если 0001 падает с "relation ... already exists"
+
+Значит предыдущий прогон выполнился частично (упал на середине списка
+`create table`), и часть таблиц уже создана. Прогоните
+`supabase/migrations/0000_reset.sql` (полностью сносит всё, что могли
+успеть создать 0001/0002 — безопасно, пока в базе ещё нет реальных данных),
+затем заново 0001 и 0002 по порядку.
    (`users`, `user_languages`, `matches`, `rounds`, `voice_recordings`,
    `grammar_errors`, `round_scores`, `evaluation_jobs`, `training_sessions`,
    `training_rounds`, `matchmaking_tickets`, `currency_wallets`,
