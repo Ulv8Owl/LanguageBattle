@@ -34,7 +34,9 @@ drop function if exists public.handle_new_auth_user() cascade;
 drop policy if exists "voice-recordings: participants can read" on storage.objects;
 drop policy if exists "voice-recordings: participants can upload" on storage.objects;
 
--- Если удаление бакета упадёт из-за уже загруженных файлов — не страшно,
--- пропустите эту строку и продолжайте: 0002 создаёт бакет через
--- "on conflict do nothing", повторное наличие бакета не мешает.
-delete from storage.buckets where id = 'voice-recordings';
+-- Бакет voice-recordings нарочно не трогаем: Supabase запрещает удалять
+-- строки storage.buckets/storage.objects напрямую через SQL ("Direct
+-- deletion from storage tables is not allowed"). Это не мешает — 0002
+-- создаёт бакет через "on conflict do nothing", так что повторное его
+-- наличие безвредно. Если когда-нибудь понадобится удалить сам бакет —
+-- это делается через Storage UI/API, не через SQL Editor.
