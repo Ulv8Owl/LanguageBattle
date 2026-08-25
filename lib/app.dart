@@ -9,7 +9,7 @@ class LanguageBattleApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp.router(
-      title: 'Language Battle',
+      title: 'Chrolingo',
       debugShowCheckedModeBanner: false,
       theme: buildAppTheme(),
       routerConfig: appRouter,

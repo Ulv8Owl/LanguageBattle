@@ -69,7 +69,7 @@ class _LoginScreenState extends State<LoginScreen> {
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
                     const Text(
-                      'LANGUAGE BATTLE',
+                      'CHROLINGO',
                       textAlign: TextAlign.center,
                       style: TextStyle(
                         fontSize: 28,
