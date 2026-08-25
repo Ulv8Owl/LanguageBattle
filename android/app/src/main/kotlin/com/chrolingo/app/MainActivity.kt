@@ -1,4 +1,4 @@
-package com.languagebattle.language_battle
+package com.chrolingo.app
 
 import io.flutter.embedding.android.FlutterActivity
 

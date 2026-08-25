@@ -70,6 +70,12 @@ class _TrainingScreenState extends State<TrainingScreen> {
   /// История пройденных раундов сессии — рисуется той же лентой.
   final List<_CompletedRound> _history = [];
 
+  /// Порядок фраз на всю сессию, перемешанный один раз при старте — раунды
+  /// соло идут строго локально (одна сессия = один клиент), поэтому, в
+  /// отличие от PvP, не нужно синхронизировать "уже использованные индексы"
+  /// через БД: достаточно перетасовать банк один раз и идти по порядку.
+  late final List<int> _phraseOrder = List.generate(PhraseBank.count, (i) => i)..shuffle();
+
   StreamSubscription? _jobSub;
   StreamSubscription? _roundSub;
 
@@ -129,7 +135,8 @@ class _TrainingScreenState extends State<TrainingScreen> {
 
   Future<void> _openRound(int n) async {
     final sessionId = _sessionId!;
-    final phrase = PhraseBank.pick(_targetLanguage, n);
+    final phraseIndex = _phraseOrder[(n - 1) % _phraseOrder.length];
+    final phrase = PhraseBank.textFor(phraseIndex, _targetLanguage);
     final row = await supabase
         .from('training_rounds')
         .insert({'session_id': sessionId, 'round_number': n, 'generated_phrase': phrase})
@@ -267,6 +274,11 @@ class _TrainingScreenState extends State<TrainingScreen> {
         debugPrint('claim_training_reward failed: $e');
       }
 
+      // Раунд оценён и награда начислена — обе попытки этого раунда больше
+      // не нужны, аудио не хранится "про запас" (см. deferred_suggestions.md,
+      // пункт 7 — реализовано по отдельному запросу владельца проекта).
+      unawaited(_deleteRoundRecordings(roundId));
+
       if (!mounted) return;
       setState(() {
         _finalScore = score;
@@ -275,6 +287,20 @@ class _TrainingScreenState extends State<TrainingScreen> {
       });
       _scrollToBottomSoon();
     });
+  }
+
+  Future<void> _deleteRoundRecordings(String trainingRoundId) async {
+    try {
+      final rows = await supabase
+          .from('voice_recordings')
+          .select('audio_storage_path')
+          .eq('training_round_id', trainingRoundId);
+      final paths = rows.map((r) => r['audio_storage_path'] as String).toList();
+      if (paths.isEmpty) return;
+      await supabase.storage.from('voice-recordings').remove(paths);
+    } catch (e) {
+      debugPrint('failed to delete training round recordings: $e');
+    }
   }
 
   Future<void> _next() async {

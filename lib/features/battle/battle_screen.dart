@@ -22,6 +22,19 @@ import 'battle_models.dart';
 ///
 /// В интерфейсе нет текстовых подсказок: состояние записи передаётся только
 /// самой кнопкой микрофона (см. VoiceRecorderDock).
+///
+/// Раунд имеет таймаут (см. deferred_suggestions.md, пункт 5 — реализовано
+/// по отдельному запросу): если игрок не отправил голосовое за
+/// [_roundTimeoutSeconds] секунд после появления фразы, серверная функция
+/// `auto_skip_stale_rounds` засчитывает ему минимальный балл за раунд, чтобы
+/// брошенный матч не зависал в `in_progress` навсегда. Обратный отсчёт в
+/// шапке — это таймаут именно на "начать отвечать", а не ограничение на
+/// длину самого голосового.
+///
+/// Аудио удаляется из Storage сразу после завершения матча — оно не
+/// хранится "про запас" (сознательное решение, отличается от спеки, где
+/// экран итогов мог бы предлагать переслушать голосовое; эта возможность
+/// сознательно не реализуется).
 class BattleScreen extends StatefulWidget {
   final String matchId;
 
@@ -51,10 +64,28 @@ class _BattleScreenState extends State<BattleScreen> {
   StreamSubscription? _recordingsSub;
   StreamSubscription? _scoresSub;
 
+  /// Сколько секунд даётся игроку на то, чтобы НАЧАТЬ отвечать в раунде
+  /// (не на длину самой записи) — раздел 7 спеки называет диапазон 30-45с.
+  static const _roundTimeoutSeconds = 40;
+
+  /// Раз в секунду будит build(), чтобы обратный отсчёт в шапке был живым.
+  Timer? _tickTimer;
+
+  /// Раз в несколько секунд просит сервер списать штраф за брошенный раунд
+  /// (см. auto_skip_stale_rounds в 0007_round_timeout_and_cleanup.sql).
+  /// Идемпотентно — повторные вызовы безвредны.
+  Timer? _sweepTimer;
+
   @override
   void initState() {
     super.initState();
     _init();
+    _tickTimer = Timer.periodic(const Duration(seconds: 1), (_) {
+      if (mounted) setState(() {});
+    });
+    _sweepTimer = Timer.periodic(const Duration(seconds: 5), (_) {
+      supabase.rpc('auto_skip_stale_rounds').catchError((_) => null);
+    });
   }
 
   Future<void> _init() async {
@@ -128,6 +159,8 @@ class _BattleScreenState extends State<BattleScreen> {
     _roundsSub?.cancel();
     _recordingsSub?.cancel();
     _scoresSub?.cancel();
+    _tickTimer?.cancel();
+    _sweepTimer?.cancel();
     _feedController.dispose();
     super.dispose();
   }
@@ -167,6 +200,18 @@ class _BattleScreenState extends State<BattleScreen> {
     return _scoreFor(r.id, m.playerAId) != null && _scoreFor(r.id, m.playerBId) != null;
   }
 
+  /// Секунд до автосписания раунда, null — если считать нечего (матч не
+  /// идёт, раундов ещё нет, или последний раунд уже полностью оценён).
+  int? get _roundSecondsLeft {
+    final m = _match;
+    final round = _lastRound;
+    if (m == null || round == null || m.status != 'in_progress') return null;
+    if (_roundFullyScored(round)) return null;
+    final elapsed = DateTime.now().toUtc().difference(round.createdAt.toUtc()).inSeconds;
+    final left = _roundTimeoutSeconds - elapsed;
+    return left > 0 ? left : 0;
+  }
+
   Future<void> _maybeAdvance() async {
     final m = _match;
     if (m == null || m.status != 'in_progress') return;
@@ -185,13 +230,22 @@ class _BattleScreenState extends State<BattleScreen> {
 
   Future<void> _tryCreateRound(int n) async {
     final m = _match!;
+    // Рандом по фиксированному банку фраз (не генерация LLM — см.
+    // lib/data/phrase_bank.dart), без повторов уже сыгранных в этом матче.
+    final usedIndices = _rounds.map((r) => r.phraseIndex).whereType<int>().toSet();
+    final phraseIndex = PhraseBank.randomIndex(exclude: usedIndices);
     final phrase = m.isDuel
-        ? '${PhraseBank.pick(m.languageForSlot(m.playerAId!, 'target'), n)} / '
-            '${PhraseBank.pick(m.languageForSlot(m.playerBId!, 'target'), n)}'
-        : PhraseBank.pick(m.languagePair ?? 'en', n);
+        ? '${PhraseBank.textFor(phraseIndex, m.languageForSlot(m.playerAId!, 'target'))} / '
+            '${PhraseBank.textFor(phraseIndex, m.languageForSlot(m.playerBId!, 'target'))}'
+        : PhraseBank.textFor(phraseIndex, m.languagePair ?? 'en');
     try {
       await supabase.from('rounds').upsert(
-        {'match_id': m.id, 'round_number': n, 'generated_phrase': phrase},
+        {
+          'match_id': m.id,
+          'round_number': n,
+          'generated_phrase': phrase,
+          'phrase_index': phraseIndex,
+        },
         onConflict: 'match_id,round_number',
         ignoreDuplicates: true,
       );
@@ -208,10 +262,36 @@ class _BattleScreenState extends State<BattleScreen> {
       // раундам, пересчёт ELO, начисление валюты/опыта): клиент не может
       // писать напрямую в currency_wallets и users.xp, и сам результат
       // матча пересчитывается на сервере из round_scores.
-      await supabase.rpc('finalize_match', params: {'p_match_id': m.id});
+      final result = await supabase.rpc('finalize_match', params: {'p_match_id': m.id});
+      final alreadyCompleted = result is Map && result['already_completed'] == true;
+      if (!alreadyCompleted) {
+        // Аудио этого матча больше не нужно — держать его "про запас" не
+        // просили, наоборот, попросили удалять сразу после боя. Делает это
+        // только тот клиент, чей вызов finalize_match реально сработал
+        // первым, чтобы не гонять Storage API дважды на один и тот же матч.
+        await _deleteMatchRecordings();
+      }
     } catch (_) {
       // Другой клиент уже финализировал матч (или ещё не все раунды
       // синхронизировались локально) — статус придёт через Realtime.
+    }
+  }
+
+  /// Удаляет из Storage все голосовые именно ЭТОГО матча. `_recordings`
+  /// в состоянии экрана — общий, не отфильтрованный по матчу поток (см.
+  /// комментарий у `_recordingsSub`), поэтому фильтруем по id раундов
+  /// текущего матча, а не берём список как есть.
+  Future<void> _deleteMatchRecordings() async {
+    final roundIds = _rounds.map((r) => r.id).toSet();
+    final paths = _recordings
+        .where((r) => roundIds.contains(r.roundId))
+        .map((r) => r.audioStoragePath)
+        .toList();
+    if (paths.isEmpty) return;
+    try {
+      await supabase.storage.from('voice-recordings').remove(paths);
+    } catch (e) {
+      debugPrint('failed to delete match recordings: $e');
     }
   }
 
@@ -343,6 +423,7 @@ class _BattleScreenState extends State<BattleScreen> {
                 opponentWins: opponentWins,
                 myName: _myName,
                 opponentName: _opponentName,
+                secondsLeft: _roundSecondsLeft,
               ),
               Expanded(
                 child: _rounds.isEmpty
@@ -403,33 +484,78 @@ class _BattleScreenState extends State<BattleScreen> {
   }
 }
 
-/// Шапка: живой счёт ВЫИГРАННЫХ РАУНДОВ, между кружками — разделитель.
+/// Шапка: живой счёт ВЫИГРАННЫХ РАУНДОВ, между кружками — разделитель, под
+/// ними — обратный отсчёт до автосписания раунда (задача 5 итерации).
 class _ScoreHeader extends StatelessWidget {
   final int myWins;
   final int opponentWins;
   final String myName;
   final String opponentName;
+  final int? secondsLeft;
 
   const _ScoreHeader({
     required this.myWins,
     required this.opponentWins,
     required this.myName,
     required this.opponentName,
+    required this.secondsLeft,
   });
 
   @override
   Widget build(BuildContext context) {
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 12),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.center,
+      child: Column(
         children: [
-          _ScoreCircle(value: myWins, color: AppColors.gold, name: myName),
-          const Padding(
-            padding: EdgeInsets.symmetric(horizontal: 16),
-            child: Text('/', style: TextStyle(fontSize: 20, color: AppColors.muted, fontWeight: FontWeight.w700)),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              _ScoreCircle(value: myWins, color: AppColors.gold, name: myName),
+              const Padding(
+                padding: EdgeInsets.symmetric(horizontal: 16),
+                child: Text('/', style: TextStyle(fontSize: 20, color: AppColors.muted, fontWeight: FontWeight.w700)),
+              ),
+              _ScoreCircle(value: opponentWins, color: AppColors.cyan, name: opponentName),
+            ],
           ),
-          _ScoreCircle(value: opponentWins, color: AppColors.cyan, name: opponentName),
+          if (secondsLeft != null) ...[
+            const SizedBox(height: 8),
+            _RoundCountdown(seconds: secondsLeft!),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+class _RoundCountdown extends StatelessWidget {
+  final int seconds;
+
+  const _RoundCountdown({required this.seconds});
+
+  @override
+  Widget build(BuildContext context) {
+    final urgent = seconds <= 10;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 3),
+      decoration: BoxDecoration(
+        color: AppColors.navy3,
+        border: Border.all(color: urgent ? AppColors.danger : AppColors.line),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(Icons.timer_outlined, size: 12, color: urgent ? AppColors.danger : AppColors.muted),
+          const SizedBox(width: 4),
+          Text(
+            '$secondsс',
+            style: AppFonts.mono(
+              fontSize: 10,
+              weight: FontWeight.w700,
+              color: urgent ? AppColors.danger : AppColors.muted,
+            ),
+          ),
         ],
       ),
     );

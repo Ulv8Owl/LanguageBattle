@@ -15,6 +15,11 @@ enum _Phase { searching, found, notFound, failed }
 /// Объём этого захода намеренно ограничен: фоновый поиск с push-уведомлениями
 /// и бот-соперник НЕ реализованы — если за 30 секунд живой соперник не нашёлся,
 /// показывается "соперник не найден, попробуй позже" с кнопкой "Отмена".
+///
+/// Отказ/тайм-аут подтверждения одной стороны не наказывает другую: сервер
+/// возвращает встречный тикет в очередь со свежим окном поиска вместо того,
+/// чтобы отменять его тоже (deferred_suggestions.md, пункт 6 — реализовано
+/// по отдельному запросу владельца проекта), см. `_onTicketUpdate`.
 class MatchmakingScreen extends StatefulWidget {
   /// 'sparring' | 'native_duel'
   final String gameMode;
@@ -43,6 +48,7 @@ class _MatchmakingScreenState extends State<MatchmakingScreen> {
   Timer? _tick;
   Timer? _acceptTick;
   StreamSubscription? _matchSub;
+  StreamSubscription? _ticketSub;
   bool _leaving = false;
 
   String get _modeName => widget.gameMode == 'native_duel' ? 'Дуэль' : 'Состязание';
@@ -58,6 +64,7 @@ class _MatchmakingScreenState extends State<MatchmakingScreen> {
     _tick?.cancel();
     _acceptTick?.cancel();
     _matchSub?.cancel();
+    _ticketSub?.cancel();
     // Тикет снимается всегда, даже если экран закрыли свайпом назад —
     // иначе игрок остался бы висеть в очереди для чужого поиска.
     final ticketId = _ticketId;
@@ -110,8 +117,38 @@ class _MatchmakingScreenState extends State<MatchmakingScreen> {
     }
 
     if (!mounted) return;
+    // Следим за своим же тикетом: если встречная сторона откажется или не
+    // успеет подтвердить, сервер (mm_cancel, см. 0007) вернёт НАШ тикет в
+    // 'searching' вместо того, чтобы отменять и наш поиск тоже — не
+    // подтверждённый матч не должен стоить нам уже потраченного времени.
+    _ticketSub = supabase
+        .from('matchmaking_tickets')
+        .stream(primaryKey: ['id'])
+        .eq('id', _ticketId!)
+        .listen(_onTicketUpdate);
     _tick = Timer.periodic(const Duration(seconds: 2), (_) => _searchStep());
     _searchStep();
+  }
+
+  void _onTicketUpdate(List<Map<String, dynamic>> rows) {
+    if (!mounted || rows.isEmpty || _leaving) return;
+    final status = rows.first['status'] as String?;
+    if (status == 'searching' && _phase != _Phase.searching) {
+      _acceptTick?.cancel();
+      _matchSub?.cancel();
+      setState(() {
+        _phase = _Phase.searching;
+        _matchId = null;
+        _accepted = false;
+        _accepting = false;
+        _elapsed = 0;
+      });
+      _tick?.cancel();
+      _tick = Timer.periodic(const Duration(seconds: 2), (_) => _searchStep());
+    } else if (status == 'expired' && _phase == _Phase.searching) {
+      _tick?.cancel();
+      setState(() => _phase = _Phase.notFound);
+    }
   }
 
   /// Окно допустимой разницы ELO расширяется по ходу поиска (раздел 2.3),

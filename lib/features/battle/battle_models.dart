@@ -58,6 +58,10 @@ class RoundData {
   final String matchId;
   final int roundNumber;
   final String? generatedPhrase;
+
+  /// Индекс фразы в PhraseBank.phrases — нужен клиенту, чтобы не повторять
+  /// уже сыгранные фразы в пределах одного матча (см. battle_screen.dart).
+  final int? phraseIndex;
   final DateTime createdAt;
 
   const RoundData({
@@ -65,6 +69,7 @@ class RoundData {
     required this.matchId,
     required this.roundNumber,
     required this.generatedPhrase,
+    required this.phraseIndex,
     required this.createdAt,
   });
 
@@ -74,6 +79,7 @@ class RoundData {
       matchId: row['match_id'] as String,
       roundNumber: row['round_number'] as int,
       generatedPhrase: row['generated_phrase'] as String?,
+      phraseIndex: row['phrase_index'] as int?,
       createdAt: DateTime.parse(row['created_at'] as String),
     );
   }

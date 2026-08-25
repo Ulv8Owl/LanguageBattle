@@ -22,7 +22,7 @@ export interface EvaluateGrammarResult {
 /** Нейтральный балл при неустранимом сбое модели — игрока не штрафуем. */
 const NEUTRAL_SCORE = 7;
 
-const SYSTEM_PROMPT =
+const BASE_SYSTEM_PROMPT =
   `Ты — строгий, но доброжелательный судья грамматики для приложения изучения языков.
 Тебе дают транскрипт того, что сказал изучающий язык (уровень A1-B2), целевой язык и родной язык говорящего.
 Твоя задача — оценить сказанное по 10-балльной шкале и найти ошибки грамматики, орфографии и стиля в транскрипте.
@@ -35,10 +35,29 @@ const SYSTEM_PROMPT =
 score — целое число от 1 до 10: 10 — безупречно и естественно, 7-9 — понятно с мелкими огрехами,
 4-6 — заметные ошибки, но смысл ясен, 1-3 — почти непонятно или не на том языке.
 offset/length — позиция символа в ПЕРЕДАННОМ транскрипте (0-indexed, по UTF-16 code units).
-message — короткое объяснение ошибки НА РОДНОМ ЯЗЫКЕ говорящего, понятное новичку.
 replacement — как должно быть правильно.
 category — "grammar" или "spelling" для настоящих ошибок; "style" для необязательных стилистических советов.
 Если ошибок нет — верни {"score": 10, "errors": []}.`;
+
+/// Обычный режим (PvP, раздел 2.4): message — короткое, одна-две фразы,
+/// понятное с первого взгляда прямо в ленте боя.
+const BRIEF_MESSAGE_INSTRUCTION =
+  `message — короткое объяснение ошибки (одно-два предложения) НА РОДНОМ ЯЗЫКЕ говорящего, понятное новичку.`;
+
+/// Одиночная Игра (раздел 2.2): между двумя попытками игрок должен понять,
+/// что именно исправить — здесь ИИ обязан объяснять подробнее, чем в PvP,
+/// а не просто оценивать и указывать на ошибку одной строкой.
+const DETAILED_MESSAGE_INSTRUCTION =
+  `message — ПОДРОБНОЕ объяснение ошибки НА РОДНОМ ЯЗЫКЕ говорящего, 3-5 предложений:
+назови грамматическое правило, которое нарушено, объясни своими словами, почему форма из транскрипта
+неверна, и приведи короткий дополнительный пример правильного употребления этого правила (не просто
+повтори replacement). Это учебный режим с двумя попытками подряд — объяснение должно быть настолько
+понятным, чтобы неноситель языка A1-B2 смог исправить ошибку во второй попытке, не просто скопировав
+исправление.`;
+
+function buildSystemPrompt(detailed: boolean): string {
+  return `${BASE_SYSTEM_PROMPT}\n${detailed ? DETAILED_MESSAGE_INSTRUCTION : BRIEF_MESSAGE_INSTRUCTION}`;
+}
 
 function buildUserPrompt(transcript: string, targetLanguage: string, nativeLanguage: string): string {
   return [
@@ -92,7 +111,12 @@ function validate(value: unknown): ParsedResult | null {
   return { score, errors };
 }
 
-async function callLlmOnce(transcript: string, targetLanguage: string, nativeLanguage: string): Promise<unknown> {
+async function callLlmOnce(
+  transcript: string,
+  targetLanguage: string,
+  nativeLanguage: string,
+  detailed: boolean,
+): Promise<unknown> {
   const baseUrl = Deno.env.get("LLM_BASE_URL") ?? "https://api.deepseek.com/v1";
   const apiKey = Deno.env.get("LLM_API_KEY");
   const model = Deno.env.get("LLM_MODEL") ?? "deepseek-chat";
@@ -110,7 +134,7 @@ async function callLlmOnce(transcript: string, targetLanguage: string, nativeLan
     body: JSON.stringify({
       model,
       messages: [
-        { role: "system", content: SYSTEM_PROMPT },
+        { role: "system", content: buildSystemPrompt(detailed) },
         { role: "user", content: buildUserPrompt(transcript, targetLanguage, nativeLanguage) },
       ],
       // Structured output там, где провайдер это поддерживает (раздел 9.3).
@@ -143,10 +167,17 @@ export async function evaluateGrammar(
   transcript: string,
   targetLanguage: string,
   nativeLanguage: string,
+  /**
+   * true — Одиночная Игра (раздел 2.2): подробный разбор ошибки между
+   * попыткой №1 и №2. false — PvP (раздел 2.4): короткая пометка в ленте
+   * боя. Балл (score) считается одинаково в обоих случаях — отличается
+   * только глубина текста в message у найденных ошибок.
+   */
+  detailed = false,
 ): Promise<EvaluateGrammarResult> {
   for (let attempt = 0; attempt < 2; attempt++) {
     try {
-      const parsed = validate(await callLlmOnce(transcript, targetLanguage, nativeLanguage));
+      const parsed = validate(await callLlmOnce(transcript, targetLanguage, nativeLanguage, detailed));
       if (parsed) {
         return { score: parsed.score, errors: parsed.errors, degraded: false };
       }

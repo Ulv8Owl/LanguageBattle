@@ -80,7 +80,11 @@ Deno.serve(async (req) => {
     let degraded = false;
 
     if (transcript.length > 0) {
-      const result = await evaluateGrammar(transcript, targetLanguage, nativeLanguage);
+      // Одиночная Игра просит подробный разбор ошибки (раздел 2.2: игрок
+      // должен понять, что исправить перед второй попыткой) — PvP получает
+      // короткую пометку прямо в ленте боя. Балл считается одинаково.
+      const detailed = recording.training_round_id != null;
+      const result = await evaluateGrammar(transcript, targetLanguage, nativeLanguage, detailed);
       score = result.score;
       errors = result.errors;
       degraded = result.degraded;
