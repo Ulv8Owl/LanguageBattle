@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:record/record.dart';
+import 'package:speech_to_text/speech_to_text.dart';
 import 'package:supabase_flutter/supabase_flutter.dart' show FileOptions;
 import 'package:uuid/uuid.dart';
 
@@ -16,10 +17,19 @@ import 'battle_models.dart';
 
 enum _MicState { idle, recording, ready }
 
-/// Wizard-of-Oz боевой экран (Шаг 3): полный цикл записи/загрузки/прослушки
-/// голосовых и продвижения раундов через Realtime — единственное, что здесь
-/// не настоящее, это ИИ-оценка: баллы в round_scores выставляет человек
-/// вручную через Supabase Studio (см. supabase/README.md).
+/// Локали on-device распознавания речи (раздел 9.1 — ASR временно через
+/// встроенный движок Android/iOS вместо облачного адаптера; заменяется
+/// позже без изменений в остальном пайплайне, см. supabase/README.md).
+const _speechLocaleByLanguage = {
+  'en': 'en_US',
+  'es': 'es_ES',
+  'ru': 'ru_RU',
+};
+
+/// Боевой экран: полный цикл записи/загрузки/прослушки голосовых и
+/// продвижения раундов через Realtime. Транскрипт снимается on-device во
+/// время записи; реальную грамматическую оценку считает Edge Function
+/// evaluate-recording (DeepSeek), запускаемая триггером на evaluation_jobs.
 class BattleScreen extends StatefulWidget {
   final String matchId;
 
@@ -46,6 +56,10 @@ class _BattleScreenState extends State<BattleScreen> with SingleTickerProviderSt
   StreamSubscription? _scoresSub;
 
   final _recorder = AudioRecorder();
+  final _speech = SpeechToText();
+  bool _speechAvailable = false;
+  String _liveTranscript = '';
+  double _liveConfidence = 1.0;
   _MicState _micState = _MicState.idle;
   String? _pendingFilePath;
   Stopwatch? _recordStopwatch;
@@ -64,6 +78,13 @@ class _BattleScreenState extends State<BattleScreen> with SingleTickerProviderSt
   }
 
   Future<void> _init() async {
+    try {
+      _speechAvailable = await _speech.initialize(
+        onError: (e) => debugPrint('speech_to_text error: $e'),
+      );
+    } catch (e) {
+      debugPrint('speech_to_text init failed: $e');
+    }
     try {
       final row = await supabase.from('matches').select().eq('id', widget.matchId).single();
       _match = MatchData.fromRow(row);
@@ -139,6 +160,7 @@ class _BattleScreenState extends State<BattleScreen> with SingleTickerProviderSt
     _scoresSub?.cancel();
     _pulseController.dispose();
     _recorder.dispose();
+    _speech.cancel();
     super.dispose();
   }
 
@@ -209,29 +231,16 @@ class _BattleScreenState extends State<BattleScreen> with SingleTickerProviderSt
 
   Future<void> _tryCompleteMatch() async {
     final m = _match!;
-    var aTotal = 0;
-    var bTotal = 0;
-    for (final r in _rounds) {
-      aTotal += _scoreFor(r.id, m.playerAId) ?? 0;
-      bTotal += _scoreFor(r.id, m.playerBId) ?? 0;
-    }
-    String? winner;
-    if (aTotal > bTotal) {
-      winner = m.playerAId;
-    } else if (bTotal > aTotal) {
-      winner = m.playerBId;
-    }
     try {
-      await supabase
-          .from('matches')
-          .update({
-            'status': 'completed',
-            'winner_id': winner,
-            'completed_at': DateTime.now().toUtc().toIso8601String(),
-          })
-          .eq('id', m.id)
-          .eq('status', 'in_progress');
-    } catch (_) {}
+      // finalize_match — security definer RPC (пересчёт ELO, начисление
+      // валюты/опыта): клиент не может писать напрямую в currency_wallets
+      // и users.xp, и сам результат матча пересчитывается на сервере из
+      // round_scores, а не доверяется клиенту.
+      await supabase.rpc('finalize_match', params: {'p_match_id': m.id});
+    } catch (_) {
+      // Другой клиент уже финализировал матч (или ещё не все раунды
+      // синхронизировались локально) — статус придёт через Realtime.
+    }
   }
 
   // ---------------------------------------------------------------------
@@ -272,6 +281,33 @@ class _BattleScreenState extends State<BattleScreen> with SingleTickerProviderSt
     final dir = await getTemporaryDirectory();
     final path = '${dir.path}/${const Uuid().v4()}.m4a';
     await _recorder.start(const RecordConfig(encoder: AudioEncoder.aacLc), path: path);
+
+    _liveTranscript = '';
+    _liveConfidence = 1.0;
+    if (_speechAvailable) {
+      final language = _match!.languageForSlot(_myId, slot);
+      final localeId = _speechLocaleByLanguage[language] ?? 'en_US';
+      // Распознавание речи идёт параллельно с записью аудиофайла — так
+      // транскрипт готов сразу же, без отдельного шага облачного ASR
+      // (раздел 9.1). На части устройств одновременный доступ к микрофону
+      // из record + speech_to_text может не сработать — в этом случае
+      // просто не будет транскрипта, и оценка мягко деградирует
+      // (см. evaluate-recording: пустой транскрипт -> низкий балл, а не
+      // падение).
+      unawaited(_speech.listen(
+        onResult: (result) {
+          _liveTranscript = result.recognizedWords;
+          if (result.confidence > 0) _liveConfidence = result.confidence;
+        },
+        listenOptions: SpeechListenOptions(
+          localeId: localeId,
+          partialResults: true,
+          cancelOnError: true,
+          listenMode: ListenMode.dictation,
+        ),
+      ));
+    }
+
     if (!mounted) return;
     setState(() {
       _micState = _MicState.recording;
@@ -283,6 +319,7 @@ class _BattleScreenState extends State<BattleScreen> with SingleTickerProviderSt
   Future<void> _stopRecording() async {
     if (_micState != _MicState.recording) return;
     final path = await _recorder.stop();
+    if (_speechAvailable) await _speech.stop();
     _recordStopwatch?.stop();
     if (!mounted) return;
     setState(() {
@@ -320,6 +357,15 @@ class _BattleScreenState extends State<BattleScreen> with SingleTickerProviderSt
             fileOptions: const FileOptions(upsert: true, contentType: 'audio/m4a'),
           );
       final durationSeconds = (_recordStopwatch?.elapsedMilliseconds ?? 0) / 1000.0;
+      final transcript = _liveTranscript.trim();
+      final words = transcript.isEmpty ? const <String>[] : transcript.split(RegExp(r'\s+'));
+      // Встроенный движок распознавания даёт только общую уверенность на всю
+      // фразу, а не по каждому слову — присваиваем её всем словам одинаково.
+      // Заменится на настоящий per-word confidence вместе с переходом на
+      // полноценный ASR-адаптер (раздел 9.7/9.9).
+      final wordConfidences = words
+          .map((w) => {'word': w, 'confidence': _liveConfidence})
+          .toList();
       final inserted = await supabase
           .from('voice_recordings')
           .insert({
@@ -329,6 +375,8 @@ class _BattleScreenState extends State<BattleScreen> with SingleTickerProviderSt
             'language_code': language,
             'audio_storage_path': storagePath,
             'duration_seconds': durationSeconds,
+            'transcript': transcript,
+            'word_confidences': wordConfidences,
           })
           .select()
           .single();
@@ -385,7 +433,7 @@ class _BattleScreenState extends State<BattleScreen> with SingleTickerProviderSt
       body: SafeArea(
         child: Column(
           children: [
-            _ScoreHeader(myTotal: myTotal, opponentTotal: opponentTotal),
+            _ScoreHeader(myTotal: myTotal, opponentTotal: opponentTotal, myName: 'Ты', opponentName: _opponentName),
             Expanded(
               child: _rounds.isEmpty
                   ? const Center(child: CircularProgressIndicator())
@@ -575,8 +623,15 @@ class _MicCircle extends StatelessWidget {
 class _ScoreHeader extends StatelessWidget {
   final int myTotal;
   final int opponentTotal;
+  final String myName;
+  final String opponentName;
 
-  const _ScoreHeader({required this.myTotal, required this.opponentTotal});
+  const _ScoreHeader({
+    required this.myTotal,
+    required this.opponentTotal,
+    required this.myName,
+    required this.opponentName,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -585,12 +640,12 @@ class _ScoreHeader extends StatelessWidget {
       child: Row(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          _ScoreCircle(value: myTotal, color: AppColors.gold),
+          _ScoreCircle(value: myTotal, color: AppColors.gold, name: myName),
           const Padding(
-            padding: EdgeInsets.symmetric(horizontal: 14),
-            child: Text('/', style: TextStyle(fontSize: 22, color: AppColors.muted)),
+            padding: EdgeInsets.symmetric(horizontal: 16),
+            child: Text('/', style: TextStyle(fontSize: 20, color: AppColors.muted, fontWeight: FontWeight.w700)),
           ),
-          _ScoreCircle(value: opponentTotal, color: AppColors.cream),
+          _ScoreCircle(value: opponentTotal, color: AppColors.cyan, name: opponentName),
         ],
       ),
     );
@@ -600,21 +655,30 @@ class _ScoreHeader extends StatelessWidget {
 class _ScoreCircle extends StatelessWidget {
   final int value;
   final Color color;
+  final String name;
 
-  const _ScoreCircle({required this.value, required this.color});
+  const _ScoreCircle({required this.value, required this.color, required this.name});
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      height: 44,
-      width: 44,
-      decoration: BoxDecoration(shape: BoxShape.circle, border: Border.all(color: color, width: 2)),
-      child: Center(
-        child: Text(
-          '$value',
-          style: TextStyle(color: color, fontWeight: FontWeight.w800, fontSize: 16),
+    return Column(
+      children: [
+        Container(
+          height: 46,
+          width: 46,
+          decoration: BoxDecoration(
+            shape: BoxShape.circle,
+            color: AppColors.navy3,
+            border: Border.all(color: color, width: 2.5),
+            boxShadow: [BoxShadow(color: color.withValues(alpha: 0.35), blurRadius: 12)],
+          ),
+          child: Center(
+            child: Text('$value', style: AppFonts.ui(fontSize: 18, weight: FontWeight.w800, color: color)),
+          ),
         ),
-      ),
+        const SizedBox(height: 4),
+        Text(name, style: AppFonts.mono(fontSize: 9, color: AppColors.muted)),
+      ],
     );
   }
 }

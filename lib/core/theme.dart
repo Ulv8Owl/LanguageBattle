@@ -1,20 +1,59 @@
 import 'package:flutter/material.dart';
+import 'package:google_fonts/google_fonts.dart';
 
-/// Colors lifted from the lexarena mockups so the placeholder screens don't
-/// look like default Material out of the box.
+/// Токены из lexarena_mockups_v132.html — держим приложение в той же
+/// чёрно-жёлтой палитре, что и макеты.
 class AppColors {
   static const navy1 = Color(0xFF0D0D10);
   static const navy2 = Color(0xFF17171B);
   static const navy3 = Color(0xFF212126);
+  static const navy4 = Color(0xFF2C2C31);
+  static const line = Color(0x24FFFFFF);
+  static const lineStrong = Color(0x42FFFFFF);
   static const gold = Color(0xFFFFD400);
+  static const gold2 = Color(0xFFF5C400);
+  static const goldSoft = Color(0x24FFD400);
+  static const cyan = Color(0xFFF2F2F5);
+  static const plat = Color(0xFF4FAE9C);
+  static const diamond = Color(0xFF5C8AC7);
+  static const master = Color(0xFF9C74C4);
+  static const gm = Color(0xFFC65468);
+  static const ember = Color(0xFFDB7A6A);
   static const cream = Color(0xFFF5F5F7);
   static const muted = Color(0xFF8A8A92);
   static const ok = Color(0xFF4FB876);
   static const danger = Color(0xFFE85870);
 }
 
+/// Шрифты макета: Bungee (лого), Baloo 2 (UI/кнопки/заголовки),
+/// Manrope (обычный текст — используется как textTheme по умолчанию),
+/// Space Mono (цифры/лейблы).
+class AppFonts {
+  static TextStyle brand({double fontSize = 32, Color color = AppColors.gold}) =>
+      GoogleFonts.bungee(fontSize: fontSize, color: color, letterSpacing: 0.2);
+
+  static TextStyle ui({
+    double fontSize = 14,
+    FontWeight weight = FontWeight.w700,
+    Color color = AppColors.cream,
+  }) =>
+      GoogleFonts.baloo2(fontSize: fontSize, fontWeight: weight, color: color);
+
+  static TextStyle mono({
+    double fontSize = 11,
+    FontWeight weight = FontWeight.w400,
+    Color color = AppColors.muted,
+  }) =>
+      GoogleFonts.spaceMono(fontSize: fontSize, fontWeight: weight, color: color);
+}
+
 ThemeData buildAppTheme() {
   final base = ThemeData.dark(useMaterial3: true);
+  final manropeText = GoogleFonts.manropeTextTheme(base.textTheme).apply(
+    bodyColor: AppColors.cream,
+    displayColor: AppColors.cream,
+  );
+
   return base.copyWith(
     scaffoldBackgroundColor: AppColors.navy1,
     colorScheme: base.colorScheme.copyWith(
@@ -23,10 +62,12 @@ ThemeData buildAppTheme() {
       surface: AppColors.navy2,
       error: AppColors.danger,
     ),
-    appBarTheme: const AppBarTheme(
+    textTheme: manropeText,
+    appBarTheme: AppBarTheme(
       backgroundColor: AppColors.navy1,
       foregroundColor: AppColors.cream,
       elevation: 0,
+      titleTextStyle: AppFonts.ui(fontSize: 16, weight: FontWeight.w800),
     ),
     elevatedButtonTheme: ElevatedButtonThemeData(
       style: ElevatedButton.styleFrom(
@@ -34,7 +75,8 @@ ThemeData buildAppTheme() {
         foregroundColor: Colors.black,
         padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 24),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-        textStyle: const TextStyle(fontWeight: FontWeight.w700, fontSize: 16),
+        textStyle: AppFonts.ui(fontSize: 14, weight: FontWeight.w800, color: Colors.black)
+            .copyWith(letterSpacing: 0.6),
       ),
     ),
     inputDecorationTheme: InputDecorationTheme(
@@ -53,10 +95,6 @@ ThemeData buildAppTheme() {
       showSelectedLabels: false,
       showUnselectedLabels: false,
       type: BottomNavigationBarType.fixed,
-    ),
-    textTheme: base.textTheme.apply(
-      bodyColor: AppColors.cream,
-      displayColor: AppColors.cream,
     ),
   );
 }

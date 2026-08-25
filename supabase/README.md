@@ -14,7 +14,13 @@ dev-доменов), поэтому миграции нужно применит
 4. Новым запросом — то же самое с `supabase/migrations/0002_rls_and_storage.sql`.
 5. Новым запросом — `supabase/migrations/0003_grants.sql` (без этого шага
    вход в приложение падает с `permission denied for table ...`, см. ниже).
-6. Проверка: **Table Editor** должен показать все таблицы из раздела 4 спеки
+6. Новым запросом — `supabase/migrations/0004_ai_pipeline_trigger.sql`
+   (триггер, дёргающий Edge Function на новый `evaluation_jobs` — см. раздел
+   "Подключение реального ИИ-пайплайна" ниже, без секретов триггер просто
+   молчит, ничего не ломает).
+7. Новым запросом — `supabase/migrations/0005_progression_and_shop.sql`
+   (XP/валюта/ELO при завершении матча, каталог магазина).
+8. Проверка: **Table Editor** должен показать все таблицы из раздела 4 спеки
    (`users`, `user_languages`, `matches`, `rounds`, `voice_recordings`,
    `grammar_errors`, `round_scores`, `evaluation_jobs`, `training_sessions`,
    `training_rounds`, `matchmaking_tickets`, `currency_wallets`,
@@ -79,17 +85,67 @@ values (
 Оба тестовых аккаунта, зайдя в приложение, увидят этот матч на экране
 "Арена" и смогут открыть один и тот же бой.
 
-## Простановка баллов за раунд
+## Оценка раундов — теперь настоящая (Фаза 2)
 
-После того как оба голосовых в раунде загружены (видно в `voice_recordings`
-и приложение показывает их в ленте боя), откройте `round_scores` в Table
-Editor и вставьте по одной строке на каждого игрока для этого `round_id`:
+Баллы больше не проставляются вручную. Как только оба игрока записали
+голосовое, клиент сам:
 
-```sql
-insert into round_scores (round_id, user_id, score, ai_feedback)
-values ('<round_id>', '<user_id>', 8, 'Неплохо, есть небольшая ошибка в порядке слов.');
-```
+1. Распознаёт речь **on-device** (встроенный движок Android/iOS через
+   пакет `speech_to_text`) и кладёт транскрипт в `voice_recordings.transcript`
+   сразу при загрузке — без отдельного облачного ASR-шага (раздел 9.1,
+   временное упрощение до перехода на полноценный ASR-адаптер).
+2. Создаёт `evaluation_jobs` (status='pending').
+3. Триггер на этой таблице (см. ниже) дёргает Edge Function
+   `evaluate-recording`, которая вызывает LLM-судью (DeepSeek), считает
+   балл по формуле раздела 9.5 и пишет `round_scores`/`grammar_errors`.
+4. Приложение видит новый счёт через Realtime и само создаёт следующий
+   раунд; после 10-го — вызывает `finalize_match` (пересчёт ELO, валюта,
+   опыт) и показывает экран итогов.
 
-Как только обе строки появятся — приложение (через Realtime) само покажет
-баллы в ленте и создаст следующий раунд. После 10-го раунда матч сам
-завершится и обе стороны увидят экран итогов.
+Если что-то в пайплайне не настроено (см. ниже), баллы просто не появятся —
+раунд зависнет в ожидании. В этом случае можно по-прежнему вставить
+`round_scores` вручную как временный обход, пока чините пайплайн.
+
+## Подключение реального ИИ-пайплайна (DeepSeek)
+
+Нужны Supabase CLI и логин (`npx supabase login`, один раз).
+
+1. **Задеплойте Edge Function**:
+   ```
+   npx supabase link --project-ref gdturijctufmcctuztyn
+   npx supabase functions deploy evaluate-recording
+   ```
+2. **Секреты самой функции** (не попадают в git, хранятся в Supabase):
+   ```
+   npx supabase secrets set LLM_API_KEY=<ваш DeepSeek API key>
+   npx supabase secrets set LLM_BASE_URL=https://api.deepseek.com/v1
+   npx supabase secrets set LLM_MODEL=deepseek-chat
+   ```
+   (`LLM_BASE_URL`/`LLM_MODEL` можно не задавать — это и есть значения по
+   умолчанию; меняете их, когда захотите перейти на другого провайдера
+   из раздела 9.2, без единой правки кода.)
+3. **Секреты для триггера БД** (URL функции + service_role key — их
+   отдельно кладём в Supabase Vault через SQL Editor, чтобы они не попали
+   в этот репозиторий):
+   ```sql
+   select vault.create_secret(
+     'https://gdturijctufmcctuztyn.supabase.co/functions/v1/evaluate-recording',
+     'evaluate_recording_url'
+   );
+   select vault.create_secret(
+     '<ваш service_role key>',
+     'service_role_key'
+   );
+   ```
+   Если раньше уже создавали такие секреты и надо заменить значение —
+   используйте `select vault.update_secret(id, new_secret) ...` (id
+   секрета видно в `select * from vault.secrets;`), а не повторный
+   `create_secret` (он создаст дубликат с тем же именем).
+4. Проверка: запишите тестовый раунд как обычно (реальный бой или вручную
+   вставленный `voice_recordings` + `evaluation_jobs`) и посмотрите
+   **Edge Functions → evaluate-recording → Logs** в Dashboard — там будет
+   видно, дошёл ли вызов и что ответил DeepSeek.
+
+Пока эти секреты не заданы, триггер просто пишет `WARNING` в логи Postgres
+и ничего не делает — старый Wizard-of-Oz путь (баллы руками через Table
+Editor) продолжает работать как временный запасной вариант.

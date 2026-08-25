@@ -44,6 +44,8 @@ dependencies:
   permission_handler: ^11.3.1
   uuid: ^4.5.1
   intl: ^0.19.0
+  google_fonts: ^6.2.1
+  speech_to_text: ^7.0.0
 
 dev_dependencies:
   flutter_test:
@@ -55,6 +57,16 @@ dev_dependencies:
   # package. See that file for information about deactivating specific lint
   # rules and activating additional ones.
   flutter_lints: ^6.0.0
+  flutter_launcher_icons: ^0.14.3
+
+flutter_launcher_icons:
+  android: true
+  ios: true
+  remove_alpha_ios: true
+  image_path_ios: "assets/icon/icon_ios.png"
+  image_path_android: "assets/icon/icon_legacy_rounded.png"
+  adaptive_icon_background: "#000000"
+  adaptive_icon_foreground: "assets/icon/icon_adaptive_foreground.png"
 
 # For information on the generic Dart part of this file, see the
 # following page: https://dart.dev/tools/pub/pubspec
@@ -73,6 +85,7 @@ flutter:
   #   - images/a_dot_ham.jpeg
   assets:
     - .env
+    - assets/icon/
 
   # An image asset can refer to one or more resolution-specific "variants", see
   # https://flutter.dev/to/resolution-aware-images
