@@ -2,19 +2,19 @@ import 'package:flutter/material.dart';
 
 import '../core/theme.dart';
 
-/// Небольшая библиотека переиспользуемых виджетов, повторяющих визуальный
-/// язык lexarena_mockups_v132.html (.panel/.pill/.tabbar/.menu-row/...).
+/// Небольшая библиотека переиспользуемых виджетов Chrolingo, задающих общий
+/// язык макетов Chrolingo (.panel/.pill/.tabbar/.menu-row/...).
 /// Полноценный иллюстрированный аватар-конструктор из макета (экран 03) в
 /// это MVP не входит — вместо лицевых SVG используется простой круглый
 /// плейсхолдер с той же системой рамок/свечения по цвету лиги/редкости.
 
-class LxPanel extends StatelessWidget {
+class ChPanel extends StatelessWidget {
   final Widget child;
   final EdgeInsetsGeometry padding;
   final Color? borderColor;
   final List<BoxShadow>? boxShadow;
 
-  const LxPanel({
+  const ChPanel({
     super.key,
     required this.child,
     this.padding = const EdgeInsets.all(12),
@@ -44,11 +44,11 @@ class LxPanel extends StatelessWidget {
   }
 }
 
-class LxPill extends StatelessWidget {
+class ChPill extends StatelessWidget {
   final Widget icon;
   final String label;
 
-  const LxPill({super.key, required this.icon, required this.label});
+  const ChPill({super.key, required this.icon, required this.label});
 
   @override
   Widget build(BuildContext context) {
@@ -71,12 +71,12 @@ class LxPill extends StatelessWidget {
   }
 }
 
-class LxTabBar extends StatelessWidget {
+class ChTabBar extends StatelessWidget {
   final List<String> tabs;
   final int selected;
   final ValueChanged<int> onChanged;
 
-  const LxTabBar({super.key, required this.tabs, required this.selected, required this.onChanged});
+  const ChTabBar({super.key, required this.tabs, required this.selected, required this.onChanged});
 
   @override
   Widget build(BuildContext context) {
@@ -120,13 +120,13 @@ class LxTabBar extends StatelessWidget {
   }
 }
 
-class LxMenuRow extends StatelessWidget {
+class ChMenuRow extends StatelessWidget {
   final Widget icon;
   final String title;
   final bool flagship;
   final VoidCallback onTap;
 
-  const LxMenuRow({
+  const ChMenuRow({
     super.key,
     required this.icon,
     required this.title,
@@ -173,11 +173,11 @@ class LxMenuRow extends StatelessWidget {
   }
 }
 
-class LxModeIcon extends StatelessWidget {
+class ChModeIcon extends StatelessWidget {
   final IconData icon;
   final List<Color> gradient;
 
-  const LxModeIcon({super.key, required this.icon, required this.gradient});
+  const ChModeIcon({super.key, required this.icon, required this.gradient});
 
   @override
   Widget build(BuildContext context) {
@@ -196,13 +196,13 @@ class LxModeIcon extends StatelessWidget {
 
 /// Плейсхолдер аватара — цветной круг с инициалом вместо иллюстрированного
 /// лица из макета (свой конструктор лиц — отдельная задача, не в этом MVP).
-class LxAvatar extends StatelessWidget {
+class ChAvatar extends StatelessWidget {
   final String name;
   final double size;
   final Color ringColor;
   final bool online;
 
-  const LxAvatar({
+  const ChAvatar({
     super.key,
     required this.name,
     this.size = 40,
@@ -253,14 +253,14 @@ class LxAvatar extends StatelessWidget {
   }
 }
 
-class LxItemSlot extends StatelessWidget {
+class ChItemSlot extends StatelessWidget {
   final Widget preview;
   final String title;
   final Widget? priceTag;
   final bool owned;
   final VoidCallback? onTap;
 
-  const LxItemSlot({
+  const ChItemSlot({
     super.key,
     required this.preview,
     required this.title,
@@ -300,6 +300,40 @@ class LxItemSlot extends StatelessWidget {
             if (priceTag != null) ...[const SizedBox(height: 5), priceTag!],
           ],
         ),
+      ),
+    );
+  }
+}
+
+/// Статичная «волна» — визуальная метка голосового сообщения. Реальная
+/// огибающая амплитуд потребовала бы разбора аудиофайла на клиенте, что для
+/// ленты сообщений избыточно.
+class ChWaveform extends StatelessWidget {
+  final double width;
+  final Color color;
+
+  const ChWaveform({super.key, required this.width, required this.color});
+
+  static const _bars = [4.0, 9.0, 15.0, 7.0, 18.0, 11.0, 6.0, 14.0, 8.0, 16.0, 5.0, 10.0, 13.0, 6.0];
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      width: width,
+      height: 20,
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        crossAxisAlignment: CrossAxisAlignment.center,
+        children: _bars
+            .map((h) => Container(
+                  width: 2.5,
+                  height: h,
+                  decoration: BoxDecoration(
+                    color: color.withValues(alpha: 0.65),
+                    borderRadius: BorderRadius.circular(2),
+                  ),
+                ))
+            .toList(),
       ),
     );
   }

@@ -1,4 +1,4 @@
--- Language Battle: initial schema (spec section 4)
+-- Chrolingo: initial schema (spec section 4)
 -- Tables are created in dependency order (voice_recordings needs both
 -- rounds and training_rounds to exist first).
 

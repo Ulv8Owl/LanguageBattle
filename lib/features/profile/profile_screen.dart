@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
+import 'package:go_router/go_router.dart';
 
+import '../../core/leagues.dart';
 import '../../core/supabase_client.dart';
 import '../../core/theme.dart';
-import '../../widgets/lexarena_widgets.dart';
+import '../../widgets/chrolingo_widgets.dart';
 
 const _languageFlags = {'en': '🇬🇧', 'es': '🇪🇸', 'ru': '🇷🇺'};
 
@@ -84,6 +86,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
     final native = (_profile?['native_language'] as String?) ?? '?';
     final target = (_learning?['language_code'] as String?) ?? '?';
     final elo = (_learning?['elo'] as int?) ?? 1000;
+    final league = leagueFor(elo);
 
     return RefreshIndicator(
       onRefresh: _load,
@@ -92,7 +95,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
         children: [
           Row(
             children: [
-              LxAvatar(name: username, size: 58, ringColor: AppColors.gold),
+              ChAvatar(name: username, size: 58, ringColor: league.color),
               const SizedBox(width: 12),
               Expanded(
                 child: Column(
@@ -102,13 +105,32 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     const SizedBox(height: 4),
                     Row(
                       children: [
-                        const Icon(Icons.emoji_events, size: 14, color: AppColors.gold),
+                        Icon(Icons.emoji_events, size: 14, color: league.color),
                         const SizedBox(width: 5),
-                        Text('$elo ELO', style: AppFonts.mono(fontSize: 10, weight: FontWeight.w700, color: AppColors.gold)),
+                        Text(
+                          '${league.shortName} · $elo ELO',
+                          style: AppFonts.mono(fontSize: 10, weight: FontWeight.w700, color: league.color),
+                        ),
                       ],
                     ),
                   ],
                 ),
+              ),
+              // Профиль — единственная точка входа в редактор аватара и в
+              // Настройки (раздел 5.1, п.7): отдельного пункта нижней
+              // навигации для настроек нет.
+              IconButton(
+                tooltip: 'Редактор аватара',
+                onPressed: () async {
+                  await context.push('/avatar');
+                  if (mounted) _load();
+                },
+                icon: const Icon(Icons.face_retouching_natural, size: 22, color: AppColors.gold),
+              ),
+              IconButton(
+                tooltip: 'Настройки',
+                onPressed: () => context.push('/settings'),
+                icon: const Icon(Icons.settings, size: 22, color: AppColors.muted),
               ),
             ],
           ),
@@ -125,7 +147,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
           const SizedBox(height: 18),
           Text('ЯЗЫКОВАЯ ПАРА', style: AppFonts.mono(fontSize: 9, weight: FontWeight.w700, color: AppColors.gold)),
           const SizedBox(height: 8),
-          LxPanel(
+          ChPanel(
             padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 9),
             child: Text(
               '${_languageFlags[native] ?? '🏳'} → ${_languageFlags[target] ?? '🏳'}',
@@ -185,7 +207,7 @@ class _StatTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return LxPanel(
+    return ChPanel(
       padding: const EdgeInsets.symmetric(vertical: 11),
       child: Column(
         children: [

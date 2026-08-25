@@ -1,38 +1,23 @@
-// Воркер очереди evaluation_jobs (раздел 9.8). Вызывается триггером на
+// Воркер очереди evaluation_jobs (раздел 9.7). Вызывается триггером на
 // INSERT в evaluation_jobs (см. supabase/migrations/0004_ai_pipeline_trigger.sql).
 // Клиент никогда не ждёт эту функцию синхронно — он подписан на
-// round_scores/training_rounds через Realtime и узнаёт о результате, когда
-// воркер его допишет.
+// round_scores/training_rounds/evaluation_jobs через Realtime и узнаёт о
+// результате, когда воркер его допишет.
+//
+// Один и тот же путь обслуживает все три режима: Состязание, Дуэль и
+// Одиночную Игру (в соло тоже начисляются валюта и опыт, поэтому оценивать
+// на клиенте нельзя — раздел 2.2).
+//
+// Балл берётся НАПРЯМУЮ из ответа LLM (раздел 9.4, MVP-версия): без
+// нормирующей формулы, без фильтра по категории ошибок и без сопоставления
+// с confidence ASR. Все три пункта осознанно отложены — см.
+// deferred_suggestions.md, не добавлять их сюда без отдельного запроса.
 
 import { createClient } from "jsr:@supabase/supabase-js@2";
 import { evaluateGrammar } from "../_shared/evaluateGrammar.ts";
 
-const CONFIDENCE_THRESHOLD = 0.5;
-
-interface WordConfidence {
-  word: string;
-  start?: number;
-  end?: number;
-  confidence: number;
-}
-
-function wordCharRanges(transcript: string, words: WordConfidence[]): { start: number; end: number; confidence: number }[] {
-  const ranges: { start: number; end: number; confidence: number }[] = [];
-  let cursor = 0;
-  for (const w of words) {
-    const idx = transcript.indexOf(w.word, cursor);
-    if (idx === -1) continue;
-    const start = idx;
-    const end = idx + w.word.length;
-    ranges.push({ start, end, confidence: w.confidence });
-    cursor = end;
-  }
-  return ranges;
-}
-
-function overlaps(aStart: number, aEnd: number, bStart: number, bEnd: number): boolean {
-  return aStart < bEnd && bStart < aEnd;
-}
+/** Балл за пустой транскрипт: ASR ничего не разобрал — говорить не о чем. */
+const EMPTY_TRANSCRIPT_SCORE = 1;
 
 Deno.serve(async (req) => {
   const supabase = createClient(
@@ -76,11 +61,7 @@ Deno.serve(async (req) => {
     // Голосовое на родном языке в Дуэли — только для прослушки соперником,
     // не оценивается (см. раздел 2.4).
     if (recording.recording_slot === "native") {
-      await supabase.from("evaluation_jobs").update({
-        status: "done",
-        worker_id: "evaluate-recording",
-        completed_at: new Date().toISOString(),
-      }).eq("id", job_id);
+      await markDone(supabase, job_id);
       return new Response(JSON.stringify({ skipped: "native slot not graded" }), { status: 200 });
     }
 
@@ -94,77 +75,79 @@ Deno.serve(async (req) => {
     const targetLanguage = recording.language_code ?? "en";
     const nativeLanguage = speaker?.native_language ?? "en";
 
-    let confirmedErrors: { offset_start: number; length: number; message: string; replacement: string; category: string; suppressed: boolean }[] = [];
-    let score: number;
+    let score = EMPTY_TRANSCRIPT_SCORE;
+    let errors: { offset: number; length: number; message: string; replacement: string; category: string }[] = [];
+    let degraded = false;
 
-    if (transcript.length === 0) {
-      score = 1;
-    } else {
-      const { errors } = await evaluateGrammar(transcript, targetLanguage, nativeLanguage);
-      const words: WordConfidence[] = Array.isArray(recording.word_confidences) ? recording.word_confidences : [];
-      const wordRanges = wordCharRanges(transcript, words);
+    if (transcript.length > 0) {
+      const result = await evaluateGrammar(transcript, targetLanguage, nativeLanguage);
+      score = result.score;
+      errors = result.errors;
+      degraded = result.degraded;
+    }
 
-      confirmedErrors = errors.map((e) => {
-        const overlappingConfidences = wordRanges
-          .filter((w) => overlaps(e.offset, e.offset + e.length, w.start, w.end))
-          .map((w) => w.confidence);
-        const minConfidence = overlappingConfidences.length > 0 ? Math.min(...overlappingConfidences) : 1;
-        const suppressed = minConfidence < CONFIDENCE_THRESHOLD;
-        return {
+    if (errors.length > 0) {
+      await supabase.from("grammar_errors").insert(
+        errors.map((e) => ({
+          voice_recording_id: recording.id,
           offset_start: e.offset,
           length: e.length,
           message: e.message,
           replacement: e.replacement,
           category: e.category,
-          suppressed,
-        };
-      });
-
-      const wordCount = Math.max(transcript.split(/\s+/).filter(Boolean).length, 1);
-      const penalized = confirmedErrors.filter((e) => !e.suppressed && e.category !== "style").length;
-      const density = penalized / wordCount;
-      score = Math.min(10, Math.max(1, 10 - Math.round(density * 10)));
-    }
-
-    if (confirmedErrors.length > 0) {
-      await supabase.from("grammar_errors").insert(
-        confirmedErrors.map((e) => ({
-          voice_recording_id: recording.id,
-          offset_start: e.offset_start,
-          length: e.length,
-          message: e.message,
-          replacement: e.replacement,
-          category: e.category,
-          suppressed: e.suppressed,
         })),
       );
     }
 
-    const feedback = confirmedErrors.filter((e) => !e.suppressed).length === 0
+    const feedback = transcript.length === 0
+      ? "Не удалось разобрать речь — попробуй сказать чётче."
+      : degraded
+      ? "Не удалось получить разбор от ИИ — балл выставлен нейтральным."
+      : errors.length === 0
       ? "Отлично, ошибок не найдено!"
-      : confirmedErrors.filter((e) => !e.suppressed).map((e) => e.message).slice(0, 3).join(" ");
+      : errors.map((e) => e.message).slice(0, 3).join(" ");
 
     if (recording.round_id) {
+      // PvP: балл за раунд.
       await supabase.from("round_scores").upsert(
         { round_id: recording.round_id, user_id: recording.user_id, score, ai_feedback: feedback },
         { onConflict: "round_id,user_id" },
       );
     } else if (recording.training_round_id) {
-      await supabase.from("training_rounds").update({ final_score: score }).eq("id", recording.training_round_id);
+      // Одиночная Игра (раздел 2.2): попытка №1 даёт только разбор ошибок,
+      // финальный балл ставится по попытке №2. Попытки различаются по
+      // порядку created_at внутри одного training_round — как в схеме
+      // (раздел 4), без отдельного поля attempt.
+      const { count } = await supabase
+        .from("voice_recordings")
+        .select("id", { count: "exact", head: true })
+        .eq("training_round_id", recording.training_round_id)
+        .lte("created_at", recording.created_at);
+      const attemptNumber = count ?? 1;
+      if (attemptNumber >= 2) {
+        await supabase
+          .from("training_rounds")
+          .update({ final_score: score })
+          .eq("id", recording.training_round_id);
+      }
     }
 
-    await supabase.from("evaluation_jobs").update({
-      status: "done",
-      worker_id: "evaluate-recording",
-      completed_at: new Date().toISOString(),
-    }).eq("id", job_id);
-
+    await markDone(supabase, job_id);
     return new Response(JSON.stringify({ ok: true, score }), { status: 200 });
   } catch (e) {
     console.error("evaluate-recording failed:", e);
     if (jobId) {
-      await supabase.from("evaluation_jobs").update({ status: "failed" }).eq("id", jobId).catch(() => {});
+      await supabase.from("evaluation_jobs").update({ status: "failed" }).eq("id", jobId);
     }
     return new Response(JSON.stringify({ error: String(e) }), { status: 500 });
   }
 });
+
+// deno-lint-ignore no-explicit-any
+async function markDone(supabase: any, jobId: string) {
+  await supabase.from("evaluation_jobs").update({
+    status: "done",
+    worker_id: "evaluate-recording",
+    completed_at: new Date().toISOString(),
+  }).eq("id", jobId);
+}

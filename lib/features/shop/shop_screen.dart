@@ -1,9 +1,15 @@
 import 'package:flutter/material.dart';
+import 'package:intl/intl.dart';
 
+import '../../core/game_access.dart';
+import '../../core/nav_state.dart';
 import '../../core/supabase_client.dart';
 import '../../core/theme.dart';
-import '../../widgets/lexarena_widgets.dart';
+import '../../widgets/chrolingo_widgets.dart';
 
+/// Магазин — РОВНО два раздела (задача 5 итерации):
+/// «Подписка» (карточка тарифа, оформление — заглушка без платёжного шлюза)
+/// и «Предметы» (сетка косметики 3×4 со скроллом и фильтром по категориям).
 class ShopScreen extends StatefulWidget {
   const ShopScreen({super.key});
 
@@ -12,25 +18,44 @@ class ShopScreen extends StatefulWidget {
 }
 
 class _ShopScreenState extends State<ShopScreen> {
-  int _tab = 0;
-  Map<String, dynamic>? _wallet;
+  int _section = ShopSections.subscription;
+  int _category = 0;
+
+  WalletState _wallet = WalletState.empty;
   List<Map<String, dynamic>> _items = [];
   Set<String> _owned = {};
   bool _loading = true;
+  bool _activating = false;
+
+  /// Фильтр по категориям: Рамки / Эмоции / Аватар.
+  static const _categories = ['Рамки', 'Эмоции', 'Аватар'];
+  static const _categoryTypes = ['profile_frame', 'emote', 'avatar_skin'];
 
   @override
   void initState() {
     super.initState();
+    shopSectionRequest.addListener(_onSectionRequested);
+    _section = shopSectionRequest.value;
     _load();
+  }
+
+  @override
+  void dispose() {
+    shopSectionRequest.removeListener(_onSectionRequested);
+    super.dispose();
+  }
+
+  void _onSectionRequested() {
+    if (!mounted) return;
+    setState(() => _section = shopSectionRequest.value);
   }
 
   Future<void> _load() async {
     setState(() => _loading = true);
-    final uid = currentUserId;
     try {
-      final wallet = await supabase.from('currency_wallets').select().eq('user_id', uid).maybeSingle();
-      final items = await supabase.from('cosmetic_items').select();
-      final inventory = await supabase.from('user_inventory').select('item_id').eq('user_id', uid);
+      final wallet = await GameAccess.sync();
+      final items = await supabase.from('cosmetic_items').select().order('type').order('price_soft');
+      final inventory = await supabase.from('user_inventory').select('item_id').eq('user_id', currentUserId);
       if (!mounted) return;
       setState(() {
         _wallet = wallet;
@@ -38,20 +63,47 @@ class _ShopScreenState extends State<ShopScreen> {
         _owned = inventory.map((r) => r['item_id'] as String).toSet();
         _loading = false;
       });
-    } catch (_) {
-      if (mounted) setState(() => _loading = false);
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _loading = false);
+      _toast('Не удалось загрузить магазин: $e');
+    }
+  }
+
+  void _toast(String message) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
+  }
+
+  /// Оформление подписки — ЗАГЛУШКА: статус становится 'active' сразу,
+  /// без реального платёжного шлюза (Google Play Billing подключается
+  /// отдельной задачей).
+  Future<void> _subscribe() async {
+    setState(() => _activating = true);
+    try {
+      await GameAccess.activateSubscription();
+      await _load();
+      _toast('Подписка активна');
+    } catch (e) {
+      _toast('Не удалось оформить подписку: $e');
+    } finally {
+      if (mounted) setState(() => _activating = false);
     }
   }
 
   Future<void> _buy(Map<String, dynamic> item) async {
     try {
       await supabase.rpc('purchase_item', params: {'p_item_id': item['id']});
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Куплено: ${item['name']}')));
-      _load();
+      await _load();
+      _toast('Куплено: ${item['name']}');
     } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Не удалось купить: $e')));
+      if (ServerErrors.isSubscriptionRequired(e)) {
+        _toast('Этот предмет доступен только по подписке');
+        setState(() => _section = ShopSections.subscription);
+      } else if (ServerErrors.isInsufficientFunds(e)) {
+        _toast('Не хватает монет');
+      } else {
+        _toast('Не удалось купить: $e');
       }
     }
   }
@@ -59,21 +111,15 @@ class _ShopScreenState extends State<ShopScreen> {
   Future<void> _equip(Map<String, dynamic> item) async {
     try {
       await supabase.rpc('equip_item', params: {'p_item_id': item['id']});
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Экипировано: ${item['name']}')));
+      _toast('Экипировано: ${item['name']}');
     } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Не удалось экипировать: $e')));
-      }
+      _toast('Не удалось экипировать: $e');
     }
   }
 
   @override
   Widget build(BuildContext context) {
     if (_loading) return const Center(child: CircularProgressIndicator());
-
-    final typeForTab = ['profile_frame', 'emote', null][_tab];
-    final visible = typeForTab == null ? <Map<String, dynamic>>[] : _items.where((i) => i['type'] == typeForTab).toList();
 
     return Padding(
       padding: const EdgeInsets.all(16),
@@ -84,57 +130,233 @@ class _ShopScreenState extends State<ShopScreen> {
             children: [
               Text('Магазин', style: AppFonts.ui(fontSize: 16, weight: FontWeight.w800)),
               const Spacer(),
-              LxPill(icon: const Icon(Icons.diamond, size: 12, color: AppColors.cream), label: '${_wallet?['hard_currency'] ?? 0}'),
+              ChPill(
+                icon: const Icon(Icons.bolt, size: 12, color: AppColors.cyan),
+                label: '${_wallet.energyCurrent}/${_wallet.energyMax}',
+              ),
               const SizedBox(width: 6),
-              LxPill(icon: const Icon(Icons.circle, size: 12, color: AppColors.gold), label: '${_wallet?['soft_currency'] ?? 0}'),
+              ChPill(
+                icon: const Icon(Icons.circle, size: 12, color: AppColors.gold),
+                label: '${_wallet.coins}',
+              ),
             ],
           ),
           const SizedBox(height: 14),
-          LxTabBar(
-            tabs: const ['Рамки', 'Эмоции', 'Внешность'],
-            selected: _tab,
-            onChanged: (i) => setState(() => _tab = i),
+          ChTabBar(
+            tabs: const ['Подписка', 'Предметы'],
+            selected: _section,
+            onChanged: (i) => setState(() => _section = i),
           ),
           const SizedBox(height: 14),
           Expanded(
-            child: typeForTab == null
-                ? const Center(
-                    child: Text(
-                      'Конструктор внешности — отдельная большая задача\n(парametric-редактор лица), не входит в это MVP.',
-                      textAlign: TextAlign.center,
-                      style: TextStyle(color: AppColors.muted, fontSize: 12),
-                    ),
-                  )
-                : GridView.count(
-                    crossAxisCount: 2,
-                    mainAxisSpacing: 10,
-                    crossAxisSpacing: 10,
-                    childAspectRatio: 0.95,
-                    children: visible.map((item) {
-                      final owned = _owned.contains(item['id']);
-                      final priceSoft = item['price_soft'] as int?;
-                      final priceHard = item['price_hard'] as int?;
-                      return LxItemSlot(
-                        owned: owned,
-                        preview: Icon(
-                          item['type'] == 'emote' ? Icons.emoji_emotions : Icons.circle_outlined,
-                          size: 36,
-                          color: AppColors.gold,
-                        ),
-                        title: (item['name'] as String?) ?? '',
-                        priceTag: owned
-                            ? const Text('Куплено', style: TextStyle(color: AppColors.ok, fontSize: 10))
-                            : LxPill(
-                                icon: Icon(priceHard != null ? Icons.diamond : Icons.circle, size: 10, color: priceHard != null ? AppColors.cream : AppColors.gold),
-                                label: '${priceHard ?? priceSoft ?? 0}',
-                              ),
-                        onTap: () => owned ? _equip(item) : _buy(item),
-                      );
-                    }).toList(),
-                  ),
+            child: _section == ShopSections.subscription ? _buildSubscription() : _buildItems(),
           ),
         ],
       ),
+    );
+  }
+
+  // -------------------------------------------------------------------
+  // Раздел «Подписка»
+  // -------------------------------------------------------------------
+
+  Widget _buildSubscription() {
+    // Числовой формат нарочно: локализованные названия месяцев требуют
+    // initializeDateFormatting, а локализации интерфейса в проекте пока нет.
+    final dateFormat = DateFormat('dd.MM.yyyy');
+    final subscribed = _wallet.isSubscribed;
+    final trial = _wallet.isTrial;
+
+    String headline;
+    String? subline;
+    String buttonLabel;
+    if (subscribed) {
+      headline = 'Подписка активна';
+      subline = _wallet.expiresAt == null
+          ? null
+          : 'Действует до ${dateFormat.format(_wallet.expiresAt!.toLocal())}';
+      buttonLabel = 'Продлить';
+    } else if (trial) {
+      final days = _wallet.trialDaysLeft;
+      headline = 'Пробный период: осталось $days ${_pluralDays(days)}';
+      subline = 'После окончания все три режима закроются до оформления подписки.';
+      buttonLabel = 'Оформить';
+    } else {
+      headline = 'Пробный период закончился';
+      subline = 'Оформи подписку, чтобы снова играть во всех трёх режимах.';
+      buttonLabel = 'Оформить';
+    }
+
+    return ListView(
+      children: [
+        ChPanel(
+          borderColor: AppColors.gold,
+          boxShadow: [BoxShadow(color: AppColors.gold.withValues(alpha: 0.16), blurRadius: 22)],
+          padding: const EdgeInsets.all(18),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text('CHROLINGO PRO',
+                  style: AppFonts.mono(fontSize: 9, weight: FontWeight.w700, color: AppColors.gold)),
+              const SizedBox(height: 10),
+              Text(headline, style: AppFonts.ui(fontSize: 17, weight: FontWeight.w800)),
+              if (subline != null) ...[
+                const SizedBox(height: 6),
+                Text(subline, style: const TextStyle(color: AppColors.muted, fontSize: 12, height: 1.45)),
+              ],
+              const SizedBox(height: 14),
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.baseline,
+                textBaseline: TextBaseline.alphabetic,
+                children: [
+                  Text('399 ₽', style: AppFonts.ui(fontSize: 26, weight: FontWeight.w800, color: AppColors.gold)),
+                  const SizedBox(width: 6),
+                  const Text('в месяц', style: TextStyle(color: AppColors.muted, fontSize: 12)),
+                ],
+              ),
+              const SizedBox(height: 14),
+              const _Perk('Все три режима: Одиночная Игра, Состязание, Дуэль'),
+              const SizedBox(height: 7),
+              const _Perk('Косметика с меткой «★ Подписка»'),
+              const SizedBox(height: 7),
+              const _Perk('Подписочная ветка наград Battle Pass'),
+              const SizedBox(height: 18),
+              SizedBox(
+                width: double.infinity,
+                child: ElevatedButton(
+                  onPressed: _activating ? null : _subscribe,
+                  child: _activating
+                      ? const SizedBox(
+                          height: 18,
+                          width: 18,
+                          child: CircularProgressIndicator(strokeWidth: 2, color: Colors.black),
+                        )
+                      : Text(buttonLabel),
+                ),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 12),
+        Text(
+          'Энергия к подписке не привязана: лимит попыток в Одиночной Игре '
+          'действует всегда и восстанавливается со временем.',
+          style: AppFonts.mono(fontSize: 10, color: AppColors.muted).copyWith(height: 1.5),
+        ),
+      ],
+    );
+  }
+
+  static String _pluralDays(int n) {
+    final mod10 = n % 10;
+    final mod100 = n % 100;
+    if (mod10 == 1 && mod100 != 11) return 'день';
+    if (mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)) return 'дня';
+    return 'дней';
+  }
+
+  // -------------------------------------------------------------------
+  // Раздел «Предметы»
+  // -------------------------------------------------------------------
+
+  Widget _buildItems() {
+    final type = _categoryTypes[_category];
+    final visible = _items.where((i) => i['type'] == type).toList();
+
+    return Column(
+      children: [
+        ChTabBar(
+          tabs: _categories,
+          selected: _category,
+          onChanged: (i) => setState(() => _category = i),
+        ),
+        const SizedBox(height: 12),
+        Expanded(
+          child: visible.isEmpty
+              ? const Center(
+                  child: Text('В этой категории пока пусто', style: TextStyle(color: AppColors.muted, fontSize: 12)),
+                )
+              // Сетка 3 в ширину × 4 в высоту видимых одновременно; всё, что
+              // не помещается, уходит в скролл (предметов будет много).
+              : LayoutBuilder(
+                  builder: (context, constraints) {
+                    const spacing = 10.0;
+                    final tileWidth = (constraints.maxWidth - spacing * 2) / 3;
+                    final tileHeight = (constraints.maxHeight - spacing * 3) / 4;
+                    return GridView.builder(
+                      gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                        crossAxisCount: 3,
+                        mainAxisSpacing: spacing,
+                        crossAxisSpacing: spacing,
+                        childAspectRatio: tileWidth / tileHeight.clamp(90.0, 220.0),
+                      ),
+                      itemCount: visible.length,
+                      itemBuilder: (context, i) => _buildTile(visible[i]),
+                    );
+                  },
+                ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildTile(Map<String, dynamic> item) {
+    final owned = _owned.contains(item['id']);
+    final exclusive = item['subscriber_exclusive'] as bool? ?? false;
+    final priceSoft = item['price_soft'] as int?;
+
+    Widget priceTag;
+    if (owned) {
+      priceTag = Text('Куплено', style: AppFonts.mono(fontSize: 9, color: AppColors.ok));
+    } else if (exclusive) {
+      priceTag = Text(
+        '★ Подписка',
+        style: AppFonts.mono(fontSize: 9, weight: FontWeight.w700, color: AppColors.gold),
+      );
+    } else {
+      priceTag = ChPill(
+        icon: const Icon(Icons.circle, size: 9, color: AppColors.gold),
+        label: '${priceSoft ?? 0}',
+      );
+    }
+
+    return ChItemSlot(
+      owned: owned,
+      preview: Icon(_iconFor(item['type'] as String?), size: 30, color: exclusive ? AppColors.gold : AppColors.cream),
+      title: (item['name'] as String?) ?? '',
+      priceTag: priceTag,
+      onTap: () => owned ? _equip(item) : _buy(item),
+    );
+  }
+
+  static IconData _iconFor(String? type) {
+    switch (type) {
+      case 'emote':
+        return Icons.emoji_emotions;
+      case 'avatar_skin':
+        return Icons.face_retouching_natural;
+      default:
+        return Icons.circle_outlined;
+    }
+  }
+}
+
+class _Perk extends StatelessWidget {
+  final String text;
+
+  const _Perk(this.text);
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Icon(Icons.check, size: 15, color: AppColors.ok),
+        const SizedBox(width: 8),
+        Expanded(
+          child: Text(text, style: const TextStyle(fontSize: 12, color: AppColors.cream, height: 1.4)),
+        ),
+      ],
     );
   }
 }

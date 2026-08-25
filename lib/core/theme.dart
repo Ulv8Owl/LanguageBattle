@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 
-/// Токены из lexarena_mockups_v132.html — держим приложение в той же
+/// Палитра Chrolingo — приложение держится в единой
 /// чёрно-жёлтой палитре, что и макеты.
 class AppColors {
   static const navy1 = Color(0xFF0D0D10);

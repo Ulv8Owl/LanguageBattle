@@ -4,32 +4,24 @@ import 'dart:io';
 import 'package:audioplayers/audioplayers.dart';
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
-import 'package:path_provider/path_provider.dart';
-import 'package:record/record.dart';
-import 'package:speech_to_text/speech_to_text.dart';
 import 'package:supabase_flutter/supabase_flutter.dart' show FileOptions;
-import 'package:uuid/uuid.dart';
 
 import '../../core/supabase_client.dart';
 import '../../core/theme.dart';
 import '../../data/phrase_bank.dart';
+import '../../widgets/chrolingo_widgets.dart';
+import '../../widgets/voice_recorder_dock.dart';
 import 'battle_models.dart';
 
-enum _MicState { idle, recording, ready }
-
-/// Локали on-device распознавания речи (раздел 9.1 — ASR временно через
-/// встроенный движок Android/iOS вместо облачного адаптера; заменяется
-/// позже без изменений в остальном пайплайне, см. supabase/README.md).
-const _speechLocaleByLanguage = {
-  'en': 'en_US',
-  'es': 'es_ES',
-  'ru': 'ru_RU',
-};
-
-/// Боевой экран: полный цикл записи/загрузки/прослушки голосовых и
-/// продвижения раундов через Realtime. Транскрипт снимается on-device во
-/// время записи; реальную грамматическую оценку считает Edge Function
-/// evaluate-recording (DeepSeek), запускаемая триггером на evaluation_jobs.
+/// Экран боя — непрерывная лента-переписка (раздел 5.2, задача 4 итерации).
+///
+/// Раунды не листаются постранично: фраза от ИИ и голосовые обеих сторон
+/// накапливаются в одной ленте. Матч длится ровно 10 раундов, а в шапке
+/// показывается счёт ВЫИГРАННЫХ РАУНДОВ (кто набрал в раунде больше баллов —
+/// тому очко), поэтому сумма двух чисел в шапке доходит до 10 к концу матча.
+///
+/// В интерфейсе нет текстовых подсказок: состояние записи передаётся только
+/// самой кнопкой микрофона (см. VoiceRecorderDock).
 class BattleScreen extends StatefulWidget {
   final String matchId;
 
@@ -39,37 +31,25 @@ class BattleScreen extends StatefulWidget {
   State<BattleScreen> createState() => _BattleScreenState();
 }
 
-class _BattleScreenState extends State<BattleScreen> with SingleTickerProviderStateMixin {
+class _BattleScreenState extends State<BattleScreen> {
   final String _myId = currentUserId;
+  final _dockKey = GlobalKey<VoiceRecorderDockState>();
+  final _feedController = ScrollController();
 
   MatchData? _match;
   String _opponentName = '…';
+  String _myName = 'Ты';
   List<RoundData> _rounds = [];
   List<VoiceRecordingData> _recordings = [];
   List<RoundScoreData> _scores = [];
   bool _loading = true;
   bool _navigatedAway = false;
+  String? _actionError;
 
   StreamSubscription? _matchSub;
   StreamSubscription? _roundsSub;
   StreamSubscription? _recordingsSub;
   StreamSubscription? _scoresSub;
-
-  final _recorder = AudioRecorder();
-  final _speech = SpeechToText();
-  bool _speechAvailable = false;
-  String _liveTranscript = '';
-  double _liveConfidence = 1.0;
-  _MicState _micState = _MicState.idle;
-  String? _pendingFilePath;
-  Stopwatch? _recordStopwatch;
-  bool _uploading = false;
-  String? _actionError;
-
-  late final AnimationController _pulseController = AnimationController(
-    vsync: this,
-    duration: const Duration(milliseconds: 700),
-  )..repeat(reverse: true);
 
   @override
   void initState() {
@@ -79,24 +59,15 @@ class _BattleScreenState extends State<BattleScreen> with SingleTickerProviderSt
 
   Future<void> _init() async {
     try {
-      _speechAvailable = await _speech.initialize(
-        onError: (e) => debugPrint('speech_to_text error: $e'),
-      );
-    } catch (e) {
-      debugPrint('speech_to_text init failed: $e');
-    }
-    try {
       final row = await supabase.from('matches').select().eq('id', widget.matchId).single();
       _match = MatchData.fromRow(row);
       final opponentId = _match!.playerAId == _myId ? _match!.playerBId : _match!.playerAId;
       if (opponentId != null) {
-        final opp = await supabase
-            .from('users')
-            .select('username')
-            .eq('id', opponentId)
-            .maybeSingle();
+        final opp = await supabase.from('users').select('username').eq('id', opponentId).maybeSingle();
         _opponentName = (opp?['username'] as String?) ?? 'Соперник';
       }
+      final me = await supabase.from('users').select('username').eq('id', _myId).maybeSingle();
+      _myName = (me?['username'] as String?) ?? 'Ты';
     } catch (e) {
       _actionError = 'Не удалось загрузить матч: $e';
     }
@@ -126,6 +97,7 @@ class _BattleScreenState extends State<BattleScreen> with SingleTickerProviderSt
         .listen((rows) {
       if (!mounted) return;
       setState(() => _rounds = rows.map(RoundData.fromRow).toList());
+      _scrollToBottomSoon();
       _maybeAdvance();
     });
 
@@ -137,11 +109,9 @@ class _BattleScreenState extends State<BattleScreen> with SingleTickerProviderSt
     _recordingsSub = supabase.from('voice_recordings').stream(primaryKey: ['id']).listen((rows) {
       if (!mounted) return;
       setState(() {
-        _recordings = rows
-            .where((r) => r['round_id'] != null)
-            .map(VoiceRecordingData.fromRow)
-            .toList();
+        _recordings = rows.where((r) => r['round_id'] != null).map(VoiceRecordingData.fromRow).toList();
       });
+      _scrollToBottomSoon();
       _maybeAdvance();
     });
 
@@ -158,10 +128,19 @@ class _BattleScreenState extends State<BattleScreen> with SingleTickerProviderSt
     _roundsSub?.cancel();
     _recordingsSub?.cancel();
     _scoresSub?.cancel();
-    _pulseController.dispose();
-    _recorder.dispose();
-    _speech.cancel();
+    _feedController.dispose();
     super.dispose();
+  }
+
+  void _scrollToBottomSoon() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || !_feedController.hasClients) return;
+      _feedController.animateTo(
+        _feedController.position.maxScrollExtent,
+        duration: const Duration(milliseconds: 250),
+        curve: Curves.easeOut,
+      );
+    });
   }
 
   // ---------------------------------------------------------------------
@@ -195,10 +174,7 @@ class _BattleScreenState extends State<BattleScreen> with SingleTickerProviderSt
       await _tryCreateRound(1);
       return;
     }
-    RoundData last = _rounds.first;
-    for (final r in _rounds) {
-      if (r.roundNumber > last.roundNumber) last = r;
-    }
+    final last = _lastRound!;
     if (!_roundFullyScored(last)) return;
     if (last.roundNumber >= 10) {
       await _tryCompleteMatch();
@@ -215,11 +191,7 @@ class _BattleScreenState extends State<BattleScreen> with SingleTickerProviderSt
         : PhraseBank.pick(m.languagePair ?? 'en', n);
     try {
       await supabase.from('rounds').upsert(
-        {
-          'match_id': m.id,
-          'round_number': n,
-          'generated_phrase': phrase,
-        },
+        {'match_id': m.id, 'round_number': n, 'generated_phrase': phrase},
         onConflict: 'match_id,round_number',
         ignoreDuplicates: true,
       );
@@ -232,10 +204,10 @@ class _BattleScreenState extends State<BattleScreen> with SingleTickerProviderSt
   Future<void> _tryCompleteMatch() async {
     final m = _match!;
     try {
-      // finalize_match — security definer RPC (пересчёт ELO, начисление
-      // валюты/опыта): клиент не может писать напрямую в currency_wallets
-      // и users.xp, и сам результат матча пересчитывается на сервере из
-      // round_scores, а не доверяется клиенту.
+      // finalize_match — security definer RPC (победитель по выигранным
+      // раундам, пересчёт ELO, начисление валюты/опыта): клиент не может
+      // писать напрямую в currency_wallets и users.xp, и сам результат
+      // матча пересчитывается на сервере из round_scores.
       await supabase.rpc('finalize_match', params: {'p_match_id': m.id});
     } catch (_) {
       // Другой клиент уже финализировал матч (или ещё не все раунды
@@ -247,7 +219,7 @@ class _BattleScreenState extends State<BattleScreen> with SingleTickerProviderSt
   // Recording flow
   // ---------------------------------------------------------------------
 
-  RoundData? get _currentRound {
+  RoundData? get _lastRound {
     if (_rounds.isEmpty) return null;
     RoundData last = _rounds.first;
     for (final r in _rounds) {
@@ -256,8 +228,11 @@ class _BattleScreenState extends State<BattleScreen> with SingleTickerProviderSt
     return last;
   }
 
+  /// Слот, который игроку ещё предстоит записать в текущем раунде.
+  /// В Дуэли это сначала 'native', затем 'target'; в Состязании только
+  /// 'target'. null — всё записано, ждём соперника.
   String? get _nextSlot {
-    final round = _currentRound;
+    final round = _lastRound;
     final m = _match;
     if (round == null || m == null) return null;
     for (final slot in m.requiredSlots) {
@@ -266,106 +241,26 @@ class _BattleScreenState extends State<BattleScreen> with SingleTickerProviderSt
     return null;
   }
 
-  Future<void> _startRecording() async {
-    final slot = _nextSlot;
-    if (slot == null || _micState != _MicState.idle || _uploading) return;
-    final hasPermission = await _recorder.hasPermission();
-    if (!hasPermission) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Нет доступа к микрофону')),
-        );
-      }
-      return;
-    }
-    final dir = await getTemporaryDirectory();
-    final path = '${dir.path}/${const Uuid().v4()}.m4a';
-    await _recorder.start(const RecordConfig(encoder: AudioEncoder.aacLc), path: path);
-
-    _liveTranscript = '';
-    _liveConfidence = 1.0;
-    if (_speechAvailable) {
-      final language = _match!.languageForSlot(_myId, slot);
-      final localeId = _speechLocaleByLanguage[language] ?? 'en_US';
-      // Распознавание речи идёт параллельно с записью аудиофайла — так
-      // транскрипт готов сразу же, без отдельного шага облачного ASR
-      // (раздел 9.1). На части устройств одновременный доступ к микрофону
-      // из record + speech_to_text может не сработать — в этом случае
-      // просто не будет транскрипта, и оценка мягко деградирует
-      // (см. evaluate-recording: пустой транскрипт -> низкий балл, а не
-      // падение).
-      unawaited(_speech.listen(
-        onResult: (result) {
-          _liveTranscript = result.recognizedWords;
-          if (result.confidence > 0) _liveConfidence = result.confidence;
-        },
-        listenOptions: SpeechListenOptions(
-          localeId: localeId,
-          partialResults: true,
-          cancelOnError: true,
-          listenMode: ListenMode.dictation,
-        ),
-      ));
-    }
-
-    if (!mounted) return;
-    setState(() {
-      _micState = _MicState.recording;
-      _pendingFilePath = path;
-      _recordStopwatch = Stopwatch()..start();
-    });
-  }
-
-  Future<void> _stopRecording() async {
-    if (_micState != _MicState.recording) return;
-    final path = await _recorder.stop();
-    if (_speechAvailable) await _speech.stop();
-    _recordStopwatch?.stop();
-    if (!mounted) return;
-    setState(() {
-      _micState = _MicState.ready;
-      if (path != null) _pendingFilePath = path;
-    });
-  }
-
-  void _cancelPendingRecording() {
-    final path = _pendingFilePath;
-    if (path != null) {
-      File(path).delete().catchError((_) => File(path));
-    }
-    setState(() {
-      _micState = _MicState.idle;
-      _pendingFilePath = null;
-      _recordStopwatch = null;
-    });
-  }
-
-  Future<void> _sendPendingRecording() async {
-    final path = _pendingFilePath;
-    final round = _currentRound;
+  Future<void> _sendTake(VoiceTake take) async {
+    final round = _lastRound;
     final slot = _nextSlot;
     final m = _match;
-    if (path == null || round == null || slot == null || m == null) return;
+    if (round == null || slot == null || m == null) return;
 
-    setState(() => _uploading = true);
     try {
       final language = m.languageForSlot(_myId, slot);
       final storagePath = 'match/${m.id}/${round.id}/${_myId}_$slot.m4a';
       await supabase.storage.from('voice-recordings').upload(
             storagePath,
-            File(path),
+            File(take.filePath),
             fileOptions: const FileOptions(upsert: true, contentType: 'audio/m4a'),
           );
-      final durationSeconds = (_recordStopwatch?.elapsedMilliseconds ?? 0) / 1000.0;
-      final transcript = _liveTranscript.trim();
-      final words = transcript.isEmpty ? const <String>[] : transcript.split(RegExp(r'\s+'));
+      final words = take.transcript.isEmpty ? const <String>[] : take.transcript.split(RegExp(r'\s+'));
       // Встроенный движок распознавания даёт только общую уверенность на всю
       // фразу, а не по каждому слову — присваиваем её всем словам одинаково.
-      // Заменится на настоящий per-word confidence вместе с переходом на
-      // полноценный ASR-адаптер (раздел 9.7/9.9).
-      final wordConfidences = words
-          .map((w) => {'word': w, 'confidence': _liveConfidence})
-          .toList();
+      // В MVP поле не используется при расчёте балла (раздел 9.4) и пишется
+      // как задел под deferred_suggestions.md, пункт 2.
+      final wordConfidences = words.map((w) => {'word': w, 'confidence': take.confidence}).toList();
       final inserted = await supabase
           .from('voice_recordings')
           .insert({
@@ -374,21 +269,17 @@ class _BattleScreenState extends State<BattleScreen> with SingleTickerProviderSt
             'recording_slot': slot,
             'language_code': language,
             'audio_storage_path': storagePath,
-            'duration_seconds': durationSeconds,
-            'transcript': transcript,
+            'duration_seconds': take.durationSeconds,
+            'transcript': take.transcript,
             'word_confidences': wordConfidences,
           })
           .select()
           .single();
+      // Задача в очередь оценки — клиент дальше НЕ ждёт результат
+      // синхронно, он придёт через Realtime на round_scores.
       await supabase.from('evaluation_jobs').insert({
         'voice_recording_id': inserted['id'],
         'status': 'pending',
-      });
-      if (!mounted) return;
-      setState(() {
-        _micState = _MicState.idle;
-        _pendingFilePath = null;
-        _recordStopwatch = null;
       });
     } catch (e) {
       if (mounted) {
@@ -396,8 +287,7 @@ class _BattleScreenState extends State<BattleScreen> with SingleTickerProviderSt
           SnackBar(content: Text('Не удалось отправить голосовое: $e')),
         );
       }
-    } finally {
-      if (mounted) setState(() => _uploading = false);
+      rethrow;
     }
   }
 
@@ -418,32 +308,59 @@ class _BattleScreenState extends State<BattleScreen> with SingleTickerProviderSt
       );
     }
 
-    var myTotal = 0;
-    var opponentTotal = 0;
     final opponentId = m.playerAId == _myId ? m.playerBId : m.playerAId;
+    var myWins = 0;
+    var opponentWins = 0;
     for (final r in _rounds) {
-      myTotal += _scoreFor(r.id, _myId) ?? 0;
-      opponentTotal += _scoreFor(r.id, opponentId) ?? 0;
+      final mine = _scoreFor(r.id, _myId);
+      final theirs = _scoreFor(r.id, opponentId);
+      if (mine == null || theirs == null) continue;
+      if (mine > theirs) {
+        myWins++;
+      } else if (theirs > mine) {
+        opponentWins++;
+      }
     }
 
+    final slot = _nextSlot;
+    final canRecord = slot != null && m.status == 'in_progress';
+
     return Scaffold(
-      appBar: AppBar(
-        title: Text(m.isDuel ? 'Дуэль · $_opponentName' : 'Состязание · $_opponentName'),
-      ),
-      body: SafeArea(
-        child: Column(
-          children: [
-            _ScoreHeader(myTotal: myTotal, opponentTotal: opponentTotal, myName: 'Ты', opponentName: _opponentName),
-            Expanded(
-              child: _rounds.isEmpty
-                  ? const Center(child: CircularProgressIndicator())
-                  : ListView(
-                      padding: const EdgeInsets.all(12),
-                      children: _buildFeed(m, opponentId),
-                    ),
-            ),
-            _buildMicBar(),
-          ],
+      appBar: AppBar(title: Text(m.isDuel ? 'Дуэль' : 'Состязание')),
+      // Тап мимо кнопки микрофона сбрасывает подготовленное голосовое
+      // (раздел 5.2) — можно перезаписать заново.
+      body: GestureDetector(
+        behavior: HitTestBehavior.translucent,
+        onTap: () {
+          final dock = _dockKey.currentState;
+          if (dock != null && dock.hasPendingTake) dock.cancelPending();
+        },
+        child: SafeArea(
+          child: Column(
+            children: [
+              _ScoreHeader(
+                myWins: myWins,
+                opponentWins: opponentWins,
+                myName: _myName,
+                opponentName: _opponentName,
+              ),
+              Expanded(
+                child: _rounds.isEmpty
+                    ? const Center(child: CircularProgressIndicator())
+                    : ListView(
+                        controller: _feedController,
+                        padding: const EdgeInsets.fromLTRB(12, 4, 12, 12),
+                        children: _buildFeed(m, opponentId),
+                      ),
+              ),
+              VoiceRecorderDock(
+                key: _dockKey,
+                enabled: canRecord,
+                languageCode: slot == null ? 'en' : m.languageForSlot(_myId, slot),
+                onSend: _sendTake,
+              ),
+            ],
+          ),
         ),
       ),
     );
@@ -456,179 +373,46 @@ class _BattleScreenState extends State<BattleScreen> with SingleTickerProviderSt
       for (final slot in m.requiredSlots) {
         final mine = _recordingFor(round.id, _myId, slot);
         final theirs = opponentId == null ? null : _recordingFor(round.id, opponentId, slot);
-        if (mine == null && theirs == null) continue;
+        // Балл ставится только за голосовое на изучаемом языке — родное
+        // в Дуэли соперник просто слушает (раздел 2.4).
         final myScore = slot == 'target' ? _scoreFor(round.id, _myId) : null;
         final theirScore = slot == 'target' ? _scoreFor(round.id, opponentId) : null;
-        items.add(Padding(
-          padding: const EdgeInsets.symmetric(vertical: 6),
-          child: Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Expanded(
-                child: mine != null
-                    ? _RecordingBubble(recording: mine, alignRight: false, score: myScore)
-                    : const _PendingBubble(alignRight: false),
-              ),
-              const SizedBox(width: 8),
-              Expanded(
-                child: theirs != null
-                    ? _RecordingBubble(recording: theirs, alignRight: true, score: theirScore)
-                    : const _PendingBubble(alignRight: true),
-              ),
-            ],
-          ),
-        ));
+        if (mine != null) {
+          items.add(_RecordingBubble(
+            key: ValueKey('${mine.id}-mine'),
+            recording: mine,
+            name: _myName,
+            alignRight: false,
+            score: myScore,
+            scorePending: slot == 'target',
+          ));
+        }
+        if (theirs != null) {
+          items.add(_RecordingBubble(
+            key: ValueKey('${theirs.id}-theirs'),
+            recording: theirs,
+            name: _opponentName,
+            alignRight: true,
+            score: theirScore,
+            scorePending: slot == 'target',
+          ));
+        }
       }
     }
     return items;
   }
-
-  Widget _buildMicBar() {
-    final round = _currentRound;
-    final slot = _nextSlot;
-    final m = _match!;
-    final waitingForOpponent = round != null && slot == null;
-
-    String? prompt;
-    if (round != null && slot != null) {
-      prompt = PhraseBank.pick(m.languageForSlot(_myId, slot), round.roundNumber);
-    }
-
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-      decoration: const BoxDecoration(
-        color: AppColors.navy2,
-        border: Border(top: BorderSide(color: Colors.white12)),
-      ),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          if (waitingForOpponent)
-            const Padding(
-              padding: EdgeInsets.only(bottom: 10),
-              child: Text('Ждём соперника…', style: TextStyle(color: AppColors.muted)),
-            )
-          else if (prompt != null && _micState == _MicState.idle)
-            Padding(
-              padding: const EdgeInsets.only(bottom: 10),
-              child: Text(
-                'Скажи: "$prompt"',
-                textAlign: TextAlign.center,
-                style: const TextStyle(color: AppColors.cream, fontWeight: FontWeight.w600),
-              ),
-            ),
-          if (_micState == _MicState.ready) _buildReadyPreview(),
-          const SizedBox(height: 6),
-          _buildMicButton(enabled: !waitingForOpponent && !_uploading),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildReadyPreview() {
-    return Row(
-      mainAxisAlignment: MainAxisAlignment.center,
-      children: [
-        IconButton(
-          onPressed: () async {
-            final path = _pendingFilePath;
-            if (path == null) return;
-            final player = AudioPlayer();
-            await player.play(DeviceFileSource(path));
-          },
-          icon: const Icon(Icons.play_arrow, color: AppColors.gold),
-        ),
-        const Text('Голосовое готово', style: TextStyle(color: AppColors.cream)),
-        IconButton(
-          onPressed: _cancelPendingRecording,
-          icon: const Icon(Icons.delete_outline, color: AppColors.danger),
-        ),
-      ],
-    );
-  }
-
-  Widget _buildMicButton({required bool enabled}) {
-    final disabled = !enabled || _nextSlot == null;
-    Widget circle;
-    switch (_micState) {
-      case _MicState.idle:
-        circle = _MicCircle(
-          color: disabled ? Colors.white24 : Colors.white,
-          icon: Icons.mic,
-          iconColor: Colors.black,
-        );
-        break;
-      case _MicState.recording:
-        circle = AnimatedBuilder(
-          animation: _pulseController,
-          builder: (context, child) {
-            final glow = 8 + _pulseController.value * 10;
-            return Container(
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                boxShadow: [
-                  BoxShadow(color: AppColors.gold.withValues(alpha: 0.6), blurRadius: glow, spreadRadius: 1),
-                ],
-              ),
-              child: child,
-            );
-          },
-          child: const _MicCircle(color: AppColors.gold, icon: Icons.mic, iconColor: Colors.black),
-        );
-        break;
-      case _MicState.ready:
-        circle = _uploading
-            ? const _MicCircle(
-                color: AppColors.gold,
-                icon: null,
-                iconColor: Colors.black,
-                child: SizedBox(
-                  height: 22,
-                  width: 22,
-                  child: CircularProgressIndicator(strokeWidth: 2, color: Colors.black),
-                ),
-              )
-            : const _MicCircle(color: AppColors.gold, icon: Icons.send, iconColor: Colors.black);
-        break;
-    }
-
-    return GestureDetector(
-      onLongPressStart: disabled ? null : (_) => _startRecording(),
-      onLongPressEnd: disabled ? null : (_) => _stopRecording(),
-      onTap: (_micState == _MicState.ready && !_uploading) ? _sendPendingRecording : null,
-      child: circle,
-    );
-  }
 }
 
-class _MicCircle extends StatelessWidget {
-  final Color color;
-  final IconData? icon;
-  final Color iconColor;
-  final Widget? child;
-
-  const _MicCircle({required this.color, required this.icon, required this.iconColor, this.child});
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      height: 64,
-      width: 64,
-      decoration: BoxDecoration(color: color, shape: BoxShape.circle),
-      child: Center(child: child ?? Icon(icon, color: iconColor, size: 28)),
-    );
-  }
-}
-
+/// Шапка: живой счёт ВЫИГРАННЫХ РАУНДОВ, между кружками — разделитель.
 class _ScoreHeader extends StatelessWidget {
-  final int myTotal;
-  final int opponentTotal;
+  final int myWins;
+  final int opponentWins;
   final String myName;
   final String opponentName;
 
   const _ScoreHeader({
-    required this.myTotal,
-    required this.opponentTotal,
+    required this.myWins,
+    required this.opponentWins,
     required this.myName,
     required this.opponentName,
   });
@@ -636,16 +420,16 @@ class _ScoreHeader extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 14),
+      padding: const EdgeInsets.symmetric(vertical: 12),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          _ScoreCircle(value: myTotal, color: AppColors.gold, name: myName),
+          _ScoreCircle(value: myWins, color: AppColors.gold, name: myName),
           const Padding(
             padding: EdgeInsets.symmetric(horizontal: 16),
             child: Text('/', style: TextStyle(fontSize: 20, color: AppColors.muted, fontWeight: FontWeight.w700)),
           ),
-          _ScoreCircle(value: opponentTotal, color: AppColors.cyan, name: opponentName),
+          _ScoreCircle(value: opponentWins, color: AppColors.cyan, name: opponentName),
         ],
       ),
     );
@@ -677,12 +461,22 @@ class _ScoreCircle extends StatelessWidget {
           ),
         ),
         const SizedBox(height: 4),
-        Text(name, style: AppFonts.mono(fontSize: 9, color: AppColors.muted)),
+        SizedBox(
+          width: 78,
+          child: Text(
+            name,
+            textAlign: TextAlign.center,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: AppFonts.mono(fontSize: 9, color: AppColors.muted),
+          ),
+        ),
       ],
     );
   }
 }
 
+/// Фраза от ИИ — входящее сообщение с иконкой.
 class _AiBubble extends StatelessWidget {
   final int roundNumber;
   final String text;
@@ -692,25 +486,34 @@ class _AiBubble extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 6),
+      padding: const EdgeInsets.symmetric(vertical: 8),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const CircleAvatar(radius: 14, backgroundColor: AppColors.gold, child: Icon(Icons.smart_toy, size: 16, color: Colors.black)),
+          const CircleAvatar(
+            radius: 14,
+            backgroundColor: AppColors.gold,
+            child: Icon(Icons.smart_toy, size: 16, color: Colors.black),
+          ),
           const SizedBox(width: 8),
-          Expanded(
+          Flexible(
             child: Container(
               padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
+              decoration: const BoxDecoration(
                 color: AppColors.navy3,
-                borderRadius: BorderRadius.circular(12),
+                borderRadius: BorderRadius.only(
+                  topLeft: Radius.circular(4),
+                  topRight: Radius.circular(14),
+                  bottomLeft: Radius.circular(14),
+                  bottomRight: Radius.circular(14),
+                ),
               ),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text('Раунд $roundNumber', style: const TextStyle(color: AppColors.muted, fontSize: 11)),
-                  const SizedBox(height: 4),
-                  Text(text, style: const TextStyle(color: AppColors.cream)),
+                  Text('Раунд $roundNumber из 10', style: AppFonts.mono(fontSize: 9, color: AppColors.muted)),
+                  const SizedBox(height: 5),
+                  Text(text, style: const TextStyle(color: AppColors.cream, height: 1.4)),
                 ],
               ),
             ),
@@ -721,33 +524,26 @@ class _AiBubble extends StatelessWidget {
   }
 }
 
-class _PendingBubble extends StatelessWidget {
-  final bool alignRight;
-
-  const _PendingBubble({required this.alignRight});
-
-  @override
-  Widget build(BuildContext context) {
-    return Align(
-      alignment: alignRight ? Alignment.centerRight : Alignment.centerLeft,
-      child: Container(
-        padding: const EdgeInsets.all(10),
-        decoration: BoxDecoration(
-          color: Colors.white.withValues(alpha: 0.04),
-          borderRadius: BorderRadius.circular(10),
-        ),
-        child: const Text('…', style: TextStyle(color: AppColors.muted)),
-      ),
-    );
-  }
-}
-
+/// Голосовое в ленте: своё — слева с аватаром и волной, соперника — справа
+/// зеркально. Балл за раунд прикрепляется к сообщению сразу после оценки.
 class _RecordingBubble extends StatefulWidget {
   final VoiceRecordingData recording;
+  final String name;
   final bool alignRight;
   final int? score;
 
-  const _RecordingBubble({required this.recording, required this.alignRight, required this.score});
+  /// true для голосовых, за которые балл вообще предусмотрен (изучаемый
+  /// язык). Пока балла нет — на его месте крутится индикатор.
+  final bool scorePending;
+
+  const _RecordingBubble({
+    super.key,
+    required this.recording,
+    required this.name,
+    required this.alignRight,
+    required this.score,
+    required this.scorePending,
+  });
 
   @override
   State<_RecordingBubble> createState() => _RecordingBubbleState();
@@ -796,43 +592,59 @@ class _RecordingBubbleState extends State<_RecordingBubble> {
 
   @override
   Widget build(BuildContext context) {
+    final accent = widget.alignRight ? AppColors.cyan : AppColors.gold;
+
     final bubble = Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
       decoration: BoxDecoration(
         color: widget.alignRight ? AppColors.navy3 : AppColors.gold.withValues(alpha: 0.14),
-        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: accent.withValues(alpha: 0.35)),
+        borderRadius: BorderRadius.circular(14),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          IconButton(
-            padding: EdgeInsets.zero,
-            constraints: const BoxConstraints(),
-            onPressed: _loadingUrl ? null : _togglePlay,
-            icon: _loadingUrl
-                ? const SizedBox(
-                    height: 16,
-                    width: 16,
-                    child: CircularProgressIndicator(strokeWidth: 2))
-                : Icon(_isPlaying ? Icons.stop : Icons.play_arrow, color: AppColors.gold),
+          GestureDetector(
+            onTap: _loadingUrl ? null : _togglePlay,
+            child: _loadingUrl
+                ? const SizedBox(height: 18, width: 18, child: CircularProgressIndicator(strokeWidth: 2))
+                : Icon(_isPlaying ? Icons.stop : Icons.play_arrow, color: accent, size: 22),
           ),
-          const SizedBox(width: 4),
-          const Icon(Icons.graphic_eq, size: 18, color: AppColors.muted),
+          const SizedBox(width: 8),
+          ChWaveform(width: 96, color: accent),
           if (widget.score != null) ...[
-            const SizedBox(width: 8),
+            const SizedBox(width: 10),
             Container(
-              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-              decoration: BoxDecoration(color: AppColors.gold, borderRadius: BorderRadius.circular(6)),
-              child: Text('${widget.score}', style: const TextStyle(color: Colors.black, fontWeight: FontWeight.w800)),
+              padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+              decoration: BoxDecoration(color: accent, borderRadius: BorderRadius.circular(7)),
+              child: Text(
+                '${widget.score}',
+                style: AppFonts.ui(fontSize: 12, weight: FontWeight.w800, color: Colors.black),
+              ),
+            ),
+          ] else if (widget.scorePending) ...[
+            const SizedBox(width: 10),
+            const SizedBox(
+              height: 12,
+              width: 12,
+              child: CircularProgressIndicator(strokeWidth: 1.6, color: AppColors.muted),
             ),
           ],
         ],
       ),
     );
 
-    return Align(
-      alignment: widget.alignRight ? Alignment.centerRight : Alignment.centerLeft,
-      child: bubble,
+    final avatar = ChAvatar(name: widget.name, size: 28, ringColor: accent.withValues(alpha: 0.6));
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 4),
+      child: Row(
+        mainAxisAlignment: widget.alignRight ? MainAxisAlignment.end : MainAxisAlignment.start,
+        crossAxisAlignment: CrossAxisAlignment.end,
+        children: widget.alignRight
+            ? [Flexible(child: bubble), const SizedBox(width: 8), avatar]
+            : [avatar, const SizedBox(width: 8), Flexible(child: bubble)],
+      ),
     );
   }
 }

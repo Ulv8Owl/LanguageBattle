@@ -1,4 +1,4 @@
--- Language Battle: Row Level Security policies + Storage bucket for audio.
+-- Chrolingo: Row Level Security policies + Storage bucket for audio.
 --
 -- Storage path convention (bucket "voice-recordings"):
 --   PvP:   match/{match_id}/{round_id}/{user_id}_{slot}.m4a

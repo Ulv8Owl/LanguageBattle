@@ -1,25 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../core/game_access.dart';
+import '../../core/leagues.dart';
 import '../../core/supabase_client.dart';
 import '../../core/theme.dart';
-import '../../widgets/lexarena_widgets.dart';
-
-const _leagueBands = [
-  (name: 'Медная Лига', min: 0, max: 1200, color: Color(0xFFB5732E)),
-  (name: 'Серебряная Лига', min: 1200, max: 1500, color: AppColors.cyan),
-  (name: 'Золотая Лига', min: 1500, max: 1800, color: AppColors.gold),
-  (name: 'Платиновая Лига', min: 1800, max: 2100, color: AppColors.plat),
-  (name: 'Алмазная Лига', min: 2100, max: 2400, color: AppColors.diamond),
-  (name: 'Лига Мастеров', min: 2400, max: 999999, color: AppColors.master),
-];
-
-({String name, int min, int max, Color color}) _leagueFor(int elo) {
-  for (final b in _leagueBands) {
-    if (elo >= b.min && elo < b.max) return b;
-  }
-  return _leagueBands.last;
-}
+import '../../widgets/chrolingo_widgets.dart';
+import '../subscription/paywall_screen.dart';
 
 class ArenaScreen extends StatefulWidget {
   const ArenaScreen({super.key});
@@ -30,7 +17,7 @@ class ArenaScreen extends StatefulWidget {
 
 class _ArenaScreenState extends State<ArenaScreen> {
   Map<String, dynamic>? _profile;
-  Map<String, dynamic>? _wallet;
+  WalletState _wallet = WalletState.empty;
   int _elo = 1000;
   List<Map<String, dynamic>> _matches = [];
   bool _loading = true;
@@ -46,7 +33,9 @@ class _ArenaScreenState extends State<ArenaScreen> {
     final uid = currentUserId;
     try {
       final profile = await supabase.from('users').select().eq('id', uid).maybeSingle();
-      final wallet = await supabase.from('currency_wallets').select().eq('user_id', uid).maybeSingle();
+      // sync_wallet заодно досчитывает восстановленную энергию и отдаёт
+      // актуальный статус подписки — считать это на клиенте нельзя.
+      final wallet = await GameAccess.sync();
       final learning = await supabase
           .from('user_languages')
           .select('elo')
@@ -79,9 +68,17 @@ class _ArenaScreenState extends State<ArenaScreen> {
     }
   }
 
-  Future<void> _signOut() async {
-    await supabase.auth.signOut();
-    if (mounted) context.go('/login');
+  /// Единая точка входа в любой из трёх режимов. Пока пробный период
+  /// действует или оформлена подписка — обычный поток; иначе вместо него
+  /// показывается пейволл (задача 5 итерации: правило одинаково для ВСЕХ
+  /// трёх режимов, включая Одиночную Игру).
+  Future<void> _enterMode(String modeName, VoidCallback openNormalFlow) async {
+    if (!_wallet.hasAccess) {
+      await PaywallScreen.show(context, modeName);
+      if (mounted) _load();
+      return;
+    }
+    openNormalFlow();
   }
 
   void _showModeInfo({
@@ -90,12 +87,12 @@ class _ArenaScreenState extends State<ArenaScreen> {
     required String rounds,
     required String eloChange,
     required String coins,
-    required VoidCallback onFind,
+    required String gameMode,
   }) {
     showModalBottomSheet(
       context: context,
       backgroundColor: Colors.transparent,
-      builder: (context) => Container(
+      builder: (sheetContext) => Container(
         padding: const EdgeInsets.fromLTRB(18, 20, 18, 24),
         decoration: BoxDecoration(
           gradient: const LinearGradient(
@@ -105,18 +102,26 @@ class _ArenaScreenState extends State<ArenaScreen> {
           ),
           border: const Border(top: BorderSide(color: AppColors.gold)),
           borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
-          boxShadow: [BoxShadow(color: AppColors.gold.withValues(alpha: 0.14), blurRadius: 50, offset: const Offset(0, -14))],
+          boxShadow: [
+            BoxShadow(color: AppColors.gold.withValues(alpha: 0.14), blurRadius: 50, offset: const Offset(0, -14)),
+          ],
         ),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Container(width: 36, height: 4, decoration: BoxDecoration(color: AppColors.lineStrong, borderRadius: BorderRadius.circular(2))),
+            Container(
+              width: 36,
+              height: 4,
+              decoration: BoxDecoration(color: AppColors.lineStrong, borderRadius: BorderRadius.circular(2)),
+            ),
             const SizedBox(height: 16),
             Text(title, style: AppFonts.ui(fontSize: 21, weight: FontWeight.w800, color: AppColors.gold)),
             const SizedBox(height: 10),
-            Text(description, textAlign: TextAlign.center, style: const TextStyle(color: AppColors.muted, fontSize: 12, height: 1.5)),
+            Text(description,
+                textAlign: TextAlign.center,
+                style: const TextStyle(color: AppColors.muted, fontSize: 12, height: 1.5)),
             const SizedBox(height: 16),
-            LxPanel(
+            ChPanel(
               padding: const EdgeInsets.symmetric(vertical: 14),
               child: Row(
                 mainAxisAlignment: MainAxisAlignment.spaceAround,
@@ -130,7 +135,13 @@ class _ArenaScreenState extends State<ArenaScreen> {
             const SizedBox(height: 16),
             SizedBox(
               width: double.infinity,
-              child: ElevatedButton(onPressed: onFind, child: const Text('Найти соперника')),
+              child: ElevatedButton(
+                onPressed: () {
+                  Navigator.pop(sheetContext);
+                  context.push('/matchmaking/$gameMode');
+                },
+                child: const Text('Найти соперника'),
+              ),
             ),
             const SizedBox(height: 8),
             SizedBox(
@@ -143,9 +154,12 @@ class _ArenaScreenState extends State<ArenaScreen> {
                   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                 ),
                 onPressed: () {
-                  Navigator.pop(context);
+                  Navigator.pop(sheetContext);
                   ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('Групповые приглашения появятся позже')),
+                    const SnackBar(
+                      content: Text('Позови друга в группу во вкладке «Друзья», '
+                          'затем оба нажмите «Найти соперника»'),
+                    ),
                   );
                 },
                 child: const Text('Пригласить друга в группу'),
@@ -157,13 +171,6 @@ class _ArenaScreenState extends State<ArenaScreen> {
     );
   }
 
-  void _onFindOpponent(String mode) {
-    Navigator.pop(context);
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Живой матчмейкинг ещё не подключён — тестовые матчи создаются вручную (см. supabase/README.md)')),
-    );
-  }
-
   @override
   Widget build(BuildContext context) {
     if (_loading) {
@@ -172,7 +179,7 @@ class _ArenaScreenState extends State<ArenaScreen> {
     final xp = (_profile?['xp'] as int?) ?? 0;
     final level = 1 + xp ~/ 100;
     final levelProgress = (xp % 100) / 100;
-    final league = _leagueFor(_elo);
+    final league = leagueFor(_elo);
     final bandProgress = ((_elo - league.min) / (league.max - league.min)).clamp(0.0, 1.0);
 
     return RefreshIndicator(
@@ -182,7 +189,11 @@ class _ArenaScreenState extends State<ArenaScreen> {
         children: [
           Row(
             children: [
-              LxAvatar(name: (_profile?['username'] as String?) ?? '?', size: 40, ringColor: league.color),
+              ChAvatar(
+                name: (_profile?['username'] as String?) ?? '?',
+                size: 40,
+                ringColor: league.color,
+              ),
               const SizedBox(width: 10),
               Expanded(
                 child: Column(
@@ -205,49 +216,73 @@ class _ArenaScreenState extends State<ArenaScreen> {
                           ),
                         ),
                         const SizedBox(width: 6),
-                        Text('$level LVL', style: AppFonts.mono(fontSize: 9, color: AppColors.gold, weight: FontWeight.w700)),
+                        Text('$level LVL',
+                            style: AppFonts.mono(fontSize: 9, color: AppColors.gold, weight: FontWeight.w700)),
                       ],
                     ),
                   ],
                 ),
               ),
-              LxPill(icon: const Icon(Icons.diamond, size: 12, color: AppColors.cream), label: '${_wallet?['hard_currency'] ?? 0}'),
+              ChPill(
+                icon: const Icon(Icons.circle, size: 12, color: AppColors.gold),
+                label: '${_wallet.coins}',
+              ),
               const SizedBox(width: 6),
-              LxPill(icon: const Icon(Icons.circle, size: 12, color: AppColors.gold), label: '${_wallet?['soft_currency'] ?? 0}'),
-              IconButton(onPressed: _signOut, icon: const Icon(Icons.logout, size: 20, color: AppColors.muted)),
+              ChPill(
+                icon: const Icon(Icons.bolt, size: 12, color: AppColors.cyan),
+                label: '${_wallet.energyCurrent}/${_wallet.energyMax}',
+              ),
             ],
           ),
+          if (_wallet.isTrial) ...[
+            const SizedBox(height: 12),
+            _TrialBanner(daysLeft: _wallet.trialDaysLeft),
+          ] else if (!_wallet.hasAccess) ...[
+            const SizedBox(height: 12),
+            const _LockedBanner(),
+          ],
           const SizedBox(height: 22),
-          LxMenuRow(
-            icon: const LxModeIcon(icon: Icons.school, gradient: [Color(0xFF5A6C99), Color(0xFF33426B)]),
+          ChMenuRow(
+            icon: const ChModeIcon(icon: Icons.school, gradient: [Color(0xFF5A6C99), Color(0xFF33426B)]),
             title: 'Одиночная Игра',
-            onTap: () => context.push('/training'),
+            onTap: () => _enterMode('Одиночная Игра', () async {
+              await context.push('/training');
+              if (mounted) _load();
+            }),
           ),
           const SizedBox(height: 9),
-          LxMenuRow(
-            icon: const LxModeIcon(icon: Icons.bolt, gradient: [AppColors.cyan, Color(0xFF3A3A40)]),
+          ChMenuRow(
+            icon: const ChModeIcon(icon: Icons.bolt, gradient: [AppColors.cyan, Color(0xFF3A3A40)]),
             title: 'Состязание',
-            onTap: () => _showModeInfo(
-              title: 'Состязание',
-              description: 'PvP против любого игрока с тем же изучаемым языком. 10 раундов, один голосовой за раунд.',
-              rounds: '10',
-              eloChange: '±20',
-              coins: '+100',
-              onFind: () => _onFindOpponent('sparring'),
+            onTap: () => _enterMode(
+              'Состязание',
+              () => _showModeInfo(
+                title: 'Состязание',
+                description: 'PvP против любого игрока с тем же изучаемым языком. '
+                    '10 раундов, одно голосовое за раунд.',
+                rounds: '10',
+                eloChange: '±20',
+                coins: '+100',
+                gameMode: 'sparring',
+              ),
             ),
           ),
           const SizedBox(height: 9),
-          LxMenuRow(
-            icon: const LxModeIcon(icon: Icons.local_fire_department, gradient: [AppColors.gold, Color(0xFFFFE066)]),
+          ChMenuRow(
+            icon: const ChModeIcon(icon: Icons.local_fire_department, gradient: [AppColors.gold, Color(0xFFFFE066)]),
             title: 'Дуэль',
             flagship: true,
-            onTap: () => _showModeInfo(
-              title: 'Дуэль',
-              description: 'Бой против настоящего носителя изучаемого языка. 10 раундов, по 2 голосовых с каждой стороны.',
-              rounds: '10',
-              eloChange: '±24',
-              coins: '+120',
-              onFind: () => _onFindOpponent('native_duel'),
+            onTap: () => _enterMode(
+              'Дуэль',
+              () => _showModeInfo(
+                title: 'Дуэль',
+                description: 'Бой против настоящего носителя изучаемого языка. '
+                    '10 раундов, по два голосовых с каждой стороны.',
+                rounds: '10',
+                eloChange: '±24',
+                coins: '+120',
+                gameMode: 'native_duel',
+              ),
             ),
           ),
           const SizedBox(height: 24),
@@ -259,7 +294,7 @@ class _ArenaScreenState extends State<ArenaScreen> {
           ],
           Column(
             children: [
-              _TrophyIcon(color: league.color),
+              Icon(Icons.emoji_events, size: 46, color: league.color),
               const SizedBox(height: 2),
               Text(league.name, style: AppFonts.ui(fontSize: 15, weight: FontWeight.w800, color: league.color)),
               const SizedBox(height: 9),
@@ -285,18 +320,67 @@ class _ArenaScreenState extends State<ArenaScreen> {
               const SizedBox(height: 10),
               Row(
                 mainAxisAlignment: MainAxisAlignment.center,
-                children: _leagueBands
+                children: leagueBands
                     .map((b) => Padding(
                           padding: const EdgeInsets.symmetric(horizontal: 3.5),
                           child: Icon(
                             Icons.emoji_events,
                             size: 20,
-                            color: b == league ? b.color : b.color.withValues(alpha: 0.35),
+                            color: b.name == league.name ? b.color : b.color.withValues(alpha: 0.35),
                           ),
                         ))
                     .toList(),
               ),
             ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _TrialBanner extends StatelessWidget {
+  final int daysLeft;
+
+  const _TrialBanner({required this.daysLeft});
+
+  @override
+  Widget build(BuildContext context) {
+    return ChPanel(
+      padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 9),
+      child: Row(
+        children: [
+          const Icon(Icons.hourglass_bottom, size: 15, color: AppColors.gold),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              'Пробный период: осталось $daysLeft дн.',
+              style: AppFonts.mono(fontSize: 10, color: AppColors.muted),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _LockedBanner extends StatelessWidget {
+  const _LockedBanner();
+
+  @override
+  Widget build(BuildContext context) {
+    return ChPanel(
+      borderColor: AppColors.danger,
+      padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 9),
+      child: Row(
+        children: [
+          const Icon(Icons.lock_outline, size: 15, color: AppColors.danger),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              'Пробный период закончился — режимы закрыты',
+              style: AppFonts.mono(fontSize: 10, color: AppColors.muted),
+            ),
           ),
         ],
       ),
@@ -322,16 +406,6 @@ class _StatCol extends StatelessWidget {
   }
 }
 
-class _TrophyIcon extends StatelessWidget {
-  final Color color;
-  const _TrophyIcon({required this.color});
-
-  @override
-  Widget build(BuildContext context) {
-    return Icon(Icons.emoji_events, size: 46, color: color);
-  }
-}
-
 class _MatchRow extends StatelessWidget {
   final Map<String, dynamic> match;
 
@@ -343,20 +417,26 @@ class _MatchRow extends StatelessWidget {
     final completed = status == 'completed';
     return Padding(
       padding: const EdgeInsets.only(bottom: 8),
-      child: LxPanel(
+      child: ChPanel(
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
         child: InkWell(
           onTap: () => context.push(completed ? '/battle/${match['id']}/results' : '/battle/${match['id']}'),
           child: Row(
             children: [
-              Icon(match['game_mode'] == 'native_duel' ? Icons.local_fire_department : Icons.bolt, color: AppColors.gold, size: 20),
+              Icon(
+                match['game_mode'] == 'native_duel' ? Icons.local_fire_department : Icons.bolt,
+                color: AppColors.gold,
+                size: 20,
+              ),
               const SizedBox(width: 10),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(match['game_mode'] == 'native_duel' ? 'Дуэль' : 'Состязание', style: AppFonts.ui(fontSize: 12)),
-                    Text(completed ? 'Завершён' : 'В процессе', style: const TextStyle(fontSize: 10, color: AppColors.muted)),
+                    Text(match['game_mode'] == 'native_duel' ? 'Дуэль' : 'Состязание',
+                        style: AppFonts.ui(fontSize: 12)),
+                    Text(completed ? 'Завершён' : 'В процессе',
+                        style: const TextStyle(fontSize: 10, color: AppColors.muted)),
                   ],
                 ),
               ),

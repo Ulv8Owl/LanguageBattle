@@ -12,23 +12,33 @@ export interface GrammarError {
 }
 
 export interface EvaluateGrammarResult {
+  /** Балл 1-10 напрямую из ответа модели (раздел 9.4, MVP-версия). */
+  score: number;
   errors: GrammarError[];
+  /** true, если модель так и не вернула валидный ответ и балл нейтральный. */
+  degraded: boolean;
 }
 
-const SYSTEM_PROMPT = `Ты — строгий, но доброжелательный судья грамматики для приложения изучения языков.
+/** Нейтральный балл при неустранимом сбое модели — игрока не штрафуем. */
+const NEUTRAL_SCORE = 7;
+
+const SYSTEM_PROMPT =
+  `Ты — строгий, но доброжелательный судья грамматики для приложения изучения языков.
 Тебе дают транскрипт того, что сказал изучающий язык (уровень A1-B2), целевой язык и родной язык говорящего.
-Твоя задача — найти ТОЛЬКО ошибки грамматики, орфографии и (отдельно) стилистические огрехи в транскрипте.
+Твоя задача — оценить сказанное по 10-балльной шкале и найти ошибки грамматики, орфографии и стиля в транскрипте.
 НЕ оценивай произношение — ты видишь только текст.
-НЕ штрафуй и не отмечай как ошибку то, что укладывается в разговорную норму или является допустимым вариантом.
+НЕ штрафуй за то, что укладывается в разговорную норму или является допустимым вариантом.
 
 Верни СТРОГО JSON без markdown-разметки в формате:
-{"errors": [{"offset": number, "length": number, "message": string, "replacement": string, "category": "grammar"|"spelling"|"style"}]}
+{"score": number, "errors": [{"offset": number, "length": number, "message": string, "replacement": string, "category": "grammar"|"spelling"|"style"}]}
 
+score — целое число от 1 до 10: 10 — безупречно и естественно, 7-9 — понятно с мелкими огрехами,
+4-6 — заметные ошибки, но смысл ясен, 1-3 — почти непонятно или не на том языке.
 offset/length — позиция символа в ПЕРЕДАННОМ транскрипте (0-indexed, по UTF-16 code units).
 message — короткое объяснение ошибки НА РОДНОМ ЯЗЫКЕ говорящего, понятное новичку.
 replacement — как должно быть правильно.
-category — "grammar" или "spelling" для настоящих ошибок; "style" для необязательных стилистических советов ("носитель сказал бы иначе") — они не штрафуются, но могут быть показаны отдельно.
-Если ошибок нет — верни {"errors": []}.`;
+category — "grammar" или "spelling" для настоящих ошибок; "style" для необязательных стилистических советов.
+Если ошибок нет — верни {"score": 10, "errors": []}.`;
 
 function buildUserPrompt(transcript: string, targetLanguage: string, nativeLanguage: string): string {
   return [
@@ -39,21 +49,47 @@ function buildUserPrompt(transcript: string, targetLanguage: string, nativeLangu
   ].join("\n");
 }
 
-function isValidResult(value: unknown): value is EvaluateGrammarResult {
-  if (typeof value !== "object" || value === null) return false;
+interface ParsedResult {
+  score: number;
+  errors: GrammarError[];
+}
+
+/**
+ * Раздел 9.3: ответ модели валидируется по схеме ПЕРЕД использованием.
+ * Возвращает null, если форма ответа не подходит — вызывающий код решает,
+ * повторять запрос или отдавать нейтральный результат.
+ */
+function validate(value: unknown): ParsedResult | null {
+  if (typeof value !== "object" || value === null) return null;
   const v = value as Record<string, unknown>;
-  if (!Array.isArray(v.errors)) return false;
-  return v.errors.every((e) => {
-    if (typeof e !== "object" || e === null) return false;
+
+  if (typeof v.score !== "number" || !Number.isFinite(v.score)) return null;
+  const score = Math.min(10, Math.max(1, Math.round(v.score)));
+
+  if (!Array.isArray(v.errors)) return null;
+  const errors: GrammarError[] = [];
+  for (const e of v.errors) {
+    if (typeof e !== "object" || e === null) return null;
     const err = e as Record<string, unknown>;
-    return (
-      typeof err.offset === "number" &&
-      typeof err.length === "number" &&
-      typeof err.message === "string" &&
-      typeof err.replacement === "string" &&
-      (err.category === "grammar" || err.category === "spelling" || err.category === "style")
-    );
-  });
+    if (
+      typeof err.offset !== "number" ||
+      typeof err.length !== "number" ||
+      typeof err.message !== "string" ||
+      typeof err.replacement !== "string" ||
+      (err.category !== "grammar" && err.category !== "spelling" && err.category !== "style")
+    ) {
+      return null;
+    }
+    errors.push({
+      offset: Math.max(0, Math.round(err.offset)),
+      length: Math.max(0, Math.round(err.length)),
+      message: err.message,
+      replacement: err.replacement,
+      category: err.category,
+    });
+  }
+
+  return { score, errors };
 }
 
 async function callLlmOnce(transcript: string, targetLanguage: string, nativeLanguage: string): Promise<unknown> {
@@ -77,6 +113,7 @@ async function callLlmOnce(transcript: string, targetLanguage: string, nativeLan
         { role: "system", content: SYSTEM_PROMPT },
         { role: "user", content: buildUserPrompt(transcript, targetLanguage, nativeLanguage) },
       ],
+      // Structured output там, где провайдер это поддерживает (раздел 9.3).
       response_format: { type: "json_object" },
       temperature: 0.2,
     }),
@@ -96,10 +133,11 @@ async function callLlmOnce(transcript: string, targetLanguage: string, nativeLan
 }
 
 /**
- * evaluateGrammar(transcript, targetLanguage, nativeLanguage) -> { errors }
+ * evaluateGrammar(transcript, targetLanguage, nativeLanguage) -> { score, errors }
  *
  * Раздел 9.3: один повторный запрос при кривом JSON/ответе, затем —
- * нейтральный результат (без ошибок) вместо падения/штрафа игроку.
+ * нейтральный результат вместо падения/штрафа игроку. Приложение никогда
+ * не должно падать из-за ответа модели.
  */
 export async function evaluateGrammar(
   transcript: string,
@@ -108,15 +146,14 @@ export async function evaluateGrammar(
 ): Promise<EvaluateGrammarResult> {
   for (let attempt = 0; attempt < 2; attempt++) {
     try {
-      const parsed = await callLlmOnce(transcript, targetLanguage, nativeLanguage);
-      if (isValidResult(parsed)) {
-        return parsed;
+      const parsed = validate(await callLlmOnce(transcript, targetLanguage, nativeLanguage));
+      if (parsed) {
+        return { score: parsed.score, errors: parsed.errors, degraded: false };
       }
-      console.error("evaluateGrammar: LLM returned invalid shape, attempt", attempt, parsed);
+      console.error("evaluateGrammar: LLM returned invalid shape, attempt", attempt);
     } catch (e) {
       console.error("evaluateGrammar: attempt", attempt, "failed:", e);
     }
   }
-  // Неустранимый сбой модели — не штрафуем игрока.
-  return { errors: [] };
+  return { score: NEUTRAL_SCORE, errors: [], degraded: true };
 }
