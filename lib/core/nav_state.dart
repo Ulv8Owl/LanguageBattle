@@ -32,3 +32,12 @@ void openShopSubscription() {
   shopSectionRequest.value = ShopSections.subscription;
   arenaTabRequest.value = ArenaTabs.shop;
 }
+
+/// Языковая пара меняется из Профиля, но её использует и Арена (ELO,
+/// доступные режимы) — простой счётчик-нотификатор проще, чем
+/// протаскивать колбэк через IndexedStack в ArenaShell.
+final ValueNotifier<int> languagePairVersion = ValueNotifier<int>(0);
+
+void notifyLanguagePairChanged() {
+  languagePairVersion.value++;
+}

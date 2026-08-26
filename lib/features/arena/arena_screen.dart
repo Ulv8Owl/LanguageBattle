@@ -3,10 +3,10 @@ import 'package:go_router/go_router.dart';
 
 import '../../core/game_access.dart';
 import '../../core/leagues.dart';
+import '../../core/nav_state.dart';
 import '../../core/supabase_client.dart';
 import '../../core/theme.dart';
 import '../../widgets/chrolingo_widgets.dart';
-import '../subscription/paywall_screen.dart';
 
 class ArenaScreen extends StatefulWidget {
   const ArenaScreen({super.key});
@@ -15,6 +15,12 @@ class ArenaScreen extends StatefulWidget {
   State<ArenaScreen> createState() => _ArenaScreenState();
 }
 
+/// Ключи режимов — используются и для навигации/gate-логики, и для того,
+/// какая строка сейчас подсвечена (задача итерации, п.6: по умолчанию
+/// ничего не подсвечено, подсветка появляется только пока открыта плашка
+/// этого режима).
+enum _ModeKey { training, solo, sparring, duel }
+
 class _ArenaScreenState extends State<ArenaScreen> {
   Map<String, dynamic>? _profile;
   WalletState _wallet = WalletState.empty;
@@ -22,10 +28,24 @@ class _ArenaScreenState extends State<ArenaScreen> {
   List<Map<String, dynamic>> _matches = [];
   bool _loading = true;
 
+  /// null — ничего не подсвечено. Задаётся на время, пока открыта плашка
+  /// режима, и сбрасывается, когда она закрывается любым способом.
+  _ModeKey? _selectedMode;
+
   @override
   void initState() {
     super.initState();
     _load();
+    // Смена языковой пары в Профиле должна сразу отразиться на Арене
+    // (ELO, доступность режимов) — Арена не пересоздаётся при
+    // переключении вкладок (IndexedStack), поэтому слушаем нотификатор.
+    languagePairVersion.addListener(_load);
+  }
+
+  @override
+  void dispose() {
+    languagePairVersion.removeListener(_load);
+    super.dispose();
   }
 
   Future<void> _load() async {
@@ -68,81 +88,84 @@ class _ArenaScreenState extends State<ArenaScreen> {
     }
   }
 
-  /// Единая точка входа в любой из трёх режимов. Пока пробный период
-  /// действует или оформлена подписка — обычный поток; иначе вместо него
-  /// показывается пейволл (задача 5 итерации: правило одинаково для ВСЕХ
-  /// трёх режимов, включая Одиночную Игру).
-  Future<void> _enterMode(String modeName, VoidCallback openNormalFlow) async {
-    if (!_wallet.hasAccess) {
-      await PaywallScreen.show(context, modeName);
-      if (mounted) _load();
-      return;
-    }
-    openNormalFlow();
-  }
-
-  void _showModeInfo({
-    required String title,
-    required String description,
-    required String rounds,
-    required String eloChange,
-    required String coins,
-    required String gameMode,
-  }) {
+  /// Единственная точка входа в любой из четырёх режимов. Тренировка не
+  /// использует AI (нет ASR/LLM пайплайна вообще), поэтому она никогда не
+  /// закрывается пробным периодом — три остальных режима закрываются,
+  /// когда подписка/пробный период не активны (задача итерации, п.4/п.7).
+  void _onModeTap(_ModeKey key, {required bool aiGated, required WidgetBuilder sheetBuilder}) {
+    setState(() => _selectedMode = key);
+    final locked = aiGated && !_wallet.hasAccess;
     showModalBottomSheet(
       context: context,
       backgroundColor: Colors.transparent,
-      builder: (sheetContext) => Container(
-        padding: const EdgeInsets.fromLTRB(18, 20, 18, 24),
-        decoration: BoxDecoration(
-          gradient: const LinearGradient(
-            begin: Alignment.topCenter,
-            end: Alignment.bottomCenter,
-            colors: [AppColors.navy2, AppColors.navy1],
-          ),
-          border: const Border(top: BorderSide(color: AppColors.gold)),
-          borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
-          boxShadow: [
-            BoxShadow(color: AppColors.gold.withValues(alpha: 0.14), blurRadius: 50, offset: const Offset(0, -14)),
-          ],
+      builder: locked ? _buildPaywallSheet : sheetBuilder,
+    ).whenComplete(() {
+      if (mounted) setState(() => _selectedMode = null);
+    });
+  }
+
+  // -------------------------------------------------------------------
+  // Плашки режимов
+  // -------------------------------------------------------------------
+
+  Widget _sheetChrome({
+    required BuildContext sheetContext,
+    required String title,
+    required String description,
+    required List<_Stat> stats,
+    required String primaryLabel,
+    required VoidCallback onPrimary,
+    VoidCallback? onInviteFriend,
+    Color accent = AppColors.gold,
+  }) {
+    return Container(
+      padding: const EdgeInsets.fromLTRB(18, 20, 18, 24),
+      decoration: BoxDecoration(
+        gradient: const LinearGradient(
+          begin: Alignment.topCenter,
+          end: Alignment.bottomCenter,
+          colors: [AppColors.navy2, AppColors.navy1],
         ),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Container(
-              width: 36,
-              height: 4,
-              decoration: BoxDecoration(color: AppColors.lineStrong, borderRadius: BorderRadius.circular(2)),
+        border: Border(top: BorderSide(color: accent)),
+        borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
+        boxShadow: [
+          BoxShadow(color: accent.withValues(alpha: 0.14), blurRadius: 50, offset: const Offset(0, -14)),
+        ],
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(
+            width: 36,
+            height: 4,
+            decoration: BoxDecoration(color: AppColors.lineStrong, borderRadius: BorderRadius.circular(2)),
+          ),
+          const SizedBox(height: 16),
+          Text(title, style: AppFonts.ui(fontSize: 21, weight: FontWeight.w800, color: accent)),
+          const SizedBox(height: 10),
+          Text(description,
+              textAlign: TextAlign.center,
+              style: const TextStyle(color: AppColors.muted, fontSize: 12, height: 1.5)),
+          const SizedBox(height: 16),
+          ChPanel(
+            padding: const EdgeInsets.symmetric(vertical: 14),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceAround,
+              children: stats.map((s) => _StatCol(value: s.value, label: s.label, color: s.color)).toList(),
             ),
-            const SizedBox(height: 16),
-            Text(title, style: AppFonts.ui(fontSize: 21, weight: FontWeight.w800, color: AppColors.gold)),
-            const SizedBox(height: 10),
-            Text(description,
-                textAlign: TextAlign.center,
-                style: const TextStyle(color: AppColors.muted, fontSize: 12, height: 1.5)),
-            const SizedBox(height: 16),
-            ChPanel(
-              padding: const EdgeInsets.symmetric(vertical: 14),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.spaceAround,
-                children: [
-                  _StatCol(value: rounds, label: 'раундов', color: AppColors.gold),
-                  _StatCol(value: eloChange, label: 'ELO', color: AppColors.cyan),
-                  _StatCol(value: coins, label: 'монет', color: AppColors.gold),
-                ],
-              ),
+          ),
+          const SizedBox(height: 16),
+          SizedBox(
+            width: double.infinity,
+            child: ElevatedButton(
+              onPressed: () {
+                Navigator.pop(sheetContext);
+                onPrimary();
+              },
+              child: Text(primaryLabel),
             ),
-            const SizedBox(height: 16),
-            SizedBox(
-              width: double.infinity,
-              child: ElevatedButton(
-                onPressed: () {
-                  Navigator.pop(sheetContext);
-                  context.push('/matchmaking/$gameMode');
-                },
-                child: const Text('Найти соперника'),
-              ),
-            ),
+          ),
+          if (onInviteFriend != null) ...[
             const SizedBox(height: 8),
             SizedBox(
               width: double.infinity,
@@ -155,19 +178,111 @@ class _ArenaScreenState extends State<ArenaScreen> {
                 ),
                 onPressed: () {
                   Navigator.pop(sheetContext);
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(
-                      content: Text('Позови друга в группу во вкладке «Друзья», '
-                          'затем оба нажмите «Найти соперника»'),
-                    ),
-                  );
+                  onInviteFriend();
                 },
                 child: const Text('Пригласить друга в группу'),
               ),
             ),
           ],
+        ],
+      ),
+    );
+  }
+
+  Widget _buildTrainingSheet(BuildContext sheetContext) {
+    return _sheetChrome(
+      sheetContext: sheetContext,
+      title: 'Тренировка',
+      description: 'Карточки со словами на твоей языковой паре: смотришь слово, '
+          'вспоминаешь перевод, переворачиваешь. Не тратит энергию и работает '
+          'без подписки.',
+      stats: const [
+        _Stat(value: '10', label: 'карточек', color: AppColors.gold),
+        _Stat(value: '0', label: 'энергии', color: AppColors.ok),
+      ],
+      primaryLabel: 'Начать',
+      onPrimary: () => context.push('/flashcards'),
+      accent: AppColors.ok,
+    );
+  }
+
+  Widget _buildSoloSheet(BuildContext sheetContext) {
+    return _sheetChrome(
+      sheetContext: sheetContext,
+      title: 'Одиночная Игра',
+      description: 'Практика с AI-фидбеком, вне рейтинга. Две попытки на фразу: '
+          'после первой — подробный разбор ошибок, вторая идёт в зачёт.',
+      stats: const [
+        _Stat(value: '5', label: 'раундов', color: AppColors.gold),
+        _Stat(value: '—', label: 'ELO', color: AppColors.cyan),
+        _Stat(value: '1', label: 'энергии', color: AppColors.cyan),
+      ],
+      primaryLabel: 'Начать',
+      onPrimary: () async {
+        await context.push('/training');
+        if (mounted) _load();
+      },
+    );
+  }
+
+  Widget _buildSparringSheet(BuildContext sheetContext) {
+    return _sheetChrome(
+      sheetContext: sheetContext,
+      title: 'Состязание',
+      description: 'PvP против любого игрока с тем же изучаемым языком. '
+          '10 раундов, одно голосовое за раунд.',
+      stats: const [
+        _Stat(value: '10', label: 'раундов', color: AppColors.gold),
+        _Stat(value: '±20', label: 'ELO', color: AppColors.cyan),
+        _Stat(value: '+100', label: 'монет', color: AppColors.gold),
+      ],
+      primaryLabel: 'Найти соперника',
+      onPrimary: () => context.push('/matchmaking/sparring'),
+      onInviteFriend: () => ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Позови друга в группу во вкладке «Друзья», '
+              'затем оба нажмите «Найти соперника»'),
         ),
       ),
+    );
+  }
+
+  Widget _buildDuelSheet(BuildContext sheetContext) {
+    return _sheetChrome(
+      sheetContext: sheetContext,
+      title: 'Дуэль',
+      description: 'Бой против настоящего носителя изучаемого языка. '
+          '10 раундов, по два голосовых с каждой стороны.',
+      stats: const [
+        _Stat(value: '10', label: 'раундов', color: AppColors.gold),
+        _Stat(value: '±24', label: 'ELO', color: AppColors.cyan),
+        _Stat(value: '+120', label: 'монет', color: AppColors.gold),
+      ],
+      primaryLabel: 'Найти соперника',
+      onPrimary: () => context.push('/matchmaking/native_duel'),
+      onInviteFriend: () => ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Позови друга в группу во вкладке «Друзья», '
+              'затем оба нажмите «Найти соперника»'),
+        ),
+      ),
+    );
+  }
+
+  /// Плашка вместо описания режима, когда пробный период кончился и
+  /// подписки нет (задача итерации, п.7). Показывается для ВСЕХ трёх
+  /// AI-режимов одинаково.
+  Widget _buildPaywallSheet(BuildContext sheetContext) {
+    return _sheetChrome(
+      sheetContext: sheetContext,
+      title: 'Пробный период закончился',
+      description: 'Режимы с подключённым ИИ — Одиночная Игра, Состязание и '
+          'Дуэль — заблокированы до оплаты подписки. Тренировка по-прежнему '
+          'доступна бесплатно, а подписку можно оформить, если сочтёшь нужным.',
+      stats: const [],
+      primaryLabel: 'Подписка',
+      onPrimary: openShopSubscription,
+      accent: AppColors.danger,
     );
   }
 
@@ -234,56 +349,37 @@ class _ArenaScreenState extends State<ArenaScreen> {
               ),
             ],
           ),
-          if (_wallet.isTrial) ...[
-            const SizedBox(height: 12),
-            _TrialBanner(daysLeft: _wallet.trialDaysLeft),
-          ] else if (!_wallet.hasAccess) ...[
+          if (!_wallet.hasAccess && !_wallet.isTrial) ...[
             const SizedBox(height: 12),
             const _LockedBanner(),
           ],
           const SizedBox(height: 22),
           ChMenuRow(
-            icon: const ChModeIcon(icon: Icons.school, gradient: [Color(0xFF5A6C99), Color(0xFF33426B)]),
-            title: 'Одиночная Игра',
-            onTap: () => _enterMode('Одиночная Игра', () async {
-              await context.push('/training');
-              if (mounted) _load();
-            }),
+            icon: const ChModeIcon(icon: Icons.style, gradient: [AppColors.ok, Color(0xFF2E7D52)]),
+            title: 'Тренировка',
+            flagship: _selectedMode == _ModeKey.training,
+            onTap: () => _onModeTap(_ModeKey.training, aiGated: false, sheetBuilder: _buildTrainingSheet),
           ),
           const SizedBox(height: 9),
           ChMenuRow(
-            icon: const ChModeIcon(icon: Icons.bolt, gradient: [AppColors.cyan, Color(0xFF3A3A40)]),
+            icon: const ChModeIcon(icon: Icons.school, gradient: [AppColors.gold, Color(0xFFFFE066)]),
+            title: 'Одиночная Игра',
+            flagship: _selectedMode == _ModeKey.solo,
+            onTap: () => _onModeTap(_ModeKey.solo, aiGated: true, sheetBuilder: _buildSoloSheet),
+          ),
+          const SizedBox(height: 9),
+          ChMenuRow(
+            icon: const ChModeIcon(icon: Icons.bolt, gradient: [AppColors.gold, Color(0xFFFFE066)]),
             title: 'Состязание',
-            onTap: () => _enterMode(
-              'Состязание',
-              () => _showModeInfo(
-                title: 'Состязание',
-                description: 'PvP против любого игрока с тем же изучаемым языком. '
-                    '10 раундов, одно голосовое за раунд.',
-                rounds: '10',
-                eloChange: '±20',
-                coins: '+100',
-                gameMode: 'sparring',
-              ),
-            ),
+            flagship: _selectedMode == _ModeKey.sparring,
+            onTap: () => _onModeTap(_ModeKey.sparring, aiGated: true, sheetBuilder: _buildSparringSheet),
           ),
           const SizedBox(height: 9),
           ChMenuRow(
             icon: const ChModeIcon(icon: Icons.local_fire_department, gradient: [AppColors.gold, Color(0xFFFFE066)]),
             title: 'Дуэль',
-            flagship: true,
-            onTap: () => _enterMode(
-              'Дуэль',
-              () => _showModeInfo(
-                title: 'Дуэль',
-                description: 'Бой против настоящего носителя изучаемого языка. '
-                    '10 раундов, по два голосовых с каждой стороны.',
-                rounds: '10',
-                eloChange: '±24',
-                coins: '+120',
-                gameMode: 'native_duel',
-              ),
-            ),
+            flagship: _selectedMode == _ModeKey.duel,
+            onTap: () => _onModeTap(_ModeKey.duel, aiGated: true, sheetBuilder: _buildDuelSheet),
           ),
           const SizedBox(height: 24),
           if (_matches.isNotEmpty) ...[
@@ -339,29 +435,12 @@ class _ArenaScreenState extends State<ArenaScreen> {
   }
 }
 
-class _TrialBanner extends StatelessWidget {
-  final int daysLeft;
+class _Stat {
+  final String value;
+  final String label;
+  final Color color;
 
-  const _TrialBanner({required this.daysLeft});
-
-  @override
-  Widget build(BuildContext context) {
-    return ChPanel(
-      padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 9),
-      child: Row(
-        children: [
-          const Icon(Icons.hourglass_bottom, size: 15, color: AppColors.gold),
-          const SizedBox(width: 8),
-          Expanded(
-            child: Text(
-              'Пробный период: осталось $daysLeft дн.',
-              style: AppFonts.mono(fontSize: 10, color: AppColors.muted),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
+  const _Stat({required this.value, required this.label, required this.color});
 }
 
 class _LockedBanner extends StatelessWidget {
@@ -378,7 +457,7 @@ class _LockedBanner extends StatelessWidget {
           const SizedBox(width: 8),
           Expanded(
             child: Text(
-              'Пробный период закончился — режимы закрыты',
+              'Пробный период закончился — режимы с ИИ закрыты, Тренировка доступна',
               style: AppFonts.mono(fontSize: 10, color: AppColors.muted),
             ),
           ),

@@ -58,14 +58,16 @@ class WalletState {
 
   bool get isSubscribed => subscriptionStatus == 'active' && hasAccess;
 
-  /// Сколько дней пробного периода осталось (для карточки тарифа в
-  /// Магазине). 0, если пробный период уже кончился.
-  int get trialDaysLeft {
+  /// Точное оставшееся время пробного периода — для живого обратного
+  /// отсчёта (TrialCountdownBanner). null, если пробного периода нет или
+  /// он уже кончился. `trial_ends_at` — обычная колонка в БД, поэтому
+  /// отсчёт корректен даже если игрок всё это время не заходил в
+  /// приложение: тикает локально только отображение, а не сам дедлайн.
+  Duration? get trialTimeLeft {
     final ends = trialEndsAt;
-    if (ends == null) return 0;
-    final left = ends.difference(DateTime.now().toUtc()).inSeconds;
-    if (left <= 0) return 0;
-    return (left / 86400).ceil();
+    if (ends == null) return null;
+    final left = ends.difference(DateTime.now().toUtc());
+    return left.isNegative ? null : left;
   }
 }
 

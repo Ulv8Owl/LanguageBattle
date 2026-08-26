@@ -6,6 +6,7 @@ import '../../core/nav_state.dart';
 import '../../core/supabase_client.dart';
 import '../../core/theme.dart';
 import '../../widgets/chrolingo_widgets.dart';
+import '../../widgets/trial_countdown_banner.dart';
 
 /// Магазин — РОВНО два раздела (задача 5 итерации):
 /// «Подписка» (карточка тарифа, оформление — заглушка без платёжного шлюза)
@@ -177,13 +178,12 @@ class _ShopScreenState extends State<ShopScreen> {
           : 'Действует до ${dateFormat.format(_wallet.expiresAt!.toLocal())}';
       buttonLabel = 'Продлить';
     } else if (trial) {
-      final days = _wallet.trialDaysLeft;
-      headline = 'Пробный период: осталось $days ${_pluralDays(days)}';
-      subline = 'После окончания все три режима закроются до оформления подписки.';
+      headline = 'Пробный период';
+      subline = null;
       buttonLabel = 'Оформить';
     } else {
       headline = 'Пробный период закончился';
-      subline = 'Оформи подписку, чтобы снова играть во всех трёх режимах.';
+      subline = 'Оформи подписку, чтобы снова играть в режимах с ИИ.';
       buttonLabel = 'Оформить';
     }
 
@@ -204,6 +204,10 @@ class _ShopScreenState extends State<ShopScreen> {
                 const SizedBox(height: 6),
                 Text(subline, style: const TextStyle(color: AppColors.muted, fontSize: 12, height: 1.45)),
               ],
+              if (trial && _wallet.trialEndsAt != null) ...[
+                const SizedBox(height: 12),
+                TrialCountdownBanner(trialEndsAt: _wallet.trialEndsAt!),
+              ],
               const SizedBox(height: 14),
               Row(
                 crossAxisAlignment: CrossAxisAlignment.baseline,
@@ -215,8 +219,6 @@ class _ShopScreenState extends State<ShopScreen> {
                 ],
               ),
               const SizedBox(height: 14),
-              const _Perk('Все три режима: Одиночная Игра, Состязание, Дуэль'),
-              const SizedBox(height: 7),
               const _Perk('Косметика с меткой «★ Подписка»'),
               const SizedBox(height: 7),
               const _Perk('Подписочная ветка наград Battle Pass'),
@@ -238,6 +240,43 @@ class _ShopScreenState extends State<ShopScreen> {
           ),
         ),
         const SizedBox(height: 12),
+        ChPanel(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  const Icon(Icons.lock_outline, size: 14, color: AppColors.danger),
+                  const SizedBox(width: 6),
+                  Text('БЕЗ ПОДПИСКИ ЗАКРЫВАЮТСЯ',
+                      style: AppFonts.mono(fontSize: 9, weight: FontWeight.w700, color: AppColors.danger)),
+                ],
+              ),
+              const SizedBox(height: 6),
+              const Text(
+                'Одиночная Игра, Состязание и Дуэль — режимы с подключённым ИИ.',
+                style: TextStyle(color: AppColors.cream, fontSize: 12, height: 1.4),
+              ),
+              const SizedBox(height: 10),
+              Row(
+                children: [
+                  const Icon(Icons.check_circle_outline, size: 14, color: AppColors.ok),
+                  const SizedBox(width: 6),
+                  Text('ОСТАЁТСЯ ДОСТУПНА',
+                      style: AppFonts.mono(fontSize: 9, weight: FontWeight.w700, color: AppColors.ok)),
+                ],
+              ),
+              const SizedBox(height: 6),
+              const Text(
+                'Тренировка (карточки со словами) — она не использует ИИ и '
+                'играется всегда, с подпиской или без.',
+                style: TextStyle(color: AppColors.cream, fontSize: 12, height: 1.4),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 12),
         Text(
           'Энергия к подписке не привязана: лимит попыток в Одиночной Игре '
           'действует всегда и восстанавливается со временем.',
@@ -245,14 +284,6 @@ class _ShopScreenState extends State<ShopScreen> {
         ),
       ],
     );
-  }
-
-  static String _pluralDays(int n) {
-    final mod10 = n % 10;
-    final mod100 = n % 100;
-    if (mod10 == 1 && mod100 != 11) return 'день';
-    if (mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)) return 'дня';
-    return 'дней';
   }
 
   // -------------------------------------------------------------------

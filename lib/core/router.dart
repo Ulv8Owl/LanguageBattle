@@ -6,9 +6,11 @@ import '../features/auth/signup_screen.dart';
 import '../features/auth/splash_gate.dart';
 import '../features/battle/battle_results_screen.dart';
 import '../features/battle/battle_screen.dart';
+import '../features/flashcards/flashcards_screen.dart';
 import '../features/matchmaking/matchmaking_screen.dart';
 import '../features/onboarding/onboarding_screen.dart';
 import '../features/profile/avatar_editor_screen.dart';
+import '../features/profile/language_pair_screen.dart';
 import '../features/profile/settings_screen.dart';
 import '../features/training/training_screen.dart';
 
@@ -35,8 +37,16 @@ final GoRouter appRouter = GoRouter(
       builder: (context, state) => const AvatarEditorScreen(),
     ),
     GoRoute(
+      path: '/language-pair',
+      builder: (context, state) => const LanguagePairScreen(),
+    ),
+    GoRoute(
       path: '/training',
       builder: (context, state) => const TrainingScreen(),
+    ),
+    GoRoute(
+      path: '/flashcards',
+      builder: (context, state) => const FlashcardsScreen(),
     ),
     GoRoute(
       path: '/matchmaking/:mode',

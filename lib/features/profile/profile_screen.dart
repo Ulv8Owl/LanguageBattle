@@ -1,10 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../core/game_access.dart';
 import '../../core/leagues.dart';
 import '../../core/supabase_client.dart';
 import '../../core/theme.dart';
 import '../../widgets/chrolingo_widgets.dart';
+import '../../widgets/trial_countdown_banner.dart';
 
 const _languageFlags = {'en': '🇬🇧', 'es': '🇪🇸', 'ru': '🇷🇺'};
 
@@ -18,6 +20,7 @@ class ProfileScreen extends StatefulWidget {
 class _ProfileScreenState extends State<ProfileScreen> {
   Map<String, dynamic>? _profile;
   Map<String, dynamic>? _learning;
+  WalletState _wallet = WalletState.empty;
   int _played = 0;
   int _winPct = 0;
   int _streak = 0;
@@ -62,11 +65,16 @@ class _ProfileScreenState extends State<ProfileScreen> {
           .from('user_inventory')
           .select('item_id, cosmetic_items(*)')
           .eq('user_id', uid);
+      // sync_wallet заодно отдаёт актуальный статус подписки — нужен для
+      // плашки пробного периода (задача итерации, п.5: плашка переехала
+      // сюда из Арены).
+      final wallet = await GameAccess.sync();
 
       if (!mounted) return;
       setState(() {
         _profile = profile;
         _learning = learning;
+        _wallet = wallet;
         _played = played;
         _winPct = played == 0 ? 0 : ((wins / played) * 100).round();
         _streak = streak;
@@ -134,6 +142,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
               ),
             ],
           ),
+          if (_wallet.isTrial && _wallet.trialEndsAt != null) ...[
+            const SizedBox(height: 16),
+            TrialCountdownBanner(trialEndsAt: _wallet.trialEndsAt!),
+          ],
           const SizedBox(height: 16),
           Row(
             children: [
@@ -147,11 +159,25 @@ class _ProfileScreenState extends State<ProfileScreen> {
           const SizedBox(height: 18),
           Text('ЯЗЫКОВАЯ ПАРА', style: AppFonts.mono(fontSize: 9, weight: FontWeight.w700, color: AppColors.gold)),
           const SizedBox(height: 8),
-          ChPanel(
-            padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 9),
-            child: Text(
-              '${_languageFlags[native] ?? '🏳'} → ${_languageFlags[target] ?? '🏳'}',
-              style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+          InkWell(
+            borderRadius: BorderRadius.circular(14),
+            onTap: () async {
+              await context.push('/language-pair');
+              if (mounted) _load();
+            },
+            child: ChPanel(
+              padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 9),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      '${_languageFlags[native] ?? '🏳'} → ${_languageFlags[target] ?? '🏳'}',
+                      style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+                    ),
+                  ),
+                  const Icon(Icons.chevron_right, size: 18, color: AppColors.muted),
+                ],
+              ),
             ),
           ),
           const SizedBox(height: 18),
