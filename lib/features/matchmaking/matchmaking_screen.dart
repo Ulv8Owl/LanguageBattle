@@ -6,6 +6,7 @@ import 'package:go_router/go_router.dart';
 import '../../core/game_access.dart';
 import '../../core/supabase_client.dart';
 import '../../core/theme.dart';
+import '../battle/battle_models.dart';
 import '../../widgets/chrolingo_widgets.dart';
 
 enum _Phase { searching, found, notFound, failed }
@@ -86,6 +87,7 @@ class _MatchmakingScreenState extends State<MatchmakingScreen> {
           .select('language_code')
           .eq('user_id', currentUserId)
           .eq('role', 'learning')
+          .eq('is_active', true)
           .limit(1)
           .maybeSingle();
 
@@ -196,10 +198,9 @@ class _MatchmakingScreenState extends State<MatchmakingScreen> {
     _matchId = matchId;
 
     try {
-      final match = await supabase.from('matches').select().eq('id', matchId).single();
-      final opponentId = match['player_a_id'] == currentUserId
-          ? match['player_b_id'] as String?
-          : match['player_a_id'] as String?;
+      final matchRow = await supabase.from('matches').select().eq('id', matchId).single();
+      final match = MatchData.fromRow(matchRow);
+      final opponentId = match.playerAId == currentUserId ? match.playerBId : match.playerAId;
       if (opponentId != null) {
         final opp = await supabase
             .from('users')
@@ -207,11 +208,17 @@ class _MatchmakingScreenState extends State<MatchmakingScreen> {
             .eq('id', opponentId)
             .maybeSingle();
         _opponentName = (opp?['username'] as String?) ?? 'Соперник';
+        // ELO соперника ИМЕННО для языка этого матча — у игрока может быть
+        // до 4 языковых пар с разным рейтингом, а нас интересует не то,
+        // что у него сейчас "активно", а тот конкретный язык, на котором
+        // будет идти бой.
+        final targetLanguage = match.languageForSlot(opponentId, 'target');
         final oppLang = await supabase
             .from('user_languages')
             .select('elo')
             .eq('user_id', opponentId)
             .eq('role', 'learning')
+            .eq('language_code', targetLanguage)
             .limit(1)
             .maybeSingle();
         _opponentElo = (oppLang?['elo'] as int?) ?? 1000;

@@ -52,6 +52,7 @@ class _FlashcardsScreenState extends State<FlashcardsScreen> {
           .select('language_code')
           .eq('user_id', uid)
           .eq('role', 'learning')
+          .eq('is_active', true)
           .limit(1)
           .maybeSingle();
       final native = profile?['native_language'] as String?;

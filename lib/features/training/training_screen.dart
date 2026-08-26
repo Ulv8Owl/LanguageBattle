@@ -100,6 +100,7 @@ class _TrainingScreenState extends State<TrainingScreen> {
           .select('language_code')
           .eq('user_id', _myId)
           .eq('role', 'learning')
+          .eq('is_active', true)
           .limit(1)
           .maybeSingle();
       _targetLanguage = (learning?['language_code'] as String?) ?? 'en';

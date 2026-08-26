@@ -66,6 +66,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
           'cefr_level': 'A1',
           'elo': 1000,
           'league': 'bronze',
+          'is_active': true,
         },
       ]);
 

@@ -3,12 +3,20 @@ import 'package:go_router/go_router.dart';
 
 import '../../core/game_access.dart';
 import '../../core/leagues.dart';
+import '../../core/nav_state.dart';
 import '../../core/supabase_client.dart';
 import '../../core/theme.dart';
 import '../../widgets/chrolingo_widgets.dart';
 import '../../widgets/trial_countdown_banner.dart';
 
 const _languageFlags = {'en': '🇬🇧', 'es': '🇪🇸', 'ru': '🇷🇺'};
+
+/// Максимум языковых пар на аккаунт (задача итерации). С сегодняшними
+/// тремя поддерживаемыми языками (en/es/ru) реально достижимо не больше
+/// 2 пар одновременно — родной язык занимает один слот, а третий язык
+/// пока просто не существует. Ограничение честно фиксируется здесь и
+/// проверяется на сервере (`add_language_pair`), а не только в UI.
+const kMaxLanguagePairs = 4;
 
 class ProfileScreen extends StatefulWidget {
   const ProfileScreen({super.key});
@@ -19,13 +27,18 @@ class ProfileScreen extends StatefulWidget {
 
 class _ProfileScreenState extends State<ProfileScreen> {
   Map<String, dynamic>? _profile;
-  Map<String, dynamic>? _learning;
+
+  /// Все изучаемые языки аккаунта (до kMaxLanguagePairs), каждый со своим
+  /// ELO. Ровно один помечен is_active — он используется везде в
+  /// приложении (Арена, бой, матчмейкинг, Тренировка).
+  List<Map<String, dynamic>> _pairs = [];
   WalletState _wallet = WalletState.empty;
   int _played = 0;
   int _winPct = 0;
   int _streak = 0;
   List<Map<String, dynamic>> _inventory = [];
   bool _loading = true;
+  bool _switchingPair = false;
 
   @override
   void initState() {
@@ -38,13 +51,12 @@ class _ProfileScreenState extends State<ProfileScreen> {
     final uid = currentUserId;
     try {
       final profile = await supabase.from('users').select().eq('id', uid).maybeSingle();
-      final learning = await supabase
+      final pairs = await supabase
           .from('user_languages')
           .select()
           .eq('user_id', uid)
           .eq('role', 'learning')
-          .limit(1)
-          .maybeSingle();
+          .order('language_code');
       final asA = await supabase.from('matches').select().eq('player_a_id', uid).eq('status', 'completed');
       final asB = await supabase.from('matches').select().eq('player_b_id', uid).eq('status', 'completed');
       final all = [...asA, ...asB]
@@ -73,7 +85,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
       if (!mounted) return;
       setState(() {
         _profile = profile;
-        _learning = learning;
+        _pairs = List<Map<String, dynamic>>.from(pairs);
         _wallet = wallet;
         _played = played;
         _winPct = played == 0 ? 0 : ((wins / played) * 100).round();
@@ -86,14 +98,38 @@ class _ProfileScreenState extends State<ProfileScreen> {
     }
   }
 
+  /// Переключает активную пару. Рейтинг НЕ трогается ни у старой, ни у
+  /// новой пары — это просто смена того, какая строка сейчас "активна"
+  /// (задача итерации: "рейтинг НЕ обнуляется, а записывается для новой
+  /// пары... выбрав старую пару рейтинг опять отображается").
+  Future<void> _selectPair(String targetLanguage) async {
+    setState(() => _switchingPair = true);
+    try {
+      await supabase.rpc('set_active_language_pair', params: {'p_target_language': targetLanguage});
+      notifyLanguagePairChanged();
+      await _load();
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Не удалось переключить пару: $e')),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _switchingPair = false);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     if (_loading) return const Center(child: CircularProgressIndicator());
 
     final username = (_profile?['username'] as String?) ?? 'Игрок';
     final native = (_profile?['native_language'] as String?) ?? '?';
-    final target = (_learning?['language_code'] as String?) ?? '?';
-    final elo = (_learning?['elo'] as int?) ?? 1000;
+    final activePair = _pairs.cast<Map<String, dynamic>?>().firstWhere(
+          (p) => p?['is_active'] == true,
+          orElse: () => null,
+        );
+    final elo = (activePair?['elo'] as int?) ?? 1000;
     final league = leagueFor(elo);
 
     return RefreshIndicator(
@@ -157,25 +193,32 @@ class _ProfileScreenState extends State<ProfileScreen> {
             ],
           ),
           const SizedBox(height: 18),
-          Text('ЯЗЫКОВАЯ ПАРА', style: AppFonts.mono(fontSize: 9, weight: FontWeight.w700, color: AppColors.gold)),
+          Text('ЯЗЫКОВЫЕ ПАРЫ', style: AppFonts.mono(fontSize: 9, weight: FontWeight.w700, color: AppColors.gold)),
           const SizedBox(height: 8),
-          InkWell(
-            borderRadius: BorderRadius.circular(14),
-            onTap: () async {
-              await context.push('/language-pair');
-              if (mounted) _load();
-            },
-            child: ChPanel(
-              padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 9),
-              child: Row(
+          Opacity(
+            opacity: _switchingPair ? 0.5 : 1,
+            child: IgnorePointer(
+              ignoring: _switchingPair,
+              child: Wrap(
+                spacing: 8,
+                runSpacing: 8,
                 children: [
-                  Expanded(
-                    child: Text(
-                      '${_languageFlags[native] ?? '🏳'} → ${_languageFlags[target] ?? '🏳'}',
-                      style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+                  for (final pair in _pairs)
+                    _LanguagePairChip(
+                      nativeFlag: _languageFlags[native] ?? '🏳',
+                      targetFlag: _languageFlags[pair['language_code'] as String?] ?? '🏳',
+                      active: pair['is_active'] == true,
+                      onTap: pair['is_active'] == true
+                          ? null
+                          : () => _selectPair(pair['language_code'] as String),
                     ),
-                  ),
-                  const Icon(Icons.chevron_right, size: 18, color: AppColors.muted),
+                  if (_pairs.length < kMaxLanguagePairs)
+                    _AddPairChip(
+                      onTap: () async {
+                        await context.push('/language-pair');
+                        if (mounted) _load();
+                      },
+                    ),
                 ],
               ),
             ),
@@ -219,6 +262,65 @@ class _ProfileScreenState extends State<ProfileScreen> {
               }).toList(),
             ),
         ],
+      ),
+    );
+  }
+}
+
+/// Плашка языковой пары — размером под сами флаги, не растянута на всю
+/// ширину (задача итерации: "не была сильно длиннее чем сам текст").
+/// Активная пара подсвечена золотом.
+class _LanguagePairChip extends StatelessWidget {
+  final String nativeFlag;
+  final String targetFlag;
+  final bool active;
+  final VoidCallback? onTap;
+
+  const _LanguagePairChip({
+    required this.nativeFlag,
+    required this.targetFlag,
+    required this.active,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      borderRadius: BorderRadius.circular(12),
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
+        decoration: BoxDecoration(
+          color: active ? AppColors.goldSoft : AppColors.navy3,
+          border: Border.all(color: active ? AppColors.gold : AppColors.line, width: active ? 1.5 : 1),
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: Text('$nativeFlag → $targetFlag', style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
+      ),
+    );
+  }
+}
+
+/// Плашка «+» той же формы и размера, что и обычная пара — появляется
+/// справа от последней, пока пар меньше kMaxLanguagePairs.
+class _AddPairChip extends StatelessWidget {
+  final VoidCallback onTap;
+
+  const _AddPairChip({required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      borderRadius: BorderRadius.circular(12),
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
+        decoration: BoxDecoration(
+          color: AppColors.navy3,
+          border: Border.all(color: AppColors.lineStrong, style: BorderStyle.solid),
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: const Icon(Icons.add, size: 16, color: AppColors.muted),
       ),
     );
   }

@@ -61,6 +61,7 @@ class _ArenaScreenState extends State<ArenaScreen> {
           .select('elo')
           .eq('user_id', uid)
           .eq('role', 'learning')
+          .eq('is_active', true)
           .limit(1)
           .maybeSingle();
       final asPlayerA = await supabase

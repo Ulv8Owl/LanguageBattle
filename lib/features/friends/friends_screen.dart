@@ -39,7 +39,8 @@ Future<Map<String, PlayerRef>> loadPlayers(Iterable<String> ids) async {
       .from('user_languages')
       .select('user_id, elo')
       .inFilter('user_id', list)
-      .eq('role', 'learning');
+      .eq('role', 'learning')
+      .eq('is_active', true);
   final eloById = <String, int>{
     for (final row in langs) row['user_id'] as String: (row['elo'] as int?) ?? 1000,
   };
@@ -483,6 +484,7 @@ class _LeaderboardTabState extends State<_LeaderboardTab> {
           .from('user_languages')
           .select('elo, users(id, username, native_language)')
           .eq('role', 'learning')
+          .eq('is_active', true)
           .order('elo', ascending: false)
           .limit(50);
       final players = <PlayerRef>[];
