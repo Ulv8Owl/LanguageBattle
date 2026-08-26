@@ -68,6 +68,14 @@ class _LoginScreenState extends State<LoginScreen> {
                   mainAxisSize: MainAxisSize.min,
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
+                    Image.asset(
+                      'assets/branding/chameleon.png',
+                      height: 150,
+                      // Пиксель-арт: без сглаживания при масштабировании,
+                      // иначе Flutter размоет хамелеона билинейным фильтром.
+                      filterQuality: FilterQuality.none,
+                    ),
+                    const SizedBox(height: 12),
                     const Text(
                       'CHROLINGO',
                       textAlign: TextAlign.center,
