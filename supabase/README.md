@@ -192,13 +192,17 @@ Editor. Чтобы проверить сквозной путь «два реа�
    ```
 2. **Секреты самой функции** (не попадают в git, хранятся в Supabase):
    ```
-   npx supabase secrets set LLM_API_KEY=<ваш DeepSeek API key>
-   npx supabase secrets set LLM_BASE_URL=https://api.deepseek.com/v1
-   npx supabase secrets set LLM_MODEL=deepseek-chat
+   npx supabase secrets set LLM_API_KEY=<ваш API key>
+   npx supabase secrets set LLM_BASE_URL=https://api.b.ai/v1
+   npx supabase secrets set LLM_MODEL=DeepSeek-V4-Flash
    ```
-   (`LLM_BASE_URL`/`LLM_MODEL` можно не задавать — это и есть значения по
-   умолчанию; меняете их, когда захотите перейти на другого провайдера
-   из раздела 9.2, без единой правки кода.)
+   Важно: `LLM_BASE_URL` — это база БЕЗ `/chat/completions` в конце, код
+   сам дописывает этот путь при вызове (`${baseUrl}/chat/completions`).
+
+   (`LLM_BASE_URL`/`LLM_MODEL` можно не задавать — текущие значения по
+   умолчанию в коде это как раз api.b.ai/DeepSeek-V4-Flash; меняете их,
+   когда захотите перейти на другого провайдера из раздела 9.2, без
+   единой правки кода.)
 3. **Секреты для триггера БД** (URL функции + service_role key — их
    отдельно кладём в Supabase Vault через SQL Editor, чтобы они не попали
    в этот репозиторий):

@@ -117,9 +117,9 @@ async function callLlmOnce(
   nativeLanguage: string,
   detailed: boolean,
 ): Promise<unknown> {
-  const baseUrl = Deno.env.get("LLM_BASE_URL") ?? "https://api.deepseek.com/v1";
+  const baseUrl = Deno.env.get("LLM_BASE_URL") ?? "https://api.b.ai/v1";
   const apiKey = Deno.env.get("LLM_API_KEY");
-  const model = Deno.env.get("LLM_MODEL") ?? "deepseek-chat";
+  const model = Deno.env.get("LLM_MODEL") ?? "DeepSeek-V4-Flash";
 
   if (!apiKey) {
     throw new Error("LLM_API_KEY is not configured");
