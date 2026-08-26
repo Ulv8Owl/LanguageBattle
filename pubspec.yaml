@@ -59,16 +59,25 @@ dev_dependencies:
   flutter_lints: ^6.0.0
   flutter_launcher_icons: ^0.14.3
 
-# Иконка нарочно БЕЗ adaptive_icon_background/foreground и БЕЗ скругления
-# углов на обеих платформах — по прямой просьбе автора: и Android, и iOS
-# сами скругляют углы иконки на уровне ОС/лаунчера, добавлять это здесь
-# значило бы дублировать (и местами конфликтовать с) системную маску.
+# Ни на одной платформе мы сами не скругляем углы — по прямой просьбе
+# автора: и Android, и iOS сами скругляют/маскируют иконку на уровне ОС.
+#
+# На Android легаси-квадрат (image_path_android) рисунок занимает почти
+# весь холст (лег в 100x100 без полей). Это нормально для API<26, где
+# маски нет вообще — но на API26+ система оборачивает иконку в adaptive
+# icon и обрезает всё, что выходит за safe zone (круг диаметром ~61% от
+# холста). Полноразмерный рисунок в safe zone не помещается, поэтому
+# часть хамелеона обрезалась маской ("часть пикселей не видно").
+# Исправлено через отдельный adaptive_icon_foreground: тот же рисунок,
+# но с прозрачными полями вокруг, так что контент занимает ~48x54% холста
+# — с запасом внутри safe zone, обрежется он в круг/квадрат/сквиркл или
+# как угодно ещё, ни один пиксель хамелеона не потеряется.
 #
 # Источники (assets/icon/icon_*.png) — чистый NEAREST-апскейл пиксель-арт
 # оригинала без какого-либо сглаживания. Но этот пакет сам ресайзит их до
 # мелких итоговых размеров сглаживающим фильтром, что размывает пиксель-
 # арт — поэтому после генерации итоговые файлы в
-# android/.../mipmap-*/ic_launcher.png и ios/.../AppIcon.appiconset
+# android/.../mipmap-*/ic_launcher*.png и ios/.../AppIcon.appiconset
 # ПЕРЕСЧИТЫВАЮТСЯ НАПРЯМУЮ из пиксель-арт оригинала через NEAREST отдельным
 # скриптом, а не берутся из вывода этого пакета как есть.
 flutter_launcher_icons:
@@ -77,6 +86,8 @@ flutter_launcher_icons:
   remove_alpha_ios: true
   image_path_ios: "assets/icon/icon_ios.png"
   image_path_android: "assets/icon/icon_android.png"
+  adaptive_icon_background: "#000000"
+  adaptive_icon_foreground: "assets/icon/icon_android_foreground.png"
 
 # For information on the generic Dart part of this file, see the
 # following page: https://dart.dev/tools/pub/pubspec
