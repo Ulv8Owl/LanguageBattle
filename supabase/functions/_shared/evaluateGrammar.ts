@@ -55,8 +55,60 @@ const DETAILED_MESSAGE_INSTRUCTION =
 понятным, чтобы неноситель языка A1-B2 смог исправить ошибку во второй попытке, не просто скопировав
 исправление.`;
 
-function buildSystemPrompt(detailed: boolean): string {
-  return `${BASE_SYSTEM_PROMPT}\n${detailed ? DETAILED_MESSAGE_INSTRUCTION : BRIEF_MESSAGE_INSTRUCTION}`;
+export type CefrLevel = "A1" | "A2" | "B1" | "B2" | "C1" | "C2";
+
+/**
+ * Уровень игрока — внутренняя механика, приравненная к его лиге (Медная
+ * Лига -> A1 ... Лига Мастеров -> C2, см. supabase/migrations/0010 и
+ * lib/core/leagues.dart). НИГДЕ в интерфейсе не показывается — это только
+ * ограничитель сложности ТЕКСТА ОБЪЯСНЕНИЙ (message/replacement), чтобы
+ * говорящий действительно мог его понять/перевести своими силами. Сам балл
+ * (score) от уровня не зависит и считается по одной и той же шкале для всех
+ * — см. явное напоминание в конце каждого блока ниже.
+ */
+const LEVEL_INSTRUCTIONS: Record<CefrLevel, string> = {
+  A1: `Уровень говорящего — A1 (полный новичок, знает от силы 500-1000 слов).
+Объясняй ошибку предельно простыми словами и очень короткими предложениями.
+Не используй грамматические термины сложнее "глагол"/"существительное"/
+"окончание"/"порядок слов". Опирайся только на глагол to be, Present Simple,
+Past Simple, Future Simple, единственное/множественное число — не объясняй
+через более сложные времена или конструкции, даже если ошибка на самом деле
+сложнее: сведи объяснение к тому, что говорящий способен понять и перевести
+уже сейчас.`,
+  A2: `Уровень говорящего — A2. Он уже знает to be, Present/Past/Future Simple,
+неправильные глаголы, be going to, WH-questions, предлоги in/on/at. Объясняй
+просто и короткими фразами, этими терминами пользоваться можно, но не
+опирайся на Present Perfect, Passive Voice, условные предложения, герундий/
+инфинитив — для него это ещё не пройдено.`,
+  B1: `Уровень говорящего — B1. Он знает порядок слов, модальные have to/must,
+условные предложения 0/1/2, инфинитив и герундий, Present Continuous, Past
+Continuous, Future Simple, Present Perfect. Объяснение может быть чуть
+подробнее и свободно ссылаться на эти темы, но не на Passive Voice,
+смешанные условные или инверсию — этого он ещё не проходил.`,
+  B2: `Уровень говорящего — B2. Он знает Passive Voice, все формы будущего,
+Present Perfect и Present Perfect Continuous, сравнительные/превосходные
+степени, модальные глаголы, герундий/инфинитив, условные предложения,
+фразовые глаголы. Объясняй развёрнуто, этой терминологией и примерами
+пользоваться можно свободно.`,
+  C1: `Уровень говорящего — C1. Он свободно ориентируется в повествовательных
+временах, used to/would, стилистической инверсии, инверсии в условных
+предложениях, каузативных конструкциях. Объяснение может быть подробным и
+использовать точную грамматическую терминологию, не упрощай ради упрощения.`,
+  C2: `Уровень говорящего — C2, практически как у носителя языка. Объясняй
+так же тонко и подробно, как для продвинутого лингвиста или преподавателя:
+можно свободно использовать любую грамматическую терминологию, идиомы и
+стилистические нюансы.`,
+};
+
+const LEVEL_SCORE_REMINDER =
+  `Уровень выше касается ТОЛЬКО того, какими словами и терминами ты объясняешь
+ошибку (message/replacement) — сам балл (score) по-прежнему выставляй
+объективно по единой шкале для всех уровней, не занижай и не завышай его
+из-за уровня говорящего.`;
+
+function buildSystemPrompt(detailed: boolean, level: CefrLevel): string {
+  const levelBlock = `${LEVEL_INSTRUCTIONS[level]}\n${LEVEL_SCORE_REMINDER}`;
+  return `${BASE_SYSTEM_PROMPT}\n${levelBlock}\n${detailed ? DETAILED_MESSAGE_INSTRUCTION : BRIEF_MESSAGE_INSTRUCTION}`;
 }
 
 function buildUserPrompt(transcript: string, targetLanguage: string, nativeLanguage: string): string {
@@ -116,6 +168,7 @@ async function callLlmOnce(
   targetLanguage: string,
   nativeLanguage: string,
   detailed: boolean,
+  level: CefrLevel,
 ): Promise<unknown> {
   const baseUrl = Deno.env.get("LLM_BASE_URL") ?? "https://api.b.ai/v1";
   const apiKey = Deno.env.get("LLM_API_KEY");
@@ -134,7 +187,7 @@ async function callLlmOnce(
     body: JSON.stringify({
       model,
       messages: [
-        { role: "system", content: buildSystemPrompt(detailed) },
+        { role: "system", content: buildSystemPrompt(detailed, level) },
         { role: "user", content: buildUserPrompt(transcript, targetLanguage, nativeLanguage) },
       ],
       // Structured output там, где провайдер это поддерживает (раздел 9.3).
@@ -174,10 +227,16 @@ export async function evaluateGrammar(
    * только глубина текста в message у найденных ошибок.
    */
   detailed = false,
+  /**
+   * Уровень говорящего (его лига, приравненная к CEFR — см.
+   * supabase/migrations/0010). Ограничивает только сложность ТЕКСТА
+   * объяснений, не саму строгость оценки — см. LEVEL_SCORE_REMINDER.
+   */
+  level: CefrLevel = "A1",
 ): Promise<EvaluateGrammarResult> {
   for (let attempt = 0; attempt < 2; attempt++) {
     try {
-      const parsed = validate(await callLlmOnce(transcript, targetLanguage, nativeLanguage, detailed));
+      const parsed = validate(await callLlmOnce(transcript, targetLanguage, nativeLanguage, detailed, level));
       if (parsed) {
         return { score: parsed.score, errors: parsed.errors, degraded: false };
       }

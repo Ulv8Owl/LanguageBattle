@@ -2,15 +2,18 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
 import '../../core/game_access.dart';
+import '../../core/leagues.dart';
 import '../../core/nav_state.dart';
 import '../../core/supabase_client.dart';
 import '../../core/theme.dart';
+import '../../core/word_packs.dart';
 import '../../widgets/chrolingo_widgets.dart';
 import '../../widgets/trial_countdown_banner.dart';
 
-/// Магазин — РОВНО два раздела (задача 5 итерации):
-/// «Подписка» (карточка тарифа, оформление — заглушка без платёжного шлюза)
-/// и «Предметы» (сетка косметики 3×4 со скроллом и фильтром по категориям).
+/// Магазин — три раздела: «Подписка» (карточка тарифа, оформление —
+/// заглушка без платёжного шлюза), «Предметы» (сетка косметики 3×4 со
+/// скроллом и фильтром по категориям) и «Наборы слов» (паки по 100 слов
+/// для Тренировки, по 10 на лигу — открываются по мере роста рейтинга).
 class ShopScreen extends StatefulWidget {
   const ShopScreen({super.key});
 
@@ -25,8 +28,10 @@ class _ShopScreenState extends State<ShopScreen> {
   WalletState _wallet = WalletState.empty;
   List<Map<String, dynamic>> _items = [];
   Set<String> _owned = {};
+  List<WordPackInfo> _wordPacks = [];
   bool _loading = true;
   bool _activating = false;
+  int? _buyingWordPack;
 
   /// Фильтр по категориям: Рамки / Эмоции / Аватар.
   static const _categories = ['Рамки', 'Эмоции', 'Аватар'];
@@ -57,11 +62,13 @@ class _ShopScreenState extends State<ShopScreen> {
       final wallet = await GameAccess.sync();
       final items = await supabase.from('cosmetic_items').select().order('type').order('price_soft');
       final inventory = await supabase.from('user_inventory').select('item_id').eq('user_id', currentUserId);
+      final wordPacks = await WordPackCatalog.fetch();
       if (!mounted) return;
       setState(() {
         _wallet = wallet;
         _items = List<Map<String, dynamic>>.from(items);
         _owned = inventory.map((r) => r['item_id'] as String).toSet();
+        _wordPacks = wordPacks;
         _loading = false;
       });
     } catch (e) {
@@ -109,6 +116,27 @@ class _ShopScreenState extends State<ShopScreen> {
     }
   }
 
+  Future<void> _buyWordPack(WordPackInfo pack) async {
+    final key = pack.levelIndex * 10 + pack.packIndex;
+    setState(() => _buyingWordPack = key);
+    try {
+      await WordPackCatalog.purchase(pack.levelIndex, pack.packIndex);
+      notifyWordPacksChanged();
+      await _load();
+      _toast('Куплено: слова ${pack.rangeLabel}');
+    } catch (e) {
+      if (ServerErrors.isInsufficientFunds(e)) {
+        _toast('Не хватает монет');
+      } else if (ServerErrors.isLeagueLocked(e)) {
+        _toast('Сначала поднимись до этой лиги');
+      } else {
+        _toast('Не удалось купить: $e');
+      }
+    } finally {
+      if (mounted) setState(() => _buyingWordPack = null);
+    }
+  }
+
   Future<void> _equip(Map<String, dynamic> item) async {
     try {
       await supabase.rpc('equip_item', params: {'p_item_id': item['id']});
@@ -144,13 +172,17 @@ class _ShopScreenState extends State<ShopScreen> {
           ),
           const SizedBox(height: 14),
           ChTabBar(
-            tabs: const ['Подписка', 'Предметы'],
+            tabs: const ['Подписка', 'Предметы', 'Слова'],
             selected: _section,
             onChanged: (i) => setState(() => _section = i),
           ),
           const SizedBox(height: 14),
           Expanded(
-            child: _section == ShopSections.subscription ? _buildSubscription() : _buildItems(),
+            child: switch (_section) {
+              ShopSections.subscription => _buildSubscription(),
+              ShopSections.items => _buildItems(),
+              _ => _buildWordPacks(),
+            },
           ),
         ],
       ),
@@ -287,6 +319,46 @@ class _ShopScreenState extends State<ShopScreen> {
   }
 
   // -------------------------------------------------------------------
+  // Раздел «Наборы слов» — 6 лиг × 10 паков по 100 слов для Тренировки.
+  // -------------------------------------------------------------------
+
+  Widget _buildWordPacks() {
+    return ListView.builder(
+      itemCount: leagueBands.length,
+      itemBuilder: (context, levelIndex) {
+        final league = leagueBands[levelIndex];
+        final packs = _wordPacks.where((p) => p.levelIndex == levelIndex).toList()
+          ..sort((a, b) => a.packIndex.compareTo(b.packIndex));
+        return Padding(
+          padding: const EdgeInsets.only(bottom: 18),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Icon(Icons.emoji_events, size: 14, color: league.color),
+                  const SizedBox(width: 6),
+                  Text(league.shortName, style: AppFonts.ui(fontSize: 13, weight: FontWeight.w800, color: league.color)),
+                ],
+              ),
+              const SizedBox(height: 8),
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: packs.map((p) => _WordPackTile(
+                  pack: p,
+                  busy: _buyingWordPack == levelIndex * 10 + p.packIndex,
+                  onTap: p.owned ? null : () => _buyWordPack(p),
+                )).toList(),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  // -------------------------------------------------------------------
   // Раздел «Предметы»
   // -------------------------------------------------------------------
 
@@ -369,6 +441,59 @@ class _ShopScreenState extends State<ShopScreen> {
       default:
         return Icons.circle_outlined;
     }
+  }
+}
+
+class _WordPackTile extends StatelessWidget {
+  final WordPackInfo pack;
+  final bool busy;
+  final VoidCallback? onTap;
+
+  const _WordPackTile({required this.pack, required this.busy, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    final locked = pack.leagueLocked;
+    Widget trailing;
+    if (busy) {
+      trailing = const SizedBox(height: 12, width: 12, child: CircularProgressIndicator(strokeWidth: 2));
+    } else if (pack.owned) {
+      trailing = const Icon(Icons.check_circle, size: 14, color: AppColors.ok);
+    } else if (locked) {
+      trailing = const Icon(Icons.lock_outline, size: 14, color: AppColors.muted);
+    } else {
+      trailing = ChPill(
+        icon: const Icon(Icons.circle, size: 9, color: AppColors.gold),
+        label: '${pack.price}',
+      );
+    }
+
+    return InkWell(
+      onTap: locked || pack.owned || busy ? null : onTap,
+      borderRadius: BorderRadius.circular(10),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+        decoration: BoxDecoration(
+          border: Border.all(color: pack.owned ? AppColors.ok : AppColors.line),
+          borderRadius: BorderRadius.circular(10),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              pack.rangeLabel,
+              style: AppFonts.mono(
+                fontSize: 11,
+                weight: FontWeight.w700,
+                color: locked ? AppColors.muted : AppColors.cream,
+              ),
+            ),
+            const SizedBox(width: 8),
+            trailing,
+          ],
+        ),
+      ),
+    );
   }
 }
 

@@ -14,7 +14,22 @@
 // deferred_suggestions.md, не добавлять их сюда без отдельного запроса.
 
 import { createClient } from "jsr:@supabase/supabase-js@2";
-import { evaluateGrammar } from "../_shared/evaluateGrammar.ts";
+import { type CefrLevel, evaluateGrammar } from "../_shared/evaluateGrammar.ts";
+
+/**
+ * Лига говорящего приравнена к уровню CEFR (см. supabase/migrations/0010 —
+ * те же границы ELO, что и league_index_for_elo/cefr_level_for_elo там,
+ * продублировано здесь, потому что Edge Function не может импортировать
+ * SQL). Если меняете пороги — меняйте в обоих местах.
+ */
+function cefrLevelForElo(elo: number): CefrLevel {
+  if (elo < 1200) return "A1";
+  if (elo < 1500) return "A2";
+  if (elo < 1800) return "B1";
+  if (elo < 2100) return "B2";
+  if (elo < 2400) return "C1";
+  return "C2";
+}
 
 /** Балл за пустой транскрипт: ASR ничего не разобрал — говорить не о чем. */
 const EMPTY_TRANSCRIPT_SCORE = 1;
@@ -75,6 +90,19 @@ Deno.serve(async (req) => {
     const targetLanguage = recording.language_code ?? "en";
     const nativeLanguage = speaker?.native_language ?? "en";
 
+    // Лига говорящего на этом языке -> уровень CEFR (скрытая механика,
+    // раздел 9.2 чата про приравнивание лиг к A1-C2) — ограничивает только
+    // сложность текста объяснений LLM, не саму оценку. Нет строки/ELO —
+    // считаем новичком (1000 ELO по умолчанию, как и везде в проекте).
+    const { data: speakerLanguage } = await supabase
+      .from("user_languages")
+      .select("elo")
+      .eq("user_id", recording.user_id)
+      .eq("language_code", targetLanguage)
+      .eq("role", "learning")
+      .maybeSingle();
+    const level = cefrLevelForElo(speakerLanguage?.elo ?? 1000);
+
     let score = EMPTY_TRANSCRIPT_SCORE;
     let errors: { offset: number; length: number; message: string; replacement: string; category: string }[] = [];
     let degraded = false;
@@ -84,7 +112,7 @@ Deno.serve(async (req) => {
       // должен понять, что исправить перед второй попыткой) — PvP получает
       // короткую пометку прямо в ленте боя. Балл считается одинаково.
       const detailed = recording.training_round_id != null;
-      const result = await evaluateGrammar(transcript, targetLanguage, nativeLanguage, detailed);
+      const result = await evaluateGrammar(transcript, targetLanguage, nativeLanguage, detailed, level);
       score = result.score;
       errors = result.errors;
       degraded = result.degraded;

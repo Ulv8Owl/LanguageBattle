@@ -104,4 +104,7 @@ class ServerErrors {
 
   static bool isInsufficientFunds(Object error) =>
       error.toString().contains('insufficient_funds');
+
+  static bool isLeagueLocked(Object error) =>
+      error.toString().contains('league_locked');
 }

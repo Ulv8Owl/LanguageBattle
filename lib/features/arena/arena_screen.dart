@@ -6,6 +6,7 @@ import '../../core/leagues.dart';
 import '../../core/nav_state.dart';
 import '../../core/supabase_client.dart';
 import '../../core/theme.dart';
+import '../../core/word_packs.dart';
 import '../../widgets/chrolingo_widgets.dart';
 
 class ArenaScreen extends StatefulWidget {
@@ -118,6 +119,7 @@ class _ArenaScreenState extends State<ArenaScreen> {
     required VoidCallback onPrimary,
     VoidCallback? onInviteFriend,
     Color accent = AppColors.gold,
+    Widget? extraContent,
   }) {
     return Container(
       padding: const EdgeInsets.fromLTRB(18, 20, 18, 24),
@@ -155,6 +157,10 @@ class _ArenaScreenState extends State<ArenaScreen> {
               children: stats.map((s) => _StatCol(value: s.value, label: s.label, color: s.color)).toList(),
             ),
           ),
+          if (extraContent != null) ...[
+            const SizedBox(height: 14),
+            extraContent,
+          ],
           const SizedBox(height: 16),
           SizedBox(
             width: double.infinity,
@@ -191,19 +197,53 @@ class _ArenaScreenState extends State<ArenaScreen> {
   }
 
   Widget _buildTrainingSheet(BuildContext sheetContext) {
-    return _sheetChrome(
-      sheetContext: sheetContext,
-      title: 'Тренировка',
-      description: 'Карточки со словами на твоей языковой паре: смотришь слово, '
-          'вспоминаешь перевод, переворачиваешь. Не тратит энергию и работает '
-          'без подписки.',
-      stats: const [
-        _Stat(value: '10', label: 'карточек', color: AppColors.gold),
-        _Stat(value: '0', label: 'энергии', color: AppColors.ok),
-      ],
-      primaryLabel: 'Начать',
-      onPrimary: () => context.push('/flashcards'),
-      accent: AppColors.ok,
+    // По умолчанию — 1000 слов текущей лиги игрока; ниже своей лиги можно
+    // потренировать более простой набор, выше — нельзя (там ещё нечего
+    // покупать, см. word_pack_price/league_locked).
+    final maxLevel = leagueIndexForElo(_elo);
+    var selectedLevel = maxLevel;
+
+    return StatefulBuilder(
+      builder: (context, setSheetState) {
+        return _sheetChrome(
+          sheetContext: sheetContext,
+          title: 'Тренировка',
+          description: 'Карточки со словами на твоей языковой паре: смотришь слово, '
+              'вспоминаешь перевод, переворачиваешь. Не тратит энергию и работает '
+              'без подписки.',
+          stats: const [
+            _Stat(value: '1000', label: 'слов в наборе', color: AppColors.gold),
+            _Stat(value: '0', label: 'энергии', color: AppColors.ok),
+          ],
+          extraContent: Wrap(
+            alignment: WrapAlignment.center,
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              for (var i = 0; i <= maxLevel; i++)
+                ChoiceChip(
+                  label: Text(leagueBands[i].shortName),
+                  selected: selectedLevel == i,
+                  selectedColor: leagueBands[i].color.withValues(alpha: 0.25),
+                  side: BorderSide(color: selectedLevel == i ? leagueBands[i].color : AppColors.lineStrong),
+                  labelStyle: AppFonts.mono(
+                    fontSize: 10,
+                    weight: FontWeight.w700,
+                    color: selectedLevel == i ? leagueBands[i].color : AppColors.muted,
+                  ),
+                  backgroundColor: Colors.transparent,
+                  onSelected: (_) => setSheetState(() => selectedLevel = i),
+                ),
+            ],
+          ),
+          primaryLabel: 'Начать',
+          onPrimary: () {
+            trainingLevelRequest.value = selectedLevel;
+            context.push('/flashcards');
+          },
+          accent: AppColors.ok,
+        );
+      },
     );
   }
 
