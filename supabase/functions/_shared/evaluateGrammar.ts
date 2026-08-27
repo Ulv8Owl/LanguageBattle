@@ -178,23 +178,47 @@ async function callLlmOnce(
     throw new Error("LLM_API_KEY is not configured");
   }
 
-  const res = await fetch(`${baseUrl}/chat/completions`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${apiKey}`,
-    },
-    body: JSON.stringify({
-      model,
-      messages: [
-        { role: "system", content: buildSystemPrompt(detailed, level) },
-        { role: "user", content: buildUserPrompt(transcript, targetLanguage, nativeLanguage) },
-      ],
-      // Structured output там, где провайдер это поддерживает (раздел 9.3).
-      response_format: { type: "json_object" },
-      temperature: 0.2,
-    }),
-  });
+  // Таймаут обязателен: без него зависший/медленный провайдер держит
+  // запрос до убийства всей Edge Function платформой, а это происходит
+  // ДО catch-блока — evaluation_jobs так и останется в 'processing'
+  // навсегда, и клиент (ждущий 'done'/'failed') зависнет на экране
+  // "Разбираю попытку" без единой ошибки в логах. С таймаутом fetch
+  // сам бросает исключение, которое ловит retry-цикл evaluateGrammar.
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 20_000);
+
+  let res: Response;
+  try {
+    res = await fetch(`${baseUrl}/chat/completions`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${apiKey}`,
+      },
+      body: JSON.stringify({
+        model,
+        messages: [
+          { role: "system", content: buildSystemPrompt(detailed, level) },
+          { role: "user", content: buildUserPrompt(transcript, targetLanguage, nativeLanguage) },
+        ],
+        // Явно нестриминговый ответ: нам нужен один цельный JSON-объект,
+        // а не поток чанков (некоторые провайдеры включают стриминг по
+        // умолчанию, если поле вообще не передано).
+        stream: false,
+        // Structured output там, где провайдер это поддерживает (раздел 9.3).
+        response_format: { type: "json_object" },
+        temperature: 0.2,
+      }),
+      signal: controller.signal,
+    });
+  } catch (e) {
+    if (e instanceof Error && e.name === "AbortError") {
+      throw new Error("LLM request timed out after 20s");
+    }
+    throw e;
+  } finally {
+    clearTimeout(timeout);
+  }
 
   if (!res.ok) {
     const body = await res.text().catch(() => "");
