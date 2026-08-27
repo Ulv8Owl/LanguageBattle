@@ -54,7 +54,11 @@ Deno.serve(async (req) => {
       .eq("id", job_id)
       .single();
     if (jobErr || !job) {
-      return new Response(JSON.stringify({ error: "job not found" }), { status: 404 });
+      // "job not found" раньше маскировал ЛЮБУЮ ошибку запроса (права
+      // доступа, формат id и т.п.) под одинаковый неинформативный ответ —
+      // логируем настоящую причину, чтобы не гадать вслепую по логам.
+      console.error("evaluate-recording: job lookup failed", { job_id, jobErr });
+      return new Response(JSON.stringify({ error: "job not found", detail: jobErr }), { status: 404 });
     }
     if (job.status !== "pending") {
       // Уже обрабатывается/обработана — не задваиваем работу.
@@ -69,8 +73,9 @@ Deno.serve(async (req) => {
       .eq("id", job.voice_recording_id)
       .single();
     if (recErr || !recording) {
+      console.error("evaluate-recording: recording lookup failed", { voiceRecordingId: job.voice_recording_id, recErr });
       await supabase.from("evaluation_jobs").update({ status: "failed" }).eq("id", job_id);
-      return new Response(JSON.stringify({ error: "recording not found" }), { status: 404 });
+      return new Response(JSON.stringify({ error: "recording not found", detail: recErr }), { status: 404 });
     }
 
     // Голосовое на родном языке в Дуэли — только для прослушки соперником,
