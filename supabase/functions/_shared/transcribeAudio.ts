@@ -1,0 +1,293 @@
+// Провайдер-агностичный ASR-адаптер — серверная замена встроенному в ОС
+// распознаванию речи (пакет speech_to_text), от которого проект отказался.
+//
+// ПОЧЕМУ ASR переехал на сервер. Клиент писал аудио пакетом record и
+// ОДНОВРЕМЕННО слушал микрофон системным распознавателем через
+// speech_to_text. На Android это не работает: AudioRecord (record) и
+// SpeechRecognizer (speech_to_text) конкурируют за один и тот же вход, и
+// тот, кто пришёл вторым, не получает звук вообще. Транскрипт всегда
+// оказывался пустым, из-за чего evaluate-recording уходил в ветку
+// "пустой транскрипт" и НИ РАЗУ не доходил до LLM — игрок видел балл 1 и
+// "ошибок не найдено" что бы он ни сказал. Теперь клиент только пишет
+// файл, а речь распознаётся здесь, по загруженному аудио.
+//
+// Как и в evaluateGrammar.ts, смена провайдера — это правка переменных
+// окружения Edge Function, а не кода:
+//   ASR_PROVIDER    google (по умолчанию) | openai
+//   ASR_API_KEY     ключ провайдера
+//   ASR_BASE_URL    переопределение эндпоинта (обычно не нужно)
+//   ASR_MODEL       google: latest_short (по умолчанию); openai: whisper-1
+//
+// Провайдер openai — это любой эндпоинт с whisper-совместимым
+// /audio/transcriptions (в том числе тот же base_url, что у LLM-судьи),
+// он нужен как запасной путь, если Google Cloud окажется недоступен.
+
+export interface TranscribedWord {
+  word: string;
+  confidence: number;
+}
+
+export interface TranscriptionResult {
+  /** Распознанный текст. Пустая строка = провайдер отработал, но речи не услышал. */
+  transcript: string;
+  /** Общая уверенность распознавания 0..1 (0, если провайдер её не сообщил). */
+  confidence: number;
+  words: TranscribedWord[];
+  /**
+   * true — распознать НЕ УДАЛОСЬ по нашей вине (сбой/таймаут/не настроен
+   * ключ). Это принципиально не то же самое, что пустой transcript при
+   * degraded=false: там игрок действительно промолчал, и балл 1 честен, а
+   * здесь штрафовать игрока за нашу поломку нельзя.
+   */
+  degraded: boolean;
+}
+
+/** Язык приложения -> BCP-47, который ждут облачные ASR. */
+const BCP47_BY_LANGUAGE: Record<string, string> = {
+  en: "en-US",
+  es: "es-ES",
+  ru: "ru-RU",
+};
+
+export function bcp47For(languageCode: string): string {
+  return BCP47_BY_LANGUAGE[languageCode] ?? "en-US";
+}
+
+/** Дольше держать запрос нет смысла: голосовое в раунде — секунды, не минуты. */
+const ASR_TIMEOUT_MS = 25_000;
+
+const EMPTY: TranscriptionResult = { transcript: "", confidence: 0, words: [], degraded: false };
+
+function failed(reason: string): TranscriptionResult {
+  console.error("transcribeAudio:", reason);
+  return { transcript: "", confidence: 0, words: [], degraded: true };
+}
+
+/**
+ * Разбор WAV-контейнера, который пишет клиент (record, AudioEncoder.wav).
+ *
+ * Google STT принимает и файл целиком (тогда encoding/sampleRateHertz
+ * определяются по заголовку), но полагаться на автоопределение незачем:
+ * заголовок разбирается тривиально, а взамен мы точно знаем реальную
+ * частоту дискретизации устройства — она может отличаться от запрошенной,
+ * если железо не умеет 16 кГц, и тогда автоопределение спасёт, а жёстко
+ * зашитые 16000 испортили бы распознавание.
+ */
+interface WavData {
+  pcm: Uint8Array;
+  sampleRate: number;
+  channels: number;
+  bitsPerSample: number;
+}
+
+export function parseWav(bytes: Uint8Array): WavData | null {
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  const tag = (offset: number) =>
+    String.fromCharCode(bytes[offset], bytes[offset + 1], bytes[offset + 2], bytes[offset + 3]);
+
+  if (bytes.byteLength < 12 || tag(0) !== "RIFF" || tag(8) !== "WAVE") return null;
+
+  let sampleRate = 0;
+  let channels = 0;
+  let bitsPerSample = 0;
+  let pcm: Uint8Array | null = null;
+
+  // Чанки идут подряд: 4 байта имени, 4 байта длины, дальше данные с
+  // выравниванием до чётного размера. Между fmt и data может лежать что
+  // угодно (LIST/fact) — поэтому идём циклом, а не по фиксированным
+  // смещениям "как обычно бывает".
+  let offset = 12;
+  while (offset + 8 <= bytes.byteLength) {
+    const id = tag(offset);
+    const size = view.getUint32(offset + 4, true);
+    const body = offset + 8;
+
+    if (id === "fmt " && body + 16 <= bytes.byteLength) {
+      channels = view.getUint16(body + 2, true);
+      sampleRate = view.getUint32(body + 4, true);
+      bitsPerSample = view.getUint16(body + 14, true);
+    } else if (id === "data") {
+      const end = Math.min(body + size, bytes.byteLength);
+      pcm = bytes.subarray(body, end);
+      break;
+    }
+
+    offset = body + size + (size % 2);
+  }
+
+  if (!pcm || sampleRate === 0 || channels === 0) return null;
+  return { pcm, sampleRate, channels, bitsPerSample };
+}
+
+/** base64 без промежуточной строки на каждый байт — записи бывают под мегабайт. */
+function toBase64(bytes: Uint8Array): string {
+  let binary = "";
+  const chunk = 0x8000;
+  for (let i = 0; i < bytes.byteLength; i += chunk) {
+    binary += String.fromCharCode(...bytes.subarray(i, i + chunk));
+  }
+  return btoa(binary);
+}
+
+async function fetchWithTimeout(url: string, init: RequestInit): Promise<Response> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), ASR_TIMEOUT_MS);
+  try {
+    return await fetch(url, { ...init, signal: controller.signal });
+  } catch (e) {
+    if (e instanceof Error && e.name === "AbortError") {
+      throw new Error(`ASR request timed out after ${ASR_TIMEOUT_MS / 1000}s`);
+    }
+    throw e;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+/**
+ * Google Cloud Speech-to-Text v1, синхронный speech:recognize.
+ * Синхронный вариант ограничен минутой аудио — голосовые в раундах заведомо
+ * короче, длинные записи сюда просто не попадают.
+ */
+async function transcribeGoogle(
+  audio: Uint8Array,
+  languageCode: string,
+  apiKey: string,
+): Promise<TranscriptionResult> {
+  const baseUrl = Deno.env.get("ASR_BASE_URL") ?? "https://speech.googleapis.com/v1";
+  const model = Deno.env.get("ASR_MODEL") ?? "latest_short";
+
+  const wav = parseWav(audio);
+  if (!wav) return failed("audio is not a parseable WAV container");
+
+  const res = await fetchWithTimeout(`${baseUrl}/speech:recognize?key=${encodeURIComponent(apiKey)}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      config: {
+        encoding: "LINEAR16",
+        sampleRateHertz: wav.sampleRate,
+        audioChannelCount: wav.channels,
+        languageCode: bcp47For(languageCode),
+        model,
+        enableAutomaticPunctuation: true,
+        enableWordConfidence: true,
+        // Учащийся говорит с акцентом и ошибается — распознавание не должно
+        // "чинить" его речь под ближайшую правильную фразу, иначе судья
+        // получит текст без тех самых ошибок, которые он должен найти.
+        profanityFilter: false,
+      },
+      audio: { content: toBase64(wav.pcm) },
+    }),
+  });
+
+  if (!res.ok) {
+    const body = await res.text().catch(() => "");
+    return failed(`Google STT HTTP ${res.status}: ${body.slice(0, 500)}`);
+  }
+
+  const data = await res.json();
+  const results = Array.isArray(data?.results) ? data.results : [];
+  if (results.length === 0) return EMPTY;
+
+  const parts: string[] = [];
+  const words: TranscribedWord[] = [];
+  let confidenceSum = 0;
+  let confidenceCount = 0;
+
+  for (const result of results) {
+    const alternative = result?.alternatives?.[0];
+    if (!alternative) continue;
+    if (typeof alternative.transcript === "string") parts.push(alternative.transcript.trim());
+    if (typeof alternative.confidence === "number") {
+      confidenceSum += alternative.confidence;
+      confidenceCount++;
+    }
+    for (const w of alternative.words ?? []) {
+      if (typeof w?.word !== "string") continue;
+      words.push({ word: w.word, confidence: typeof w.confidence === "number" ? w.confidence : 0 });
+    }
+  }
+
+  const transcript = parts.filter((p) => p.length > 0).join(" ").trim();
+  if (transcript.length === 0) return EMPTY;
+
+  return {
+    transcript,
+    confidence: confidenceCount > 0 ? confidenceSum / confidenceCount : 0,
+    words,
+    degraded: false,
+  };
+}
+
+/**
+ * Whisper-совместимый /audio/transcriptions (OpenAI и все, кто повторяет
+ * его формат). Пословной уверенности здесь нет — заполняем её нулями, поле
+ * в схеме всё равно задел на будущее и в расчёте балла не участвует.
+ */
+async function transcribeOpenAi(
+  audio: Uint8Array,
+  languageCode: string,
+  apiKey: string,
+): Promise<TranscriptionResult> {
+  const baseUrl = Deno.env.get("ASR_BASE_URL") ?? Deno.env.get("LLM_BASE_URL") ?? "https://api.openai.com/v1";
+  const model = Deno.env.get("ASR_MODEL") ?? "whisper-1";
+
+  const form = new FormData();
+  form.append("file", new Blob([audio], { type: "audio/wav" }), "recording.wav");
+  form.append("model", model);
+  form.append("language", languageCode);
+  form.append("response_format", "json");
+
+  const res = await fetchWithTimeout(`${baseUrl}/audio/transcriptions`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${apiKey}` },
+    body: form,
+  });
+
+  if (!res.ok) {
+    const body = await res.text().catch(() => "");
+    return failed(`ASR HTTP ${res.status}: ${body.slice(0, 500)}`);
+  }
+
+  const data = await res.json();
+  const transcript = typeof data?.text === "string" ? data.text.trim() : "";
+  if (transcript.length === 0) return EMPTY;
+
+  return {
+    transcript,
+    confidence: 0,
+    words: transcript.split(/\s+/).map((word: string) => ({ word, confidence: 0 })),
+    degraded: false,
+  };
+}
+
+/**
+ * transcribeAudio(audio, languageCode) -> { transcript, words, degraded }
+ *
+ * Никогда не бросает: сбой провайдера — это degraded=true, а не падение
+ * воркера. Иначе задача в evaluation_jobs осталась бы висеть, а клиент —
+ * ждать результат, которого не будет.
+ */
+export async function transcribeAudio(
+  audio: Uint8Array,
+  languageCode: string,
+): Promise<TranscriptionResult> {
+  const provider = (Deno.env.get("ASR_PROVIDER") ?? "google").toLowerCase();
+  const apiKey = Deno.env.get("ASR_API_KEY");
+  if (!apiKey) return failed("ASR_API_KEY is not configured");
+  if (audio.byteLength === 0) return failed("audio file is empty");
+
+  try {
+    switch (provider) {
+      case "google":
+        return await transcribeGoogle(audio, languageCode, apiKey);
+      case "openai":
+        return await transcribeOpenAi(audio, languageCode, apiKey);
+      default:
+        return failed(`unknown ASR_PROVIDER "${provider}" (expected "google" or "openai")`);
+    }
+  } catch (e) {
+    return failed(`provider ${provider} threw: ${e}`);
+  }
+}

@@ -8,13 +8,21 @@
 // Одиночную Игру (в соло тоже начисляются валюта и опыт, поэтому оценивать
 // на клиенте нельзя — раздел 2.2).
 //
+// Воркер делает ДВА шага подряд:
+//   1) распознаёт речь по загруженному аудио (transcribeAudio.ts) — раньше
+//      это делал сам телефон средствами ОС, но одновременный захват
+//      микрофона записью и распознавателем на Android не работает, и
+//      транскрипт всегда приходил пустым;
+//   2) отдаёт транскрипт LLM-судье (evaluateGrammar.ts).
+//
 // Балл берётся НАПРЯМУЮ из ответа LLM (раздел 9.4, MVP-версия): без
 // нормирующей формулы, без фильтра по категории ошибок и без сопоставления
 // с confidence ASR. Все три пункта осознанно отложены — см.
 // deferred_suggestions.md, не добавлять их сюда без отдельного запроса.
 
-import { createClient } from "jsr:@supabase/supabase-js@2";
-import { type CefrLevel, evaluateGrammar } from "../_shared/evaluateGrammar.ts";
+import { createClient, type SupabaseClient } from "jsr:@supabase/supabase-js@2";
+import { type CefrLevel, evaluateGrammar, NEUTRAL_SCORE } from "../_shared/evaluateGrammar.ts";
+import { transcribeAudio } from "../_shared/transcribeAudio.ts";
 
 /**
  * Лига говорящего приравнена к уровню CEFR (см. supabase/migrations/0010 —
@@ -31,8 +39,25 @@ function cefrLevelForElo(elo: number): CefrLevel {
   return "C2";
 }
 
-/** Балл за пустой транскрипт: ASR ничего не разобрал — говорить не о чем. */
+/** Балл за тишину: ASR отработал, но говорить было не о чем. */
 const EMPTY_TRANSCRIPT_SCORE = 1;
+
+/** Статусы распознавания — те же значения, что в CHECK у voice_recordings (миграция 0013). */
+type TranscriptStatus = "pending" | "ok" | "empty" | "failed";
+
+/** Поля voice_recordings, которыми пользуется воркер. */
+interface VoiceRecordingRow {
+  id: string;
+  user_id: string;
+  round_id: string | null;
+  training_round_id: string | null;
+  recording_slot: string;
+  language_code: string | null;
+  audio_storage_path: string;
+  transcript: string | null;
+  transcript_status: TranscriptStatus | null;
+  created_at: string;
+}
 
 Deno.serve(async (req) => {
   const supabase = createClient(
@@ -67,60 +92,79 @@ Deno.serve(async (req) => {
 
     await supabase.from("evaluation_jobs").update({ status: "processing" }).eq("id", job_id);
 
-    const { data: recording, error: recErr } = await supabase
+    const { data: recordingRow, error: recErr } = await supabase
       .from("voice_recordings")
       .select("*")
       .eq("id", job.voice_recording_id)
       .single();
-    if (recErr || !recording) {
-      console.error("evaluate-recording: recording lookup failed", { voiceRecordingId: job.voice_recording_id, recErr });
+    if (recErr || !recordingRow) {
+      console.error("evaluate-recording: recording lookup failed", {
+        voiceRecordingId: job.voice_recording_id,
+        recErr,
+      });
       await supabase.from("evaluation_jobs").update({ status: "failed" }).eq("id", job_id);
       return new Response(JSON.stringify({ error: "recording not found", detail: recErr }), { status: 404 });
     }
+    const recording = recordingRow as VoiceRecordingRow;
 
     // Голосовое на родном языке в Дуэли — только для прослушки соперником,
-    // не оценивается (см. раздел 2.4).
+    // не оценивается (см. раздел 2.4), поэтому и распознавать его незачем.
     if (recording.recording_slot === "native") {
       await markDone(supabase, job_id);
       return new Response(JSON.stringify({ skipped: "native slot not graded" }), { status: 200 });
     }
 
-    const { data: speaker } = await supabase
-      .from("users")
-      .select("native_language")
-      .eq("id", recording.user_id)
-      .single();
-
-    const transcript = (recording.transcript ?? "").trim();
     const targetLanguage = recording.language_code ?? "en";
-    const nativeLanguage = speaker?.native_language ?? "en";
 
-    // Лига говорящего на этом языке -> уровень CEFR (скрытая механика,
-    // раздел 9.2 чата про приравнивание лиг к A1-C2) — ограничивает только
-    // сложность текста объяснений LLM, не саму оценку. Нет строки/ELO —
-    // считаем новичком (1000 ELO по умолчанию, как и везде в проекте).
-    const { data: speakerLanguage } = await supabase
-      .from("user_languages")
-      .select("elo")
-      .eq("user_id", recording.user_id)
-      .eq("language_code", targetLanguage)
-      .eq("role", "learning")
-      .maybeSingle();
-    const level = cefrLevelForElo(speakerLanguage?.elo ?? 1000);
+    // Шаг 1 — распознавание речи.
+    const { transcript, status } = await resolveTranscript(supabase, recording, targetLanguage);
 
-    let score = EMPTY_TRANSCRIPT_SCORE;
+    // Шаг 2 — оценка. Три исхода распознавания дают три разных балла, и
+    // путать их нельзя: за нашу поломку игрок не должен получать 1.
+    let score: number;
     let errors: { offset: number; length: number; message: string; replacement: string; category: string }[] = [];
-    let degraded = false;
+    let feedback: string;
 
-    if (transcript.length > 0) {
+    if (status === "failed") {
+      score = NEUTRAL_SCORE;
+      feedback = "Не удалось распознать речь — балл выставлен нейтральным.";
+    } else if (status === "empty") {
+      score = EMPTY_TRANSCRIPT_SCORE;
+      feedback = "Не удалось разобрать речь — попробуй сказать чётче и ближе к микрофону.";
+    } else {
+      // Лига говорящего на этом языке -> уровень CEFR (скрытая механика:
+      // приравнивание лиг к A1-C2) — ограничивает только сложность текста
+      // объяснений LLM, не саму оценку. Нет строки/ELO — считаем новичком
+      // (1000 ELO по умолчанию, как и везде в проекте).
+      const { data: speakerLanguage } = await supabase
+        .from("user_languages")
+        .select("elo")
+        .eq("user_id", recording.user_id)
+        .eq("language_code", targetLanguage)
+        .eq("role", "learning")
+        .maybeSingle();
+      const level = cefrLevelForElo(speakerLanguage?.elo ?? 1000);
+
+      const { data: speaker } = await supabase
+        .from("users")
+        .select("native_language")
+        .eq("id", recording.user_id)
+        .single();
+      const nativeLanguage = speaker?.native_language ?? "en";
+
       // Одиночная Игра просит подробный разбор ошибки (раздел 2.2: игрок
       // должен понять, что исправить перед второй попыткой) — PvP получает
       // короткую пометку прямо в ленте боя. Балл считается одинаково.
       const detailed = recording.training_round_id != null;
       const result = await evaluateGrammar(transcript, targetLanguage, nativeLanguage, detailed, level);
+
       score = result.score;
       errors = result.errors;
-      degraded = result.degraded;
+      feedback = result.degraded
+        ? "Не удалось получить разбор от ИИ — балл выставлен нейтральным."
+        : errors.length === 0
+        ? "Отлично, ошибок не найдено!"
+        : errors.map((e) => e.message).slice(0, 3).join(" ");
     }
 
     if (errors.length > 0) {
@@ -135,14 +179,6 @@ Deno.serve(async (req) => {
         })),
       );
     }
-
-    const feedback = transcript.length === 0
-      ? "Не удалось разобрать речь — попробуй сказать чётче."
-      : degraded
-      ? "Не удалось получить разбор от ИИ — балл выставлен нейтральным."
-      : errors.length === 0
-      ? "Отлично, ошибок не найдено!"
-      : errors.map((e) => e.message).slice(0, 3).join(" ");
 
     if (recording.round_id) {
       // PvP: балл за раунд.
@@ -170,7 +206,7 @@ Deno.serve(async (req) => {
     }
 
     await markDone(supabase, job_id);
-    return new Response(JSON.stringify({ ok: true, score }), { status: 200 });
+    return new Response(JSON.stringify({ ok: true, score, transcript_status: status }), { status: 200 });
   } catch (e) {
     console.error("evaluate-recording failed:", e);
     if (jobId) {
@@ -180,8 +216,72 @@ Deno.serve(async (req) => {
   }
 });
 
-// deno-lint-ignore no-explicit-any
-async function markDone(supabase: any, jobId: string) {
+/**
+ * Возвращает транскрипт записи, распознавая аудио, если это ещё не сделано,
+ * и сохраняя результат обратно в voice_recordings — чтобы повторный запуск
+ * задачи по той же записи не гонял ASR второй раз, а клиент мог показать
+ * игроку, что именно услышал распознаватель.
+ */
+async function resolveTranscript(
+  supabase: SupabaseClient,
+  recording: VoiceRecordingRow,
+  targetLanguage: string,
+): Promise<{ transcript: string; status: TranscriptStatus }> {
+  const existing = (recording.transcript ?? "").trim();
+  if (existing.length > 0) {
+    if (recording.transcript_status !== "ok") {
+      await saveTranscript(supabase, recording.id, existing, [], "ok");
+    }
+    return { transcript: existing, status: "ok" };
+  }
+  if (recording.transcript_status === "empty" || recording.transcript_status === "failed") {
+    // Уже пробовали и не получилось — не тратим квоту провайдера повторно.
+    return { transcript: "", status: recording.transcript_status };
+  }
+
+  const { data: file, error: downloadErr } = await supabase.storage
+    .from("voice-recordings")
+    .download(recording.audio_storage_path);
+  if (downloadErr || !file) {
+    console.error("evaluate-recording: audio download failed", {
+      path: recording.audio_storage_path,
+      downloadErr,
+    });
+    await saveTranscript(supabase, recording.id, "", [], "failed");
+    return { transcript: "", status: "failed" };
+  }
+
+  const audio = new Uint8Array(await file.arrayBuffer());
+  const asr = await transcribeAudio(audio, targetLanguage);
+
+  const status: TranscriptStatus = asr.degraded ? "failed" : asr.transcript.length > 0 ? "ok" : "empty";
+  await saveTranscript(supabase, recording.id, asr.transcript, asr.words, status);
+  return { transcript: asr.transcript, status };
+}
+
+async function saveTranscript(
+  supabase: SupabaseClient,
+  recordingId: string,
+  transcript: string,
+  words: { word: string; confidence: number }[],
+  status: TranscriptStatus,
+) {
+  const { error } = await supabase
+    .from("voice_recordings")
+    .update({
+      transcript,
+      word_confidences: words,
+      transcript_status: status,
+    })
+    .eq("id", recordingId);
+  // Не роняем задачу из-за этого (балл всё равно будет выставлен), но и
+  // молчать нельзя: если столбца transcript_status нет, значит миграция
+  // 0013 не применена, и ASR будет впустую перезапускаться на каждой
+  // повторной обработке записи.
+  if (error) console.error("evaluate-recording: failed to save transcript", { recordingId, error });
+}
+
+async function markDone(supabase: SupabaseClient, jobId: string) {
   await supabase.from("evaluation_jobs").update({
     status: "done",
     worker_id: "evaluate-recording",

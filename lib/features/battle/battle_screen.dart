@@ -1,14 +1,13 @@
 import 'dart:async';
-import 'dart:io';
 
 import 'package:audioplayers/audioplayers.dart';
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
-import 'package:supabase_flutter/supabase_flutter.dart' show FileOptions;
 
 import '../../core/supabase_client.dart';
 import '../../core/theme.dart';
 import '../../data/phrase_bank.dart';
+import '../../data/voice_submission.dart';
 import '../../widgets/chrolingo_widgets.dart';
 import '../../widgets/voice_recorder_dock.dart';
 import 'battle_models.dart';
@@ -328,39 +327,24 @@ class _BattleScreenState extends State<BattleScreen> {
     if (round == null || slot == null || m == null) return;
 
     try {
-      final language = m.languageForSlot(_myId, slot);
-      final storagePath = 'match/${m.id}/${round.id}/${_myId}_$slot.m4a';
-      await supabase.storage.from('voice-recordings').upload(
-            storagePath,
-            File(take.filePath),
-            fileOptions: const FileOptions(upsert: true, contentType: 'audio/m4a'),
-          );
-      final words = take.transcript.isEmpty ? const <String>[] : take.transcript.split(RegExp(r'\s+'));
-      // Встроенный движок распознавания даёт только общую уверенность на всю
-      // фразу, а не по каждому слову — присваиваем её всем словам одинаково.
-      // В MVP поле не используется при расчёте балла (раздел 9.4) и пишется
-      // как задел под deferred_suggestions.md, пункт 2.
-      final wordConfidences = words.map((w) => {'word': w, 'confidence': take.confidence}).toList();
-      final inserted = await supabase
-          .from('voice_recordings')
-          .insert({
-            'round_id': round.id,
-            'user_id': _myId,
-            'recording_slot': slot,
-            'language_code': language,
-            'audio_storage_path': storagePath,
-            'duration_seconds': take.durationSeconds,
-            'transcript': take.transcript,
-            'word_confidences': wordConfidences,
-          })
-          .select()
-          .single();
-      // Задача в очередь оценки — клиент дальше НЕ ждёт результат
-      // синхронно, он придёт через Realtime на round_scores.
-      await supabase.from('evaluation_jobs').insert({
-        'voice_recording_id': inserted['id'],
-        'status': 'pending',
-      });
+      // Загрузка, строка в voice_recordings и задача в очередь оценки —
+      // общий с Одиночной Игрой путь (lib/data/voice_submission.dart).
+      // Клиент дальше НЕ ждёт результат синхронно, он придёт через Realtime
+      // на round_scores.
+      await submitVoiceRecording(
+        filePath: take.filePath,
+        storagePath: battleRecordingPath(
+          matchId: m.id,
+          roundId: round.id,
+          userId: _myId,
+          slot: slot,
+        ),
+        userId: _myId,
+        languageCode: m.languageForSlot(_myId, slot),
+        recordingSlot: slot,
+        durationSeconds: take.durationSeconds,
+        roundId: round.id,
+      );
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -437,7 +421,6 @@ class _BattleScreenState extends State<BattleScreen> {
               VoiceRecorderDock(
                 key: _dockKey,
                 enabled: canRecord,
-                languageCode: slot == null ? 'en' : m.languageForSlot(_myId, slot),
                 onSend: _sendTake,
               ),
             ],

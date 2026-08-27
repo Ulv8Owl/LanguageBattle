@@ -1,42 +1,33 @@
-import 'dart:async';
 import 'dart:io';
 
 import 'package:audioplayers/audioplayers.dart';
 import 'package:flutter/material.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:record/record.dart';
-import 'package:speech_to_text/speech_to_text.dart';
 import 'package:uuid/uuid.dart';
 
+import '../core/audio_format.dart';
 import '../core/theme.dart';
 import 'chrolingo_widgets.dart';
 
 /// Готовое, но ещё не отправленное голосовое.
+///
+/// Транскрипта здесь нет намеренно: речь распознаёт сервер по загруженному
+/// аудио. Раньше док параллельно с записью слушал микрофон системным
+/// распознавателем, но на Android запись и распознаватель не могут держать
+/// микрофон одновременно — транскрипт всегда приходил пустым, и оценка
+/// молча деградировала до «ошибок не найдено» при любой речи.
 class VoiceTake {
   final String filePath;
-
-  /// Транскрипт со встроенного ASR ОС (раздел 9.1 — осознанно временное
-  /// решение). Может быть пустым, если движок ничего не разобрал.
-  final String transcript;
-  final double confidence;
   final double durationSeconds;
 
-  const VoiceTake({
-    required this.filePath,
-    required this.transcript,
-    required this.confidence,
-    required this.durationSeconds,
-  });
+  const VoiceTake({required this.filePath, required this.durationSeconds});
 }
 
-/// Локали встроенного распознавания речи по коду языка.
-const speechLocaleByLanguage = {
-  'en': 'en_US',
-  'es': 'es_ES',
-  'ru': 'ru_RU',
-};
-
 enum _MicState { idle, recording, ready }
+
+/// Короче этого удержание кнопки считается промахом, а не ответом.
+const _minRecordingMs = 400;
 
 /// Кнопка микрофона с тремя состояниями (раздел 5.2):
 /// 1. ожидание — белый кружок с микрофоном;
@@ -50,16 +41,12 @@ enum _MicState { idle, recording, ready }
 class VoiceRecorderDock extends StatefulWidget {
   final bool enabled;
 
-  /// Язык, на котором ожидается речь — определяет локаль ASR.
-  final String languageCode;
-
   /// Отправка. Пока future не завершился, кнопка показывает прогресс.
   final Future<void> Function(VoiceTake take) onSend;
 
   const VoiceRecorderDock({
     super.key,
     required this.enabled,
-    required this.languageCode,
     required this.onSend,
   });
 
@@ -69,13 +56,9 @@ class VoiceRecorderDock extends StatefulWidget {
 
 class VoiceRecorderDockState extends State<VoiceRecorderDock> with SingleTickerProviderStateMixin {
   final _recorder = AudioRecorder();
-  final _speech = SpeechToText();
 
-  bool _speechAvailable = false;
   _MicState _micState = _MicState.idle;
   String? _pendingFilePath;
-  String _liveTranscript = '';
-  double _liveConfidence = 1.0;
   Stopwatch? _stopwatch;
   bool _uploading = false;
 
@@ -88,26 +71,9 @@ class VoiceRecorderDockState extends State<VoiceRecorderDock> with SingleTickerP
   bool get hasPendingTake => _micState == _MicState.ready && !_uploading;
 
   @override
-  void initState() {
-    super.initState();
-    _initSpeech();
-  }
-
-  Future<void> _initSpeech() async {
-    try {
-      _speechAvailable = await _speech.initialize(
-        onError: (e) => debugPrint('speech_to_text error: $e'),
-      );
-    } catch (e) {
-      debugPrint('speech_to_text init failed: $e');
-    }
-  }
-
-  @override
   void dispose() {
     _pulseController.dispose();
     _recorder.dispose();
-    _speech.cancel();
     super.dispose();
   }
 
@@ -123,30 +89,17 @@ class VoiceRecorderDockState extends State<VoiceRecorderDock> with SingleTickerP
       return;
     }
     final dir = await getTemporaryDirectory();
-    final path = '${dir.path}/${const Uuid().v4()}.m4a';
-    await _recorder.start(const RecordConfig(encoder: AudioEncoder.aacLc), path: path);
-
-    _liveTranscript = '';
-    _liveConfidence = 1.0;
-    if (_speechAvailable) {
-      // Распознавание идёт параллельно с записью файла — транскрипт готов
-      // сразу, без отдельного шага облачного ASR (раздел 9.1). На части
-      // устройств одновременный доступ к микрофону из record и
-      // speech_to_text может не сработать: тогда транскрипта просто не
-      // будет, и оценка мягко деградирует, а не падает.
-      unawaited(_speech.listen(
-        onResult: (result) {
-          _liveTranscript = result.recognizedWords;
-          if (result.confidence > 0) _liveConfidence = result.confidence;
-        },
-        listenOptions: SpeechListenOptions(
-          localeId: speechLocaleByLanguage[widget.languageCode] ?? 'en_US',
-          partialResults: true,
-          cancelOnError: true,
-          listenMode: ListenMode.dictation,
-        ),
-      ));
-    }
+    final path = '${dir.path}/${const Uuid().v4()}.$voiceFileExtension';
+    // Формат и частота дискретизации выбраны под серверное распознавание
+    // речи, а не под качество звука — см. lib/core/audio_format.dart.
+    await _recorder.start(
+      const RecordConfig(
+        encoder: AudioEncoder.wav,
+        sampleRate: voiceSampleRate,
+        numChannels: voiceChannels,
+      ),
+      path: path,
+    );
 
     if (!mounted) return;
     setState(() {
@@ -159,9 +112,20 @@ class VoiceRecorderDockState extends State<VoiceRecorderDock> with SingleTickerP
   Future<void> _stopRecording() async {
     if (_micState != _MicState.recording) return;
     final path = await _recorder.stop();
-    if (_speechAvailable) await _speech.stop();
     _stopwatch?.stop();
     if (!mounted) return;
+
+    // Слишком короткое нажатие — это промах по кнопке, а не попытка
+    // ответить: отправлять такую запись нет смысла (распознаватель вернёт
+    // пустоту, а игрок получит балл 1 за то, чего не делал).
+    if ((_stopwatch?.elapsedMilliseconds ?? 0) < _minRecordingMs) {
+      cancelPending();
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Слишком коротко — удерживай кнопку, пока говоришь')),
+      );
+      return;
+    }
+
     setState(() {
       _micState = _MicState.ready;
       if (path != null) _pendingFilePath = path;
@@ -189,8 +153,6 @@ class VoiceRecorderDockState extends State<VoiceRecorderDock> with SingleTickerP
     try {
       await widget.onSend(VoiceTake(
         filePath: path,
-        transcript: _liveTranscript.trim(),
-        confidence: _liveConfidence,
         durationSeconds: (_stopwatch?.elapsedMilliseconds ?? 0) / 1000.0,
       ));
       if (!mounted) return;

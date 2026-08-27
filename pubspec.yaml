@@ -45,7 +45,9 @@ dependencies:
   uuid: ^4.5.1
   intl: ^0.19.0
   google_fonts: ^6.2.1
-  speech_to_text: ^7.0.0
+  # speech_to_text намеренно удалён: распознавание речи на устройстве не
+  # может работать одновременно с записью аудио (оба захватывают микрофон),
+  # поэтому речь распознаёт сервер — supabase/functions/_shared/transcribeAudio.ts.
 
 dev_dependencies:
   flutter_test:

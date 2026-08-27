@@ -1,14 +1,13 @@
 import 'dart:async';
-import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
-import 'package:supabase_flutter/supabase_flutter.dart' show FileOptions;
 
 import '../../core/game_access.dart';
 import '../../core/supabase_client.dart';
 import '../../core/theme.dart';
 import '../../data/phrase_bank.dart';
+import '../../data/voice_submission.dart';
 import '../../widgets/chrolingo_widgets.dart';
 import '../../widgets/voice_recorder_dock.dart';
 import '../subscription/paywall_screen.dart';
@@ -64,6 +63,13 @@ class _TrainingScreenState extends State<TrainingScreen> {
   String _phrase = '';
 
   List<Map<String, dynamic>> _firstAttemptErrors = [];
+
+  /// Что сервер услышал в каждой из двух попыток. Нужно, чтобы не выдавать
+  /// тишину и сбой распознавания за безупречный ответ — до перехода на
+  /// серверный ASR все три случая показывались одинаковым «ошибок не найдено».
+  RecordingOutcome? _firstAttempt;
+  RecordingOutcome? _secondAttempt;
+
   int? _finalScore;
   int? _earnedCoins;
 
@@ -149,6 +155,8 @@ class _TrainingScreenState extends State<TrainingScreen> {
       _roundId = row['id'] as String;
       _phrase = phrase;
       _firstAttemptErrors = [];
+      _firstAttempt = null;
+      _secondAttempt = null;
       _finalScore = null;
       _earnedCoins = null;
       _stage = _Stage.awaitingFirst;
@@ -176,32 +184,20 @@ class _TrainingScreenState extends State<TrainingScreen> {
     final attempt = _stage == _Stage.awaitingFirst ? 1 : 2;
 
     try {
-      final storagePath = 'training/$sessionId/$roundId/${_myId}_$attempt.m4a';
-      await supabase.storage.from('voice-recordings').upload(
-            storagePath,
-            File(take.filePath),
-            fileOptions: const FileOptions(upsert: true, contentType: 'audio/m4a'),
-          );
-      final words = take.transcript.isEmpty ? const <String>[] : take.transcript.split(RegExp(r'\s+'));
-      final inserted = await supabase
-          .from('voice_recordings')
-          .insert({
-            'training_round_id': roundId,
-            'user_id': _myId,
-            'recording_slot': 'target',
-            'language_code': _targetLanguage,
-            'audio_storage_path': storagePath,
-            'duration_seconds': take.durationSeconds,
-            'transcript': take.transcript,
-            'word_confidences': words.map((w) => {'word': w, 'confidence': take.confidence}).toList(),
-          })
-          .select()
-          .single();
-      final recordingId = inserted['id'] as String;
-      await supabase.from('evaluation_jobs').insert({
-        'voice_recording_id': recordingId,
-        'status': 'pending',
-      });
+      final recordingId = await submitVoiceRecording(
+        filePath: take.filePath,
+        storagePath: trainingRecordingPath(
+          sessionId: sessionId,
+          roundId: roundId,
+          userId: _myId,
+          attempt: attempt,
+        ),
+        userId: _myId,
+        languageCode: _targetLanguage,
+        recordingSlot: 'target',
+        durationSeconds: take.durationSeconds,
+        trainingRoundId: roundId,
+      );
 
       if (!mounted) return;
       setState(() => _stage = attempt == 1 ? _Stage.gradingFirst : _Stage.gradingSecond);
@@ -210,7 +206,7 @@ class _TrainingScreenState extends State<TrainingScreen> {
       if (attempt == 1) {
         _watchFirstAttempt(recordingId);
       } else {
-        _watchFinalScore(roundId);
+        _watchFinalScore(roundId, recordingId);
       }
     } catch (e) {
       if (mounted) {
@@ -232,10 +228,11 @@ class _TrainingScreenState extends State<TrainingScreen> {
         .eq('voice_recording_id', recordingId)
         .listen((rows) async {
       if (!mounted || rows.isEmpty) return;
-      final status = rows.first['status'] as String?;
-      if (status != 'done' && status != 'failed') return;
+      final jobStatus = rows.first['status'] as String?;
+      if (jobStatus != 'done' && jobStatus != 'failed') return;
       _jobSub?.cancel();
 
+      final outcome = await fetchRecordingOutcome(recordingId);
       final errors = await supabase
           .from('grammar_errors')
           .select()
@@ -244,6 +241,11 @@ class _TrainingScreenState extends State<TrainingScreen> {
       if (!mounted) return;
       setState(() {
         _firstAttemptErrors = List<Map<String, dynamic>>.from(errors);
+        // Задача упала целиком — разбора не будет, но вторую попытку
+        // отбирать у игрока не за что.
+        _firstAttempt = jobStatus == 'failed'
+            ? const RecordingOutcome(transcript: '', status: TranscriptStatus.failed)
+            : outcome;
         _stage = _Stage.awaitingSecond;
       });
       _scrollToBottomSoon();
@@ -251,7 +253,7 @@ class _TrainingScreenState extends State<TrainingScreen> {
   }
 
   /// Финальный балл за раунд пишет воркер в training_rounds.final_score.
-  void _watchFinalScore(String roundId) {
+  void _watchFinalScore(String roundId, String recordingId) {
     _roundSub?.cancel();
     _roundSub = supabase
         .from('training_rounds')
@@ -262,6 +264,9 @@ class _TrainingScreenState extends State<TrainingScreen> {
       final score = rows.first['final_score'] as int?;
       if (score == null) return;
       _roundSub?.cancel();
+
+      final outcome = await fetchRecordingOutcome(recordingId);
+      if (mounted) setState(() => _secondAttempt = outcome);
 
       int? coins;
       try {
@@ -310,6 +315,8 @@ class _TrainingScreenState extends State<TrainingScreen> {
       phrase: _phrase,
       errors: _firstAttemptErrors,
       score: _finalScore ?? 0,
+      firstAttempt: _firstAttempt,
+      secondAttempt: _secondAttempt,
     ));
     if (_roundNumber >= _roundsPerSession) {
       setState(() => _stage = _Stage.sessionDone);
@@ -419,7 +426,6 @@ class _TrainingScreenState extends State<TrainingScreen> {
             VoiceRecorderDock(
               key: _dockKey,
               enabled: _stage == _Stage.awaitingFirst || _stage == _Stage.awaitingSecond,
-              languageCode: _targetLanguage,
               onSend: _sendTake,
             ),
         ],
@@ -432,8 +438,10 @@ class _TrainingScreenState extends State<TrainingScreen> {
 
     for (final done in _history) {
       items.add(_AiSay(roundNumber: done.roundNumber, total: _roundsPerSession, text: done.phrase));
-      if (done.errors.isNotEmpty) items.add(_ErrorReport(errors: done.errors));
-      items.add(_ScoreCard(score: done.score, coins: null));
+      if (done.errors.isNotEmpty) {
+        items.add(_ErrorReport(errors: done.errors, attempt: done.firstAttempt));
+      }
+      items.add(_ScoreCard(score: done.score, coins: null, attempt: done.secondAttempt));
     }
 
     if (_stage == _Stage.sessionDone) {
@@ -468,15 +476,15 @@ class _TrainingScreenState extends State<TrainingScreen> {
         items.add(const _Thinking(label: 'Разбираю первую попытку'));
         break;
       case _Stage.awaitingSecond:
-        items.add(_ErrorReport(errors: _firstAttemptErrors));
+        items.add(_ErrorReport(errors: _firstAttemptErrors, attempt: _firstAttempt));
         break;
       case _Stage.gradingSecond:
-        items.add(_ErrorReport(errors: _firstAttemptErrors));
+        items.add(_ErrorReport(errors: _firstAttemptErrors, attempt: _firstAttempt));
         items.add(const _Thinking(label: 'Оцениваю вторую попытку'));
         break;
       case _Stage.roundDone:
-        items.add(_ErrorReport(errors: _firstAttemptErrors));
-        items.add(_ScoreCard(score: _finalScore ?? 0, coins: _earnedCoins));
+        items.add(_ErrorReport(errors: _firstAttemptErrors, attempt: _firstAttempt));
+        items.add(_ScoreCard(score: _finalScore ?? 0, coins: _earnedCoins, attempt: _secondAttempt));
         break;
       default:
         break;
@@ -491,12 +499,16 @@ class _CompletedRound {
   final String phrase;
   final List<Map<String, dynamic>> errors;
   final int score;
+  final RecordingOutcome? firstAttempt;
+  final RecordingOutcome? secondAttempt;
 
   const _CompletedRound({
     required this.roundNumber,
     required this.phrase,
     required this.errors,
     required this.score,
+    required this.firstAttempt,
+    required this.secondAttempt,
   });
 }
 
@@ -571,33 +583,62 @@ class _Thinking extends StatelessWidget {
 
 /// Разбор ошибок после первой попытки — то, ради чего в соло есть вторая
 /// попытка (раздел 2.2, шаги 3-4).
+///
+/// Заголовок панели зависит не только от того, нашлись ли ошибки: тишина и
+/// сбой распознавания — это НЕ «ошибок не найдено», и раньше все три случая
+/// выглядели одинаково, из-за чего сломанное распознавание речи выглядело
+/// как безупречный ответ.
 class _ErrorReport extends StatelessWidget {
   final List<Map<String, dynamic>> errors;
+  final RecordingOutcome? attempt;
 
-  const _ErrorReport({required this.errors});
+  const _ErrorReport({required this.errors, required this.attempt});
 
   @override
   Widget build(BuildContext context) {
+    final status = attempt?.status ?? TranscriptStatus.ok;
+    final notRecognised = status == TranscriptStatus.empty || status == TranscriptStatus.failed;
+
+    final (String title, Color titleColor) = switch (status) {
+      TranscriptStatus.failed => ('РЕЧЬ НЕ РАСПОЗНАНА', AppColors.muted),
+      TranscriptStatus.empty => ('НИЧЕГО НЕ УСЛЫШАЛ', AppColors.muted),
+      _ => errors.isEmpty ? ('ОШИБОК НЕ НАЙДЕНО', AppColors.ok) : ('РАЗБОР ПЕРВОЙ ПОПЫТКИ', AppColors.gold),
+    };
+
+    final String hint = switch (status) {
+      TranscriptStatus.failed =>
+        'Не удалось распознать речь — это сбой на нашей стороне, балл за него не снижается. Попробуй сказать фразу ещё раз.',
+      TranscriptStatus.empty =>
+        'Похоже, записалась тишина. Говори чётче и ближе к микрофону, удерживая кнопку всё время, пока говоришь.',
+      _ => 'Скажи фразу ещё раз — вторая попытка идёт в зачёт.',
+    };
+
+    final transcript = attempt?.transcript ?? '';
+
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 8),
       child: ChPanel(
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(
-              errors.isEmpty ? 'ОШИБОК НЕ НАЙДЕНО' : 'РАЗБОР ПЕРВОЙ ПОПЫТКИ',
-              style: AppFonts.mono(
-                fontSize: 9,
-                weight: FontWeight.w700,
-                color: errors.isEmpty ? AppColors.ok : AppColors.gold,
-              ),
-            ),
+            Text(title, style: AppFonts.mono(fontSize: 9, weight: FontWeight.w700, color: titleColor)),
             const SizedBox(height: 8),
-            if (errors.isEmpty)
-              const Text(
-                'Скажи фразу ещё раз — вторая попытка идёт в зачёт.',
-                style: TextStyle(color: AppColors.muted, fontSize: 12, height: 1.4),
-              )
+            // Игрок должен видеть, что именно услышал распознаватель —
+            // иначе разбор ошибок в чужой по сути фразе выглядит абсурдом.
+            if (transcript.isNotEmpty) ...[
+              Text(
+                '«$transcript»',
+                style: const TextStyle(
+                  color: AppColors.cream,
+                  fontSize: 12,
+                  height: 1.4,
+                  fontStyle: FontStyle.italic,
+                ),
+              ),
+              const SizedBox(height: 8),
+            ],
+            if (errors.isEmpty || notRecognised)
+              Text(hint, style: const TextStyle(color: AppColors.muted, fontSize: 12, height: 1.4))
             else
               ...errors.map((e) => Padding(
                     padding: const EdgeInsets.only(bottom: 8),
@@ -627,7 +668,12 @@ class _ScoreCard extends StatelessWidget {
   final int score;
   final int? coins;
 
-  const _ScoreCard({required this.score, required this.coins});
+  /// Итог распознавания ВТОРОЙ попытки — именно она идёт в зачёт. Нужен,
+  /// чтобы объяснить балл, выставленный не за качество речи, а из-за тишины
+  /// или сбоя распознавания.
+  final RecordingOutcome? attempt;
+
+  const _ScoreCard({required this.score, required this.coins, this.attempt});
 
   @override
   Widget build(BuildContext context) {
@@ -661,6 +707,22 @@ class _ScoreCard extends StatelessWidget {
                     coins == null ? 'Рейтинг не меняется' : '+$coins монет · рейтинг не меняется',
                     style: const TextStyle(color: AppColors.muted, fontSize: 11),
                   ),
+                  if (attempt?.status == TranscriptStatus.failed)
+                    const Padding(
+                      padding: EdgeInsets.only(top: 4),
+                      child: Text(
+                        'Речь распознать не удалось — балл нейтральный, не в минус тебе',
+                        style: TextStyle(color: AppColors.muted, fontSize: 11, height: 1.3),
+                      ),
+                    )
+                  else if (attempt?.status == TranscriptStatus.empty)
+                    const Padding(
+                      padding: EdgeInsets.only(top: 4),
+                      child: Text(
+                        'Во второй попытке записалась тишина',
+                        style: TextStyle(color: AppColors.muted, fontSize: 11, height: 1.3),
+                      ),
+                    ),
                 ],
               ),
             ),
