@@ -135,7 +135,7 @@ async function checkLlm(): Promise<CheckResult> {
   }
 
   const baseUrl = Deno.env.get("LLM_BASE_URL") ?? "https://api.b.ai/v1";
-  const model = Deno.env.get("LLM_MODEL") ?? "DeepSeek-V4-Flash";
+  const model = Deno.env.get("LLM_MODEL") ?? "(не задана)";
   try {
     const res = await withTimeout((signal) =>
       fetch(`${baseUrl}/chat/completions`, {
@@ -158,13 +158,45 @@ async function checkLlm(): Promise<CheckResult> {
       };
     }
     const body = await res.text().catch(() => "");
-    return {
+    const result: CheckResult & { available_models?: string[] } = {
       configured: true,
       reachable: false,
       detail: `${baseUrl} вернул HTTP ${res.status}: ${body.slice(0, 300)}`,
     };
+    // Не та модель — самая частая причина отказа, и чинится она сменой
+    // одной переменной. Спрашиваем у провайдера список, чтобы не заставлять
+    // угадывать имя вслепую.
+    if (/model_not_found|model.*does not exist|unknown model/i.test(body) || res.status === 404) {
+      result.available_models = await listModels(baseUrl, apiKey);
+      result.detail += ` — модель ${model} провайдер не знает. ` +
+        "Выберите имя из available_models и задайте: npx supabase secrets set LLM_MODEL=<имя>";
+    }
+    return result;
   } catch (e) {
     return { configured: true, reachable: false, detail: `запрос не удался: ${e}` };
+  }
+}
+
+/** Список моделей провайдера — только имена, для подсказки в ответе. */
+async function listModels(baseUrl: string, apiKey: string): Promise<string[]> {
+  try {
+    const res = await withTimeout((signal) =>
+      fetch(`${baseUrl}/models`, { headers: { Authorization: `Bearer ${apiKey}` }, signal })
+    );
+    if (!res.ok) return [`не удалось получить список моделей: HTTP ${res.status}`];
+    const data = await res.json();
+    const items = Array.isArray(data?.data) ? data.data : Array.isArray(data) ? data : [];
+    const names = items
+      .map((m: unknown) => (typeof m === "string" ? m : (m as { id?: string })?.id))
+      .filter((id: unknown): id is string => typeof id === "string");
+    if (names.length === 0) return ["провайдер вернул пустой список моделей"];
+    // Модели для рассуждений/чата — то, что нам нужно; список у
+    // распределителей бывает на сотни позиций, поэтому поднимаем наверх
+    // похожие на подходящие, но показываем и остальные.
+    const likely = names.filter((n: string) => /deepseek|qwen|gpt|claude|mistral|llama|gemini|glm/i.test(n));
+    return [...new Set([...likely, ...names])].slice(0, 60);
+  } catch (e) {
+    return [`не удалось получить список моделей: ${e}`];
   }
 }
 
@@ -267,7 +299,7 @@ Deno.serve(async (req) => {
         asr: { provider: Deno.env.get("ASR_PROVIDER") ?? "google", ...asr },
         llm: {
           base_url: Deno.env.get("LLM_BASE_URL") ?? "https://api.b.ai/v1",
-          model: Deno.env.get("LLM_MODEL") ?? "DeepSeek-V4-Flash",
+          model: Deno.env.get("LLM_MODEL") ?? "(не задана)",
           ...llm,
         },
         // llm выше проверяет только доступность эндпоинта; judge прогоняет

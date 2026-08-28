@@ -216,10 +216,21 @@ async function callLlmOnce(
 ): Promise<string> {
   const baseUrl = Deno.env.get("LLM_BASE_URL") ?? "https://api.b.ai/v1";
   const apiKey = Deno.env.get("LLM_API_KEY");
-  const model = Deno.env.get("LLM_MODEL") ?? "DeepSeek-V4-Flash";
+  // Значения по умолчанию у имени модели СОЗНАТЕЛЬНО нет. Раньше здесь
+  // стояло "DeepSeek-V4-Flash" — модели с таким именем у провайдера не
+  // существует, и каждый вызов судьи молча падал с model_not_found. Пусть
+  // лучше отсутствие настройки будет явной ошибкой, чем «работающим»
+  // значением, которое на самом деле не работает.
+  const model = Deno.env.get("LLM_MODEL");
 
   if (!apiKey) {
     throw new Error("LLM_API_KEY is not configured");
+  }
+  if (!model) {
+    throw new Error(
+      "LLM_MODEL is not configured — задайте имя модели из списка провайдера: " +
+        "npx supabase secrets set LLM_MODEL=<имя>",
+    );
   }
 
   // Таймаут обязателен: без него зависший/медленный провайдер держит
@@ -328,6 +339,12 @@ export async function evaluateGrammar(
     } catch (e) {
       const message = String(e);
       failures.push(`попытка ${attempt}: ${message.slice(0, 300)}`);
+
+      // Неверная модель, неверный ключ, нет прав — повтор с тем же запросом
+      // не поможет никогда, только сожжёт время работы функции и квоту.
+      if (/model_not_found|does not exist|unknown model|HTTP 401|HTTP 403/i.test(message)) {
+        break;
+      }
       if (useResponseFormat && /response_format|json_object|HTTP 4\d\d/i.test(message)) {
         useResponseFormat = false;
       }

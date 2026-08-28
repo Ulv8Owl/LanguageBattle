@@ -202,15 +202,24 @@ Editor. Чтобы проверить сквозной путь «два реа�
    ```
    npx supabase secrets set LLM_API_KEY=<ваш API key>
    npx supabase secrets set LLM_BASE_URL=https://api.b.ai/v1
-   npx supabase secrets set LLM_MODEL=DeepSeek-V4-Flash
+   npx supabase secrets set LLM_MODEL=<имя модели у вашего провайдера>
    ```
    Важно: `LLM_BASE_URL` — это база БЕЗ `/chat/completions` в конце, код
    сам дописывает этот путь при вызове (`${baseUrl}/chat/completions`).
 
-   (`LLM_BASE_URL`/`LLM_MODEL` можно не задавать — текущие значения по
-   умолчанию в коде это как раз api.b.ai/DeepSeek-V4-Flash; меняете их,
-   когда захотите перейти на другого провайдера из раздела 9.2, без
-   единой правки кода.)
+   **`LLM_MODEL` задавать ОБЯЗАТЕЛЬНО, значения по умолчанию у него нет.**
+   Раньше в коде стояло `DeepSeek-V4-Flash` — модели с таким именем у
+   провайдера не существует, каждый вызов судьи падал с `model_not_found`,
+   и это выглядело для игрока как «ошибок не найдено». Отсутствие
+   настройки теперь честная ошибка, а не «работающее» значение, которое на
+   самом деле не работает.
+
+   Точное имя модели спрашивайте у провайдера:
+   ```
+   curl -s https://api.b.ai/v1/models -H "Authorization: Bearer <ваш LLM key>"
+   ```
+   либо просто запустите `config-check` (ниже) — при `model_not_found` он
+   сам приложит список доступных моделей в поле `available_models`.
 3. **Секреты для триггера БД** (URL функции + service_role key — их
    отдельно кладём в Supabase Vault через SQL Editor, чтобы они не попали
    в этот репозиторий):
