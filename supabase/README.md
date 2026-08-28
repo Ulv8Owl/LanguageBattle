@@ -202,7 +202,7 @@ Editor. Чтобы проверить сквозной путь «два реа�
    ```
    npx supabase secrets set LLM_API_KEY=<ваш API key>
    npx supabase secrets set LLM_BASE_URL=https://api.b.ai/v1
-   npx supabase secrets set LLM_MODEL=<имя модели у вашего провайдера>
+   npx supabase secrets set LLM_MODEL=deepseek-v4-flash
    ```
    Важно: `LLM_BASE_URL` — это база БЕЗ `/chat/completions` в конце, код
    сам дописывает этот путь при вызове (`${baseUrl}/chat/completions`).
@@ -213,6 +213,10 @@ Editor. Чтобы проверить сквозной путь «два реа�
    и это выглядело для игрока как «ошибок не найдено». Отсутствие
    настройки теперь честная ошибка, а не «работающее» значение, которое на
    самом деле не работает.
+
+   Имя модели чувствительно к регистру: у api.b.ai работает
+   `deepseek-v4-flash` (в нижнем регистре), а `DeepSeek-V4-Flash`, который
+   стоял здесь раньше, провайдер не знает вообще.
 
    Точное имя модели спрашивайте у провайдера:
    ```

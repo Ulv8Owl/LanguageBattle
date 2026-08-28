@@ -146,7 +146,11 @@ async function checkLlm(): Promise<CheckResult> {
           model,
           messages: [{ role: "user", content: "ping" }],
           stream: false,
-          max_tokens: 1,
+          // Не ставить сюда 1: часть провайдеров (в том числе api.b.ai)
+          // отвечает на такое `max_tokens must be greater than 2`, и
+          // проверка ложно сообщала о недоступности эндпоинта, хотя
+          // настоящий судья на том же ключе и той же модели работал.
+          max_tokens: 16,
         }),
       })
     );
