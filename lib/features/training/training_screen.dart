@@ -95,6 +95,7 @@ class _TrainingScreenState extends State<TrainingScreen> {
   void dispose() {
     _jobSub?.cancel();
     _roundSub?.cancel();
+    _watchdog?.cancel();
     _feedController.dispose();
     super.dispose();
   }
@@ -222,6 +223,7 @@ class _TrainingScreenState extends State<TrainingScreen> {
   /// (раздел 2.2). Готовность ловим по статусу задачи в очереди.
   void _watchFirstAttempt(String recordingId) {
     _jobSub?.cancel();
+    _startWatchdog(() => _giveUpOnFirstAttempt(recordingId));
     _jobSub = supabase
         .from('evaluation_jobs')
         .stream(primaryKey: ['id'])
@@ -231,6 +233,7 @@ class _TrainingScreenState extends State<TrainingScreen> {
       final jobStatus = rows.first['status'] as String?;
       if (jobStatus != 'done' && jobStatus != 'failed') return;
       _jobSub?.cancel();
+      _watchdog?.cancel();
 
       final outcome = await fetchRecordingOutcome(recordingId);
       final errors = await supabase
@@ -252,9 +255,67 @@ class _TrainingScreenState extends State<TrainingScreen> {
     });
   }
 
+  /// Сколько ждать результат от сервера, прежде чем признать, что он не
+  /// придёт. Оценка идёт асинхронно (распознавание + LLM), поэтому запас
+  /// большой — но НЕ бесконечный: воркер может быть убит платформой на
+  /// середине, и тогда статус задачи не изменится уже никогда, а игрок
+  /// смотрит на вечный спиннер. Раньше это был именно вечный спиннер.
+  static const _resultTimeout = Duration(seconds: 90);
+
+  Timer? _watchdog;
+
+  void _startWatchdog(void Function() onTimeout) {
+    _watchdog?.cancel();
+    _watchdog = Timer(_resultTimeout, onTimeout);
+  }
+
+  /// Результат по первой попытке так и не пришёл. Освобождаем зависшую
+  /// задачу на сервере и пускаем игрока дальше — вторую попытку отбирать
+  /// не за что, сбой не его вина.
+  Future<void> _giveUpOnFirstAttempt(String recordingId) async {
+    _jobSub?.cancel();
+    await supabase.rpc('fail_stale_evaluation_jobs', params: {'p_stale_seconds': 60}).catchError((e) {
+      debugPrint('fail_stale_evaluation_jobs failed: $e');
+      return null;
+    });
+    if (!mounted) return;
+    setState(() {
+      _firstAttempt = const RecordingOutcome(transcript: '', status: TranscriptStatus.failed);
+      _stage = _Stage.awaitingSecond;
+    });
+    _scrollToBottomSoon();
+  }
+
+  /// То же для второй попытки, но здесь нужен балл — ставим нейтральный,
+  /// как и сервер при собственном сбое: наказывать игрока не за что.
+  Future<void> _giveUpOnSecondAttempt() async {
+    _roundSub?.cancel();
+    await supabase.rpc('fail_stale_evaluation_jobs', params: {'p_stale_seconds': 60}).catchError((e) {
+      debugPrint('fail_stale_evaluation_jobs failed: $e');
+      return null;
+    });
+    if (!mounted) return;
+    setState(() {
+      _secondAttempt = const RecordingOutcome(
+        transcript: '',
+        status: TranscriptStatus.failed,
+        judgeStatus: JudgeStatus.degraded,
+      );
+      _finalScore = _neutralScore;
+      _earnedCoins = null;
+      _stage = _Stage.roundDone;
+    });
+    _scrollToBottomSoon();
+  }
+
+  /// Тот же нейтральный балл, что ставит сервер при сбое на своей стороне
+  /// (NEUTRAL_SCORE в supabase/functions/_shared/evaluateGrammar.ts).
+  static const _neutralScore = 7;
+
   /// Финальный балл за раунд пишет воркер в training_rounds.final_score.
   void _watchFinalScore(String roundId, String recordingId) {
     _roundSub?.cancel();
+    _startWatchdog(_giveUpOnSecondAttempt);
     _roundSub = supabase
         .from('training_rounds')
         .stream(primaryKey: ['id'])
@@ -264,6 +325,7 @@ class _TrainingScreenState extends State<TrainingScreen> {
       final score = rows.first['final_score'] as int?;
       if (score == null) return;
       _roundSub?.cancel();
+      _watchdog?.cancel();
 
       final outcome = await fetchRecordingOutcome(recordingId);
       if (mounted) setState(() => _secondAttempt = outcome);

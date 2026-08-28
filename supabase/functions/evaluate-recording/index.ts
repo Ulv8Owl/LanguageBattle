@@ -62,20 +62,59 @@ interface VoiceRecordingRow {
   created_at: string;
 }
 
-Deno.serve(async (req) => {
+/**
+ * Продлевает жизнь воркера после отправки ответа. Есть в рантайме Supabase
+ * Edge Functions; объявлено здесь, потому что в типах Deno этого нет.
+ */
+declare const EdgeRuntime: { waitUntil(promise: Promise<unknown>): void } | undefined;
+
+Deno.serve(async (req: Request) => {
+  // Отвечаем СРАЗУ, а работу доделываем в фоне.
+  //
+  // Вызывающая сторона — триггер БД через pg_net, у которого таймаут на
+  // запрос (по умолчанию всего 5 секунд, см. миграцию 0015). Пока воркер
+  // отвечал за доли секунды, это было незаметно; теперь он ждёт
+  // распознавание речи и подробный разбор LLM — десятки секунд. Когда
+  // вызывающая сторона отваливается по таймауту, платформа вправе убить
+  // изолят на середине: задача остаётся в 'processing' навсегда, а игрок
+  // смотрит на бесконечный спиннер «Разбираю попытку».
+  //
+  // Ответ здесь — это подтверждение приёма задачи, а НЕ её результат:
+  // результат клиент и так получает через Realtime, синхронно его никто не
+  // ждёт (раздел 9.8).
+  // Тело читаем ДО ответа: после него поток запроса уже может быть закрыт.
+  let jobId: string | undefined;
+  try {
+    jobId = (await req.json())?.job_id;
+  } catch (e) {
+    console.error("evaluate-recording: не разобрал тело запроса", e);
+  }
+  if (!jobId) {
+    return new Response(JSON.stringify({ error: "job_id is required" }), { status: 400 });
+  }
+
+  const started = processJob(jobId);
+  if (typeof EdgeRuntime !== "undefined") {
+    EdgeRuntime.waitUntil(started);
+  } else {
+    // Локальный запуск без рантайма Supabase — там ждём обычным способом,
+    // иначе задача оборвётся вместе с ответом.
+    await started;
+  }
+
+  return new Response(JSON.stringify({ accepted: true, job_id: jobId }), {
+    status: 202,
+    headers: { "Content-Type": "application/json" },
+  });
+});
+
+async function processJob(job_id: string): Promise<void> {
   const supabase = createClient(
     Deno.env.get("SUPABASE_URL")!,
     Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
   );
-  let jobId: string | undefined;
 
   try {
-    const { job_id } = await req.json();
-    jobId = job_id;
-    if (!job_id) {
-      return new Response(JSON.stringify({ error: "job_id is required" }), { status: 400 });
-    }
-
     const { data: job, error: jobErr } = await supabase
       .from("evaluation_jobs")
       .select("*")
@@ -86,11 +125,11 @@ Deno.serve(async (req) => {
       // доступа, формат id и т.п.) под одинаковый неинформативный ответ —
       // логируем настоящую причину, чтобы не гадать вслепую по логам.
       console.error("evaluate-recording: job lookup failed", { job_id, jobErr });
-      return new Response(JSON.stringify({ error: "job not found", detail: jobErr }), { status: 404 });
+      return;
     }
     if (job.status !== "pending") {
       // Уже обрабатывается/обработана — не задваиваем работу.
-      return new Response(JSON.stringify({ skipped: true }), { status: 200 });
+      return;
     }
 
     await supabase.from("evaluation_jobs").update({ status: "processing" }).eq("id", job_id);
@@ -106,7 +145,7 @@ Deno.serve(async (req) => {
         recErr,
       });
       await supabase.from("evaluation_jobs").update({ status: "failed" }).eq("id", job_id);
-      return new Response(JSON.stringify({ error: "recording not found", detail: recErr }), { status: 404 });
+      return;
     }
     const recording = recordingRow as VoiceRecordingRow;
 
@@ -114,7 +153,7 @@ Deno.serve(async (req) => {
     // не оценивается (см. раздел 2.4), поэтому и распознавать его незачем.
     if (recording.recording_slot === "native") {
       await markDone(supabase, job_id);
-      return new Response(JSON.stringify({ skipped: "native slot not graded" }), { status: 200 });
+      return;
     }
 
     const targetLanguage = recording.language_code ?? "en";
@@ -226,15 +265,15 @@ Deno.serve(async (req) => {
     }
 
     await markDone(supabase, job_id);
-    return new Response(JSON.stringify({ ok: true, score, transcript_status: status }), { status: 200 });
+    console.log("evaluate-recording: готово", { job_id, score, transcript_status: status, judge_status: judgeStatus });
   } catch (e) {
+    // Задача ОБЯЗАНА получить конечный статус в любом случае: клиент ждёт
+    // 'done'/'failed' через Realtime, и оставленный 'processing' — это
+    // бесконечный спиннер у игрока.
     console.error("evaluate-recording failed:", e);
-    if (jobId) {
-      await supabase.from("evaluation_jobs").update({ status: "failed" }).eq("id", jobId);
-    }
-    return new Response(JSON.stringify({ error: String(e) }), { status: 500 });
+    await supabase.from("evaluation_jobs").update({ status: "failed" }).eq("id", job_id);
   }
-});
+}
 
 /**
  * Возвращает транскрипт записи, распознавая аудио, если это ещё не сделано,
