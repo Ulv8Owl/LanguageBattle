@@ -260,7 +260,7 @@ class _TrainingScreenState extends State<TrainingScreen> {
   /// большой — но НЕ бесконечный: воркер может быть убит платформой на
   /// середине, и тогда статус задачи не изменится уже никогда, а игрок
   /// смотрит на вечный спиннер. Раньше это был именно вечный спиннер.
-  static const _resultTimeout = Duration(seconds: 90);
+  static const _resultTimeout = Duration(seconds: 120);
 
   Timer? _watchdog;
 

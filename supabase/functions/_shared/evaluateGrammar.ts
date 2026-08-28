@@ -233,14 +233,21 @@ async function callLlmOnce(
     );
   }
 
-  // Таймаут обязателен: без него зависший/медленный провайдер держит
-  // запрос до убийства всей Edge Function платформой, а это происходит
-  // ДО catch-блока — evaluation_jobs так и останется в 'processing'
-  // навсегда, и клиент (ждущий 'done'/'failed') зависнет на экране
-  // "Разбираю попытку" без единой ошибки в логах. С таймаутом fetch
-  // сам бросает исключение, которое ловит retry-цикл evaluateGrammar.
+  // Таймаут обязателен: без него зависший провайдер держит запрос до
+  // убийства всей Edge Function платформой, а это происходит ДО
+  // catch-блока — evaluation_jobs так и осталась бы в 'processing'
+  // навсегда. С таймаутом fetch сам бросает исключение, которое ловит
+  // retry-цикл evaluateGrammar.
+  //
+  // Но и слишком тесным он быть не может. Было 20 секунд — этого не
+  // хватало: разбор для Одиночной Игры просит 3-5 предложений объяснения
+  // НА КАЖДУЮ ошибку, и на нескольких ошибках модель просто не успевала
+  // договорить. Судья упирался в таймаут все три раза подряд (в базе это
+  // видно как задачи длительностью ~63 секунды = 3 x 20 c + распознавание)
+  // и деградировал, а игрок видел «ИИ-судья не отвечает».
+  const timeoutMs = Number(Deno.env.get("LLM_TIMEOUT_MS") ?? 45_000);
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 20_000);
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
 
   let res: Response;
   try {
@@ -262,13 +269,18 @@ async function callLlmOnce(
         stream: false,
         // Structured output там, где провайдер это поддерживает (раздел 9.3).
         ...(useResponseFormat ? { response_format: { type: "json_object" } } : {}),
+        // Потолок длины ответа. Без него модель на подробном режиме может
+        // писать сколь угодно долго и упереться в таймаут, не договорив —
+        // а недоговорённый JSON бесполезен целиком. Запаса хватает на
+        // десяток подробных объяснений.
+        max_tokens: 2000,
         temperature: 0.2,
       }),
       signal: controller.signal,
     });
   } catch (e) {
     if (e instanceof Error && e.name === "AbortError") {
-      throw new Error("LLM request timed out after 20s");
+      throw new Error(`LLM request timed out after ${Math.round(timeoutMs / 1000)}s`);
     }
     throw e;
   } finally {
@@ -320,6 +332,7 @@ export async function evaluateGrammar(
   const failures: string[] = [];
 
   for (let attempt = 0; attempt < 3; attempt++) {
+    const startedAt = Date.now();
     try {
       const raw = await callLlmOnce(
         transcript,
@@ -331,6 +344,11 @@ export async function evaluateGrammar(
       );
       const parsed = validate(extractJson(raw));
       if (parsed) {
+        // Время ответа в логах — чтобы «судья не отвечает» сразу отличалось
+        // от «судья отвечает, но медленно» без раскопок по таблицам.
+        console.log(
+          `evaluateGrammar: ответ за ${Date.now() - startedAt} мс, ошибок ${parsed.errors.length}`,
+        );
         return { score: parsed.score, errors: parsed.errors, degraded: false };
       }
       // Разобрали JSON, но форма не та — покажем, что именно вернула модель,
@@ -338,11 +356,18 @@ export async function evaluateGrammar(
       failures.push(`попытка ${attempt}: ответ разобран, но не той формы: ${raw.slice(0, 300)}`);
     } catch (e) {
       const message = String(e);
-      failures.push(`попытка ${attempt}: ${message.slice(0, 300)}`);
+      failures.push(`попытка ${attempt} (${Date.now() - startedAt} мс): ${message.slice(0, 300)}`);
 
       // Неверная модель, неверный ключ, нет прав — повтор с тем же запросом
       // не поможет никогда, только сожжёт время работы функции и квоту.
       if (/model_not_found|does not exist|unknown model|HTTP 401|HTTP 403/i.test(message)) {
+        break;
+      }
+      // Таймаут — тоже не повод повторять: модель не «сбойнула», она просто
+      // не успевает, и второй такой же запрос не будет быстрее. Раньше три
+      // таймаута подряд съедали больше минуты и всё равно заканчивались
+      // деградацией — ровно то, что игрок видел как «судья не отвечает».
+      if (/timed out/i.test(message)) {
         break;
       }
       if (useResponseFormat && /response_format|json_object|HTTP 4\d\d/i.test(message)) {
