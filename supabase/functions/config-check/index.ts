@@ -211,14 +211,49 @@ async function checkJudge(): Promise<CheckResult & { probe?: unknown }> {
   };
 }
 
+/**
+ * Роль из полезной нагрузки JWT — БЕЗ проверки подписи, и это здесь
+ * безопасно: функция задеплоена с включённым verify_jwt (значение по
+ * умолчанию), поэтому платформа уже проверила подпись ключом проекта до
+ * входа в этот обработчик. Наше дело — отличить service_role от anon, а не
+ * подтвердить подлинность токена заново.
+ */
+function jwtRole(token: string): string | null {
+  const parts = token.split(".");
+  if (parts.length !== 3) return null;
+  try {
+    const padded = parts[1].replace(/-/g, "+").replace(/_/g, "/");
+    const payload = JSON.parse(atob(padded + "=".repeat((4 - (padded.length % 4)) % 4)));
+    return typeof payload?.role === "string" ? payload.role : null;
+  } catch {
+    return null;
+  }
+}
+
 Deno.serve(async (req) => {
-  const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
-  const presented = (req.headers.get("Authorization") ?? "").replace(/^Bearer\s+/i, "");
-  if (!serviceKey || presented !== serviceKey) {
-    return new Response(JSON.stringify({ error: "service_role key required" }), {
-      status: 401,
-      headers: { "Content-Type": "application/json" },
-    });
+  const presented = (req.headers.get("Authorization") ?? "").replace(/^Bearer\s+/i, "").trim();
+  const role = jwtRole(presented);
+  // Сравнение строк с SUPABASE_SERVICE_ROLE_KEY оставлено только запасным
+  // путём: у проектов, переведённых на новые ключи (sb_secret_...), в
+  // функцию подставляется НЕ тот же ключ, что показан в дашборде как
+  // legacy service_role, и строгое равенство отвергало верный ключ.
+  // Роль в JWT — то, что нас на самом деле интересует.
+  const injected = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
+  const authorised = role === "service_role" || (injected !== "" && presented === injected);
+
+  if (!authorised) {
+    return new Response(
+      JSON.stringify({
+        error: "нужен service_role key",
+        // Подсказка без раскрытия секретов: показывает, ЧТО прислали.
+        seen: presented === ""
+          ? "заголовок Authorization пуст"
+          : role === null
+          ? "прислан не-JWT токен, и он не совпал с ключом функции"
+          : `прислан токен с ролью "${role}" — нужен service_role`,
+      }),
+      { status: 401, headers: { "Content-Type": "application/json" } },
+    );
   }
 
   const [asr, llm, judge] = await Promise.all([checkAsr(), checkLlm(), checkJudge()]);
