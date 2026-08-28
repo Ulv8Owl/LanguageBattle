@@ -29,12 +29,41 @@ enum TranscriptStatus {
       };
 }
 
+/// Отработал ли LLM-судья по этой записи. Значения совпадают со столбцом
+/// voice_recordings.judge_status (миграция 0014).
+enum JudgeStatus {
+  /// Задача ещё не дошла до судьи.
+  pending,
+
+  /// Судья ответил: пустой список ошибок здесь и правда значит «ошибок нет».
+  ok,
+
+  /// Судья не ответил или ответил мусором — балл нейтральный, а пустой
+  /// список ошибок НЕ значит, что ошибок нет.
+  degraded,
+
+  /// Судью не звали: речь не распознана либо это родной слот Дуэли.
+  skipped;
+
+  static JudgeStatus parse(String? value) => switch (value) {
+        'ok' => JudgeStatus.ok,
+        'degraded' => JudgeStatus.degraded,
+        'skipped' => JudgeStatus.skipped,
+        _ => JudgeStatus.pending,
+      };
+}
+
 /// Что сервер в итоге разобрал по загруженной записи.
 class RecordingOutcome {
   final String transcript;
   final TranscriptStatus status;
+  final JudgeStatus judgeStatus;
 
-  const RecordingOutcome({required this.transcript, required this.status});
+  const RecordingOutcome({
+    required this.transcript,
+    required this.status,
+    this.judgeStatus = JudgeStatus.ok,
+  });
 }
 
 /// Отправка голосового: файл в Storage -> строка в voice_recordings ->
@@ -97,12 +126,13 @@ Future<String> submitVoiceRecording({
 Future<RecordingOutcome> fetchRecordingOutcome(String recordingId) async {
   final row = await supabase
       .from('voice_recordings')
-      .select('transcript, transcript_status')
+      .select('transcript, transcript_status, judge_status')
       .eq('id', recordingId)
       .maybeSingle();
   return RecordingOutcome(
     transcript: ((row?['transcript'] as String?) ?? '').trim(),
     status: TranscriptStatus.parse(row?['transcript_status'] as String?),
+    judgeStatus: JudgeStatus.parse(row?['judge_status'] as String?),
   );
 }
 

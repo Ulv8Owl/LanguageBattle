@@ -45,6 +45,9 @@ const EMPTY_TRANSCRIPT_SCORE = 1;
 /** Статусы распознавания — те же значения, что в CHECK у voice_recordings (миграция 0013). */
 type TranscriptStatus = "pending" | "ok" | "empty" | "failed";
 
+/** Статусы работы судьи — CHECK у voice_recordings (миграция 0014). */
+type JudgeStatus = "pending" | "ok" | "degraded" | "skipped";
+
 /** Поля voice_recordings, которыми пользуется воркер. */
 interface VoiceRecordingRow {
   id: string;
@@ -125,12 +128,16 @@ Deno.serve(async (req) => {
     let errors: { offset: number; length: number; message: string; replacement: string; category: string }[] = [];
     let feedback: string;
 
+    let judgeStatus: JudgeStatus;
+
     if (status === "failed") {
       score = NEUTRAL_SCORE;
       feedback = "Не удалось распознать речь — балл выставлен нейтральным.";
+      judgeStatus = "skipped";
     } else if (status === "empty") {
       score = EMPTY_TRANSCRIPT_SCORE;
       feedback = "Не удалось разобрать речь — попробуй сказать чётче и ближе к микрофону.";
+      judgeStatus = "skipped";
     } else {
       // Лига говорящего на этом языке -> уровень CEFR (скрытая механика:
       // приравнивание лиг к A1-C2) — ограничивает только сложность текста
@@ -160,12 +167,25 @@ Deno.serve(async (req) => {
 
       score = result.score;
       errors = result.errors;
+      judgeStatus = result.degraded ? "degraded" : "ok";
       feedback = result.degraded
         ? "Не удалось получить разбор от ИИ — балл выставлен нейтральным."
         : errors.length === 0
         ? "Отлично, ошибок не найдено!"
         : errors.map((e) => e.message).slice(0, 3).join(" ");
+
+      if (result.degraded) {
+        console.error("evaluate-recording: судья деградировал", {
+          recordingId: recording.id,
+          reason: result.failureReason,
+        });
+      }
     }
+
+    await supabase
+      .from("voice_recordings")
+      .update({ judge_status: judgeStatus })
+      .eq("id", recording.id);
 
     if (errors.length > 0) {
       await supabase.from("grammar_errors").insert(

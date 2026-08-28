@@ -15,6 +15,12 @@
 // «ключ не задан», и недостаточно, чтобы им воспользоваться.
 
 import { bcp47For } from "../_shared/transcribeAudio.ts";
+import { evaluateGrammar } from "../_shared/evaluateGrammar.ts";
+
+/// Заведомо ошибочная фраза: судья ОБЯЗАН найти здесь минимум одну ошибку
+/// (He go -> He went / He goes). Если он возвращает пустой список — дело не
+/// в связи с провайдером, а в том, что он не понимает задачу.
+const JUDGE_PROBE = "He go to school yesterday and dont finish he homework";
 
 interface CheckResult {
   configured: boolean;
@@ -162,6 +168,49 @@ async function checkLlm(): Promise<CheckResult> {
   }
 }
 
+/**
+ * Прогон НАСТОЯЩЕГО судьи на заведомо ошибочной фразе — тем же кодом, что
+ * работает в бою. Отличает три разных «LLM не работает»:
+ * связь есть, но модель не отвечает форматом; связи нет; всё работает, но
+ * модель не находит ошибок.
+ */
+async function checkJudge(): Promise<CheckResult & { probe?: unknown }> {
+  if (!Deno.env.get("LLM_API_KEY")) {
+    return { configured: false, reachable: null, detail: "LLM_API_KEY не задан — судью проверять нечем" };
+  }
+
+  const result = await evaluateGrammar(JUDGE_PROBE, "en", "ru", true, "A1");
+
+  if (result.degraded) {
+    return {
+      configured: true,
+      reachable: false,
+      detail: `судья не дал разбора: ${result.failureReason ?? "причина не записана"}`,
+      probe: { transcript: JUDGE_PROBE },
+    };
+  }
+  if (result.errors.length === 0) {
+    return {
+      configured: true,
+      reachable: true,
+      detail:
+        "СВЯЗЬ ЕСТЬ, НО МОДЕЛЬ НЕ НАХОДИТ ОШИБОК в заведомо ошибочной фразе — " +
+        `вернула score=${result.score} и пустой список. Похоже на слишком слабую модель: попробуйте другую через LLM_MODEL.`,
+      probe: { transcript: JUDGE_PROBE, score: result.score, errors: [] },
+    };
+  }
+  return {
+    configured: true,
+    reachable: true,
+    detail: `судья работает: нашёл ошибок — ${result.errors.length}, балл ${result.score}`,
+    probe: {
+      transcript: JUDGE_PROBE,
+      score: result.score,
+      errors: result.errors.map((e) => ({ message: e.message, replacement: e.replacement, category: e.category })),
+    },
+  };
+}
+
 Deno.serve(async (req) => {
   const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
   const presented = (req.headers.get("Authorization") ?? "").replace(/^Bearer\s+/i, "");
@@ -172,17 +221,26 @@ Deno.serve(async (req) => {
     });
   }
 
-  const [asr, llm] = await Promise.all([checkAsr(), checkLlm()]);
-  const ready = asr.reachable !== false && llm.reachable !== false && asr.configured && llm.configured;
+  const [asr, llm, judge] = await Promise.all([checkAsr(), checkLlm(), checkJudge()]);
+  const blocks = [asr, llm, judge];
+  const ready = blocks.every((b) => b.configured && b.reachable !== false);
 
   return new Response(
     JSON.stringify(
       {
         ready,
         asr: { provider: Deno.env.get("ASR_PROVIDER") ?? "google", ...asr },
-        llm: { base_url: Deno.env.get("LLM_BASE_URL") ?? "https://api.b.ai/v1", ...llm },
+        llm: {
+          base_url: Deno.env.get("LLM_BASE_URL") ?? "https://api.b.ai/v1",
+          model: Deno.env.get("LLM_MODEL") ?? "DeepSeek-V4-Flash",
+          ...llm,
+        },
+        // llm выше проверяет только доступность эндпоинта; judge прогоняет
+        // настоящий разбор — эндпоинт может отвечать 200, а судья при этом
+        // не работать.
+        judge,
         hint: ready
-          ? "Ключи на месте и принимаются провайдерами."
+          ? "Ключи на месте, провайдеры отвечают, судья находит ошибки."
           : "Смотрите detail у того блока, где configured=false или reachable=false.",
       },
       null,

@@ -597,11 +597,15 @@ class _ErrorReport extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final status = attempt?.status ?? TranscriptStatus.ok;
+    final judge = attempt?.judgeStatus ?? JudgeStatus.ok;
+    // Судья не ответил — пустой список ошибок НЕ значит, что ошибок нет.
+    final judgeBroken = judge == JudgeStatus.degraded;
     final notRecognised = status == TranscriptStatus.empty || status == TranscriptStatus.failed;
 
     final (String title, Color titleColor) = switch (status) {
       TranscriptStatus.failed => ('РЕЧЬ НЕ РАСПОЗНАНА', AppColors.muted),
       TranscriptStatus.empty => ('НИЧЕГО НЕ УСЛЫШАЛ', AppColors.muted),
+      _ when judgeBroken => ('РАЗБОР НЕ ПОЛУЧЕН', AppColors.muted),
       _ => errors.isEmpty ? ('ОШИБОК НЕ НАЙДЕНО', AppColors.ok) : ('РАЗБОР ПЕРВОЙ ПОПЫТКИ', AppColors.gold),
     };
 
@@ -610,6 +614,8 @@ class _ErrorReport extends StatelessWidget {
         'Не удалось распознать речь — это сбой на нашей стороне, балл за него не снижается. Попробуй сказать фразу ещё раз.',
       TranscriptStatus.empty =>
         'Похоже, записалась тишина. Говори чётче и ближе к микрофону, удерживая кнопку всё время, пока говоришь.',
+      _ when judgeBroken =>
+        'ИИ-судья не ответил, поэтому разбора ошибок нет — это сбой на нашей стороне, а не признак того, что ошибок не было. Балл за него не снижается.',
       _ => 'Скажи фразу ещё раз — вторая попытка идёт в зачёт.',
     };
 
@@ -637,7 +643,7 @@ class _ErrorReport extends StatelessWidget {
               ),
               const SizedBox(height: 8),
             ],
-            if (errors.isEmpty || notRecognised)
+            if (errors.isEmpty || notRecognised || judgeBroken)
               Text(hint, style: const TextStyle(color: AppColors.muted, fontSize: 12, height: 1.4))
             else
               ...errors.map((e) => Padding(
@@ -707,7 +713,15 @@ class _ScoreCard extends StatelessWidget {
                     coins == null ? 'Рейтинг не меняется' : '+$coins монет · рейтинг не меняется',
                     style: const TextStyle(color: AppColors.muted, fontSize: 11),
                   ),
-                  if (attempt?.status == TranscriptStatus.failed)
+                  if (attempt?.judgeStatus == JudgeStatus.degraded)
+                    const Padding(
+                      padding: EdgeInsets.only(top: 4),
+                      child: Text(
+                        'ИИ-судья не ответил — балл нейтральный, не в минус тебе',
+                        style: TextStyle(color: AppColors.muted, fontSize: 11, height: 1.3),
+                      ),
+                    )
+                  else if (attempt?.status == TranscriptStatus.failed)
                     const Padding(
                       padding: EdgeInsets.only(top: 4),
                       child: Text(

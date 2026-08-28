@@ -17,6 +17,9 @@ export interface EvaluateGrammarResult {
   errors: GrammarError[];
   /** true, если модель так и не вернула валидный ответ и балл нейтральный. */
   degraded: boolean;
+
+  /** Почему не получилось — только при degraded. Для логов и config-check. */
+  failureReason?: string;
 }
 
 /**
@@ -168,13 +171,49 @@ function validate(value: unknown): ParsedResult | null {
   return { score, errors };
 }
 
+/**
+ * Достаёт JSON-объект из ответа модели.
+ *
+ * Прямой `JSON.parse` тут недостаточен: модели регулярно оборачивают ответ
+ * в markdown-блок ```json ... ``` или добавляют строчку вежливости до/после
+ * объекта — даже когда их об этом явно просили не делать, и даже когда
+ * запрошен response_format. Раньше такой ответ считался невалидным, обе
+ * попытки «падали», судья возвращал degraded, а игрок видел «ошибок не
+ * найдено» — то есть поломка выглядела как безупречный ответ.
+ */
+export function extractJson(content: string): unknown {
+  const withoutFences = content
+    .replace(/^\s*```(?:json)?\s*/i, "")
+    .replace(/\s*```\s*$/i, "")
+    .trim();
+
+  try {
+    return JSON.parse(withoutFences);
+  } catch {
+    // Объект внутри произвольного текста: берём от первой { до последней }.
+    const start = withoutFences.indexOf("{");
+    const end = withoutFences.lastIndexOf("}");
+    if (start === -1 || end <= start) {
+      throw new Error(`no JSON object in model response: ${content.slice(0, 300)}`);
+    }
+    return JSON.parse(withoutFences.slice(start, end + 1));
+  }
+}
+
+/** Возвращает СЫРОЙ текст ответа модели — разбор и логирование выше по стеку. */
 async function callLlmOnce(
   transcript: string,
   targetLanguage: string,
   nativeLanguage: string,
   detailed: boolean,
   level: CefrLevel,
-): Promise<unknown> {
+  /**
+   * false — повтор без `response_format` для провайдеров, которые этого
+   * поля не знают и отвечают на него 400. Без такого отката судья у такого
+   * провайдера не работал вообще, молча деградируя в «ошибок нет».
+   */
+  useResponseFormat: boolean,
+): Promise<string> {
   const baseUrl = Deno.env.get("LLM_BASE_URL") ?? "https://api.b.ai/v1";
   const apiKey = Deno.env.get("LLM_API_KEY");
   const model = Deno.env.get("LLM_MODEL") ?? "DeepSeek-V4-Flash";
@@ -211,7 +250,7 @@ async function callLlmOnce(
         // умолчанию, если поле вообще не передано).
         stream: false,
         // Structured output там, где провайдер это поддерживает (раздел 9.3).
-        response_format: { type: "json_object" },
+        ...(useResponseFormat ? { response_format: { type: "json_object" } } : {}),
         temperature: 0.2,
       }),
       signal: controller.signal,
@@ -233,9 +272,9 @@ async function callLlmOnce(
   const data = await res.json();
   const content = data?.choices?.[0]?.message?.content;
   if (typeof content !== "string") {
-    throw new Error("LLM response missing message content");
+    throw new Error(`LLM response missing message content: ${JSON.stringify(data).slice(0, 400)}`);
   }
-  return JSON.parse(content);
+  return content;
 }
 
 /**
@@ -263,16 +302,39 @@ export async function evaluateGrammar(
    */
   level: CefrLevel = "A1",
 ): Promise<EvaluateGrammarResult> {
-  for (let attempt = 0; attempt < 2; attempt++) {
+  // Провайдер может не знать response_format и отвечать на него 400 — тогда
+  // повторяем без него, иначе судья не работает вообще (и, что хуже,
+  // молча: пустой список ошибок неотличим от «ошибок нет»).
+  let useResponseFormat = true;
+  const failures: string[] = [];
+
+  for (let attempt = 0; attempt < 3; attempt++) {
     try {
-      const parsed = validate(await callLlmOnce(transcript, targetLanguage, nativeLanguage, detailed, level));
+      const raw = await callLlmOnce(
+        transcript,
+        targetLanguage,
+        nativeLanguage,
+        detailed,
+        level,
+        useResponseFormat,
+      );
+      const parsed = validate(extractJson(raw));
       if (parsed) {
         return { score: parsed.score, errors: parsed.errors, degraded: false };
       }
-      console.error("evaluateGrammar: LLM returned invalid shape, attempt", attempt);
+      // Разобрали JSON, но форма не та — покажем, что именно вернула модель,
+      // иначе причина неотличима от сетевого сбоя.
+      failures.push(`попытка ${attempt}: ответ разобран, но не той формы: ${raw.slice(0, 300)}`);
     } catch (e) {
-      console.error("evaluateGrammar: attempt", attempt, "failed:", e);
+      const message = String(e);
+      failures.push(`попытка ${attempt}: ${message.slice(0, 300)}`);
+      if (useResponseFormat && /response_format|json_object|HTTP 4\d\d/i.test(message)) {
+        useResponseFormat = false;
+      }
     }
   }
-  return { score: NEUTRAL_SCORE, errors: [], degraded: true };
+
+  const reason = failures.join(" | ");
+  console.error("evaluateGrammar: судья не дал результата:", reason);
+  return { score: NEUTRAL_SCORE, errors: [], degraded: true, failureReason: reason };
 }

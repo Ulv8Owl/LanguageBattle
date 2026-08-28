@@ -28,8 +28,6 @@
 	<true/>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>Нужен доступ к микрофону, чтобы записывать голосовые ответы в бою.</string>
-	<key>NSSpeechRecognitionUsageDescription</key>
-	<string>Распознавание речи нужно, чтобы оценить твой ответ в бою.</string>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>
