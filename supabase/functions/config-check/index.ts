@@ -15,7 +15,7 @@
 // «ключ не задан», и недостаточно, чтобы им воспользоваться.
 
 import { bcp47For } from "../_shared/transcribeAudio.ts";
-import { evaluateGrammar } from "../_shared/evaluateGrammar.ts";
+import { evaluateGrammar, trivialProbeEnabled } from "../_shared/evaluateGrammar.ts";
 
 /// Заведомо ошибочная фраза: судья ОБЯЗАН найти здесь минимум одну ошибку
 /// (He go -> He went / He goes). Если он возвращает пустой список — дело не
@@ -215,14 +215,32 @@ async function checkJudge(): Promise<CheckResult & { probe?: unknown }> {
     return { configured: false, reachable: null, detail: "LLM_API_KEY не задан — судью проверять нечем" };
   }
 
+  const startedAt = Date.now();
   const result = await evaluateGrammar(JUDGE_PROBE, "en", "ru", true, "A1");
+  const elapsed = Date.now() - startedAt;
+
+  // Диагностический режим меняет смысл всех остальных выводов этого блока,
+  // поэтому о нём сообщаем первым делом и не притворяемся, что судья цел.
+  if (trivialProbeEnabled()) {
+    return {
+      configured: true,
+      reachable: !result.degraded,
+      detail: result.degraded
+        ? `ДИАГНОСТИЧЕСКИЙ РЕЖИМ: даже тривиальный ответ не получен за ${elapsed} мс — ` +
+          `значит дело не в скорости генерации, а в связи с провайдером. ${result.failureReason ?? ""}`
+        : `ДИАГНОСТИЧЕСКИЙ РЕЖИМ: тривиальный ответ получен за ${elapsed} мс — ` +
+          "связь в порядке, значит обычный разбор упирается именно в объём генерации. " +
+          "Судья сейчас НЕ оценивает: выключите режим (npx supabase secrets unset LLM_TRIVIAL_PROBE).",
+      probe: { mode: "LLM_TRIVIAL_PROBE", elapsed_ms: elapsed, score: result.score },
+    };
+  }
 
   if (result.degraded) {
     return {
       configured: true,
       reachable: false,
-      detail: `судья не дал разбора: ${result.failureReason ?? "причина не записана"}`,
-      probe: { transcript: JUDGE_PROBE },
+      detail: `судья не дал разбора за ${elapsed} мс: ${result.failureReason ?? "причина не записана"}`,
+      probe: { transcript: JUDGE_PROBE, elapsed_ms: elapsed },
     };
   }
   if (result.errors.length === 0) {
@@ -238,9 +256,10 @@ async function checkJudge(): Promise<CheckResult & { probe?: unknown }> {
   return {
     configured: true,
     reachable: true,
-    detail: `судья работает: нашёл ошибок — ${result.errors.length}, балл ${result.score}`,
+    detail: `судья работает: нашёл ошибок — ${result.errors.length}, балл ${result.score}, ответ за ${elapsed} мс`,
     probe: {
       transcript: JUDGE_PROBE,
+      elapsed_ms: elapsed,
       score: result.score,
       errors: result.errors.map((e) => ({ message: e.message, replacement: e.replacement, category: e.category })),
     },

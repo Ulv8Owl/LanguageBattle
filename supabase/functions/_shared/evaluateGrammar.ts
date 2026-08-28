@@ -114,12 +114,41 @@ const LEVEL_SCORE_REMINDER =
 объективно по единой шкале для всех уровней, не занижай и не завышай его
 из-за уровня говорящего.`;
 
+/**
+ * ДИАГНОСТИЧЕСКИЙ РЕЖИМ. Включается переменной окружения LLM_TRIVIAL_PROBE=1
+ * и подменяет весь промпт на просьбу вернуть один и тот же ответ независимо
+ * от того, что сказал игрок.
+ *
+ * Зачем: обычный промпт заставляет модель писать 3-5 предложений разбора на
+ * каждую ошибку, и по одному лишь таймауту невозможно понять, ДОЛГО ЛИ ОНА
+ * ДУМАЕТ или мы до неё вообще не достучались — симптом в обоих случаях
+ * одинаковый. С тривиальным промптом генерировать почти нечего: если ответ
+ * приходит быстро, дело в объёме генерации; если и он не приходит — дело в
+ * связи с провайдером.
+ *
+ * ВРЕМЕННЫЙ инструмент. Пока включён, судья НЕ РАБОТАЕТ: он всем ставит
+ * балл 1 и не находит ошибок. Не оставлять включённым — поэтому и логируется
+ * предупреждением на каждый вызов, и показывается в config-check.
+ */
+export function trivialProbeEnabled(): boolean {
+  const raw = (Deno.env.get("LLM_TRIVIAL_PROBE") ?? "").toLowerCase();
+  return raw === "1" || raw === "true" || raw === "yes";
+}
+
+const TRIVIAL_SYSTEM_PROMPT =
+  `Отвечай СТРОГО одним и тем же JSON, что бы тебе ни прислали, без markdown и без пояснений:
+{"score": 1, "errors": []}`;
+
 function buildSystemPrompt(detailed: boolean, level: CefrLevel): string {
+  if (trivialProbeEnabled()) return TRIVIAL_SYSTEM_PROMPT;
   const levelBlock = `${LEVEL_INSTRUCTIONS[level]}\n${LEVEL_SCORE_REMINDER}`;
   return `${BASE_SYSTEM_PROMPT}\n${levelBlock}\n${detailed ? DETAILED_MESSAGE_INSTRUCTION : BRIEF_MESSAGE_INSTRUCTION}`;
 }
 
 function buildUserPrompt(transcript: string, targetLanguage: string, nativeLanguage: string): string {
+  // В диагностическом режиме сам транскрипт не важен — важна только
+  // скорость обмена репликами.
+  if (trivialProbeEnabled()) return "ping";
   return [
     `Целевой язык (на котором говорил учащийся): ${targetLanguage}`,
     `Родной язык учащегося (на нём объясняй ошибки): ${nativeLanguage}`,
@@ -272,8 +301,10 @@ async function callLlmOnce(
         // Потолок длины ответа. Без него модель на подробном режиме может
         // писать сколь угодно долго и упереться в таймаут, не договорив —
         // а недоговорённый JSON бесполезен целиком. Запаса хватает на
-        // десяток подробных объяснений.
-        max_tokens: 2000,
+        // десяток подробных объяснений. В диагностическом режиме ответ
+        // заведомо крошечный, и низкий потолок сам по себе исключает
+        // «модель долго генерирует» из числа возможных причин.
+        max_tokens: trivialProbeEnabled() ? 32 : 2000,
         temperature: 0.2,
       }),
       signal: controller.signal,
@@ -330,6 +361,18 @@ export async function evaluateGrammar(
   // молча: пустой список ошибок неотличим от «ошибок нет»).
   let useResponseFormat = true;
   const failures: string[] = [];
+
+  if (trivialProbeEnabled()) {
+    // Громко и на каждый вызов: в этом режиме оценки НЕТ, всем ставится
+    // балл 1. Оставленный включённым, он выглядит как «судья работает, но
+    // всё плохо» — а это ровно тот класс тихих поломок, из-за которого
+    // здесь и появились transcript_status/judge_status.
+    console.warn(
+      "evaluateGrammar: ВКЛЮЧЁН ДИАГНОСТИЧЕСКИЙ РЕЖИМ LLM_TRIVIAL_PROBE — " +
+        "промпт подменён, разбор не производится, балл всегда 1. " +
+        "Выключить: npx supabase secrets unset LLM_TRIVIAL_PROBE",
+    );
+  }
 
   for (let attempt = 0; attempt < 3; attempt++) {
     const startedAt = Date.now();
