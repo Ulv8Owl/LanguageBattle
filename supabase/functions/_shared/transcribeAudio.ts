@@ -16,7 +16,7 @@
 //   ASR_PROVIDER    google (по умолчанию) | openai
 //   ASR_API_KEY     ключ провайдера
 //   ASR_BASE_URL    переопределение эндпоинта (обычно не нужно)
-//   ASR_MODEL       google: latest_short (по умолчанию); openai: whisper-1
+//   ASR_MODEL       google: latest_long (по умолчанию); openai: whisper-1
 //
 // Провайдер openai — это любой эндпоинт с whisper-совместимым
 // /audio/transcriptions (в том числе тот же base_url, что у LLM-судьи),
@@ -153,9 +153,14 @@ async function transcribeGoogle(
   audio: Uint8Array,
   languageCode: string,
   apiKey: string,
+  hintPhrases: string[],
 ): Promise<TranscriptionResult> {
   const baseUrl = Deno.env.get("ASR_BASE_URL") ?? "https://speech.googleapis.com/v1";
-  const model = Deno.env.get("ASR_MODEL") ?? "latest_short";
+  // latest_long, а НЕ latest_short. Короткая модель рассчитана на команды и
+  // отдельные реплики в пару секунд; фраза раунда — пять предложений и
+  // секунд двадцать речи, и на ней short-модель обрывает распознавание на
+  // середине. Ровно то, что выглядело как «распознаёт не всё, что я сказал».
+  const model = Deno.env.get("ASR_MODEL") ?? "latest_long";
 
   const wav = parseWav(audio);
   if (!wav) return failed("audio is not a parseable WAV container");
@@ -170,12 +175,27 @@ async function transcribeGoogle(
         audioChannelCount: wav.channels,
         languageCode: bcp47For(languageCode),
         model,
+        // Улучшенные модели заметно точнее на неносителях с акцентом —
+        // а у нас говорят исключительно неносители.
+        useEnhanced: true,
         enableAutomaticPunctuation: true,
         enableWordConfidence: true,
         // Учащийся говорит с акцентом и ошибается — распознавание не должно
         // "чинить" его речь под ближайшую правильную фразу, иначе судья
         // получит текст без тех самых ошибок, которые он должен найти.
         profanityFilter: false,
+        // Подсказка распознавателю: мы ТОЧНО знаем, какую фразу игрок
+        // сейчас повторяет. Без неё распознаватель угадывает слова из всего
+        // языка сразу и на акценте ошибается; с ней он выбирает между
+        // похожими вариантами в пользу ожидаемых слов.
+        //
+        // boost намеренно умеренный (10, а не максимум): при слишком
+        // сильном подталкивании распознаватель начинает «слышать»
+        // ожидаемую фразу там, где игрок сказал иначе, и судья перестаёт
+        // видеть настоящие ошибки — то есть режим обучения ломается.
+        ...(hintPhrases.length > 0
+          ? { speechContexts: [{ phrases: hintPhrases.slice(0, 500), boost: 10 }] }
+          : {}),
       },
       audio: { content: toBase64(wav.pcm) },
     }),
@@ -272,6 +292,12 @@ async function transcribeOpenAi(
 export async function transcribeAudio(
   audio: Uint8Array,
   languageCode: string,
+  /**
+   * Фразы-подсказки для распознавателя — обычно та самая фраза раунда,
+   * которую игрок сейчас повторяет. Сильно повышает точность на речи
+   * неносителя; см. speechContexts в transcribeGoogle.
+   */
+  hintPhrases: string[] = [],
 ): Promise<TranscriptionResult> {
   const provider = (Deno.env.get("ASR_PROVIDER") ?? "google").toLowerCase();
   const apiKey = Deno.env.get("ASR_API_KEY");
@@ -281,7 +307,7 @@ export async function transcribeAudio(
   try {
     switch (provider) {
       case "google":
-        return await transcribeGoogle(audio, languageCode, apiKey);
+        return await transcribeGoogle(audio, languageCode, apiKey, hintPhrases);
       case "openai":
         return await transcribeOpenAi(audio, languageCode, apiKey);
       default:

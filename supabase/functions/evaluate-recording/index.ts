@@ -311,11 +311,51 @@ async function resolveTranscript(
   }
 
   const audio = new Uint8Array(await file.arrayBuffer());
-  const asr = await transcribeAudio(audio, targetLanguage);
+  // Фраза раунда — это ровно то, что игрок сейчас пытается повторить.
+  // Отдаём её распознавателю подсказкой: он всё так же слышит настоящую
+  // речь со всеми ошибками, но перестаёт угадывать слова из всего языка
+  // сразу и заметно реже подставляет непохожие.
+  const asr = await transcribeAudio(audio, targetLanguage, await roundPhrase(supabase, recording));
 
   const status: TranscriptStatus = asr.degraded ? "failed" : asr.transcript.length > 0 ? "ok" : "empty";
   await saveTranscript(supabase, recording.id, asr.transcript, asr.words, status);
   return { transcript: asr.transcript, status };
+}
+
+/**
+ * Фраза, которую игрок повторяет в этом раунде — из соло-раунда или из
+ * раунда боя, смотря чей это слот. Пустой список, если фразы нет: подсказка
+ * необязательна, без неё распознавание просто работает как раньше.
+ */
+async function roundPhrase(
+  supabase: SupabaseClient,
+  recording: VoiceRecordingRow,
+): Promise<string[]> {
+  try {
+    const { table, id } = recording.training_round_id
+      ? { table: "training_rounds", id: recording.training_round_id }
+      : { table: "rounds", id: recording.round_id };
+    if (!id) return [];
+
+    const { data } = await supabase
+      .from(table)
+      .select("generated_phrase")
+      .eq("id", id)
+      .maybeSingle();
+    const phrase = (data?.generated_phrase ?? "").trim();
+    if (phrase.length === 0) return [];
+
+    // Google ждёт короткие фразы-подсказки, а не абзац целиком: разбиваем
+    // по предложениям — так подсказка помогает на каждом из них, а не
+    // только при точном совпадении всего текста.
+    return phrase
+      .split(/(?<=[.!?])\s+/)
+      .map((part: string) => part.trim())
+      .filter((part: string) => part.length > 0);
+  } catch (e) {
+    console.error("evaluate-recording: не смог получить фразу раунда для подсказки ASR", e);
+    return [];
+  }
 }
 
 async function saveTranscript(
