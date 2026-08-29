@@ -146,14 +146,18 @@ function toBase64(bytes: Uint8Array): string {
   return btoa(binary);
 }
 
-async function fetchWithTimeout(url: string, init: RequestInit): Promise<Response> {
+async function fetchWithTimeout(
+  url: string,
+  init: RequestInit,
+  timeoutMs: number,
+): Promise<Response> {
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), ASR_TIMEOUT_MS);
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
   try {
     return await fetch(url, { ...init, signal: controller.signal });
   } catch (e) {
     if (e instanceof Error && e.name === "AbortError") {
-      throw new Error(`ASR request timed out after ${ASR_TIMEOUT_MS / 1000}s`);
+      throw new Error(`ASR request timed out after ${Math.round(timeoutMs / 1000)}s`);
     }
     throw e;
   } finally {
@@ -177,6 +181,7 @@ async function transcribeGoogle(
   languageCode: string,
   apiKey: string,
   hintPhrases: string[],
+  timeoutMs: number,
 ): Promise<TranscriptionResult> {
   const baseUrl = Deno.env.get("ASR_BASE_URL") ?? "https://speech.googleapis.com/v1";
   // latest_long, а НЕ latest_short. Короткая модель рассчитана на команды и
@@ -225,7 +230,7 @@ async function transcribeGoogle(
       },
       audio: { content: toBase64(wav.pcm) },
     }),
-  });
+  }, timeoutMs);
 
   if (!res.ok) {
     const body = await res.text().catch(() => "");
@@ -284,6 +289,7 @@ async function transcribeOpenAi(
   audio: Uint8Array,
   languageCode: string,
   apiKey: string,
+  timeoutMs: number,
 ): Promise<TranscriptionResult> {
   const baseUrl = Deno.env.get("ASR_BASE_URL") ?? Deno.env.get("LLM_BASE_URL") ?? "https://api.openai.com/v1";
   const model = Deno.env.get("ASR_MODEL") ?? "whisper-1";
@@ -301,7 +307,7 @@ async function transcribeOpenAi(
     method: "POST",
     headers: { Authorization: `Bearer ${apiKey}` },
     body: form,
-  });
+  }, timeoutMs);
 
   if (!res.ok) {
     const body = await res.text().catch(() => "");
@@ -338,18 +344,25 @@ export async function transcribeAudio(
    * неносителя; см. speechContexts в transcribeGoogle.
    */
   hintPhrases: string[] = [],
+  /**
+   * Сколько времени осталось у воркера на распознавание. Собственный
+   * ASR_TIMEOUT_MS остаётся верхней границей, но пережить бюджет задачи он
+   * не может: воркера убивают снаружи, и тогда результат не запишет никто.
+   */
+  budgetMs: number = ASR_TIMEOUT_MS,
 ): Promise<TranscriptionResult> {
   const provider = (Deno.env.get("ASR_PROVIDER") ?? "google").toLowerCase();
   const apiKey = Deno.env.get("ASR_API_KEY");
   if (!apiKey) return failed("ASR_API_KEY is not configured");
   if (audio.byteLength === 0) return failed("audio file is empty");
+  const timeoutMs = Math.max(3_000, Math.min(ASR_TIMEOUT_MS, budgetMs));
 
   try {
     switch (provider) {
       case "google":
-        return await transcribeGoogle(audio, languageCode, apiKey, hintPhrases);
+        return await transcribeGoogle(audio, languageCode, apiKey, hintPhrases, timeoutMs);
       case "openai":
-        return await transcribeOpenAi(audio, languageCode, apiKey);
+        return await transcribeOpenAi(audio, languageCode, apiKey, timeoutMs);
       default:
         return failed(`unknown ASR_PROVIDER "${provider}" (expected "google" or "openai")`);
     }

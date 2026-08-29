@@ -54,6 +54,24 @@ type TranscriptStatus = "pending" | "ok" | "empty" | "failed";
 type JudgeStatus = "pending" | "ok" | "degraded" | "skipped";
 
 /** Поля voice_recordings, которыми пользуется воркер. */
+/**
+ * Сколько всего отпущено фоновой задаче.
+ *
+ * Воркер Edge Function живёт ограниченное время, и это ограничение внешнее:
+ * когда оно наступает, процесс убивают, минуя любые наши catch и finally.
+ * Раньше суммарный бюджет пайплайна (60 с распознавание + 180 с судья) был
+ * заведомо больше — то есть в затяжном случае результат не записывался
+ * НИКОГДА, задача навсегда оставалась в 'processing', а игрок смотрел на
+ * спиннер до собственного таймаута клиента.
+ *
+ * Поэтому бюджет теперь наш, он меньше платформенного, и до его конца мы
+ * обязаны успеть записать хоть какой-то результат.
+ */
+const JOB_BUDGET_MS = Number(Deno.env.get("JOB_BUDGET_MS") ?? 125_000);
+
+/** Запас на запись результатов в базу — тратить его на модель нельзя. */
+const WRITE_RESERVE_MS = 15_000;
+
 interface VoiceRecordingRow {
   id: string;
   user_id: string;
@@ -115,6 +133,9 @@ Deno.serve(async (req: Request) => {
 });
 
 async function processJob(job_id: string): Promise<void> {
+  // Отсчёт бюджета — от самого начала фоновой работы, а не от вызова
+  // модели: скачивание аудио и чтения из базы тратят то же самое время.
+  const jobStartedAt = Date.now();
   const supabase = createClient(
     Deno.env.get("SUPABASE_URL")!,
     Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
@@ -163,6 +184,7 @@ async function processJob(job_id: string): Promise<void> {
     }
 
     const targetLanguage = recording.language_code ?? "en";
+    const budgetLeft = () => JOB_BUDGET_MS - (Date.now() - jobStartedAt) - WRITE_RESERVE_MS;
 
     // Фраза раунда на изучаемом языке — то, что игрок должен был сказать.
     // Нужна дважды: подсказкой распознавателю и эталоном судье, поэтому
@@ -175,6 +197,7 @@ async function processJob(job_id: string): Promise<void> {
       recording,
       targetLanguage,
       expectedPhrase,
+      budgetLeft(),
     );
     // Диагностика пайплайна для отладочной панели в игре (миграция 0016).
     const pipelineDebug: Record<string, unknown> = { asr: asrDebug };
@@ -244,6 +267,7 @@ async function processJob(job_id: string): Promise<void> {
         attempt: attemptNumber,
         attempt_source: attempt.source,
         verbosity,
+        budget_left_ms: budgetLeft(),
       };
       const result = await evaluateGrammar(
         transcript,
@@ -252,6 +276,7 @@ async function processJob(job_id: string): Promise<void> {
         verbosity,
         level,
         expectedPhrase,
+        budgetLeft(),
       );
 
       score = result.score;
@@ -338,6 +363,8 @@ async function resolveTranscript(
   recording: VoiceRecordingRow,
   targetLanguage: string,
   expectedPhrase: string,
+  /** Остаток бюджета задачи — распознавание не должно его пережить. */
+  budgetMs: number,
 ): Promise<{ transcript: string; status: TranscriptStatus; debug: Record<string, unknown> }> {
   const existing = (recording.transcript ?? "").trim();
   if (existing.length > 0) {
@@ -376,7 +403,7 @@ async function resolveTranscript(
   // Отдаём её распознавателю подсказкой: он всё так же слышит настоящую
   // речь со всеми ошибками, но перестаёт угадывать слова из всего языка
   // сразу и заметно реже подставляет непохожие.
-  const asr = await transcribeAudio(audio, targetLanguage, hintPhrases(expectedPhrase));
+  const asr = await transcribeAudio(audio, targetLanguage, hintPhrases(expectedPhrase), budgetMs);
 
   const status: TranscriptStatus = asr.degraded ? "failed" : asr.transcript.length > 0 ? "ok" : "empty";
   await saveTranscript(supabase, recording.id, asr.transcript, asr.words, status);

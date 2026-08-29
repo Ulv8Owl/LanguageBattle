@@ -123,6 +123,18 @@ const EXPLAIN_LIMIT_INSTRUCTION =
  */
 export type JudgeVerbosity = "brief" | "detailed" | "marksOnly";
 
+/**
+ * Верхняя граница ожидания ОДНОГО ответа модели. Реальный таймаут — минимум
+ * из неё и того, что осталось от бюджета задачи.
+ */
+const LLM_TIMEOUT_MS = Number(Deno.env.get("LLM_TIMEOUT_MS") ?? 120_000);
+
+/**
+ * Меньше этого запускать запрос уже бессмысленно: модель заведомо не
+ * успеет, а время нужно на запись результата.
+ */
+const MIN_LLM_SLICE_MS = 8_000;
+
 /// Обычный режим (PvP, раздел 2.4): message — короткое, одна-две фразы,
 /// понятное с первого взгляда прямо в ленте боя.
 const BRIEF_MESSAGE_INSTRUCTION =
@@ -354,6 +366,8 @@ async function callLlmOnce(
    * провайдера не работал вообще, молча деградируя в «ошибок нет».
    */
   useResponseFormat: boolean,
+  /** Сколько отпущено на ЭТОТ запрос — уже с учётом бюджета всей задачи. */
+  callTimeoutMs: number,
 ): Promise<string> {
   const baseUrl = Deno.env.get("LLM_BASE_URL") ?? "https://api.b.ai/v1";
   const apiKey = Deno.env.get("LLM_API_KEY");
@@ -386,11 +400,13 @@ async function callLlmOnce(
   // договорить. Судья упирался в таймаут все три раза подряд (в базе это
   // видно как задачи длительностью ~63 секунды = 3 x 20 c + распознавание)
   // и деградировал, а игрок видел «ИИ-судья не отвечает».
-  // Таймаут НЕ ограничивает подробность разбора — он только не даёт
-  // зависшему провайдеру утащить за собой всю задачу (без него функцию
-  // убивает платформа ДО блока catch, и задача остаётся в 'processing'
-  // навсегда, а игрок смотрит на вечный спиннер). Поэтому он щедрый.
-  const timeoutMs = Number(Deno.env.get("LLM_TIMEOUT_MS") ?? 180_000);
+  // Щедрым он был ровно до тех пор, пока не выяснилось, что щедрее самого
+  // воркера: 180 секунд ожидания в процессе, который платформа убивает
+  // раньше, — это гарантия, что degraded-результат не запишется никогда.
+  // Поэтому длительность приходит снаружи: минимум из LLM_TIMEOUT_MS и
+  // остатка бюджета задачи. Подробность разбора он по-прежнему не
+  // ограничивает.
+  const timeoutMs = callTimeoutMs;
   // 0 (значение по умолчанию) = не ограничивать длину ответа вообще.
   const maxTokens = Number(Deno.env.get("LLM_MAX_TOKENS") ?? 0);
   const controller = new AbortController();
@@ -512,6 +528,17 @@ export async function evaluateGrammar(
    * сказанный кусок, и половина фразы получала балл как за целую.
    */
   expectedPhrase = "",
+  /**
+   * Сколько времени осталось у воркера на разбор.
+   *
+   * Существует потому, что собственный LLM_TIMEOUT_MS оказался больше, чем
+   * живёт сам воркер: платформа убивала функцию ДО того, как срабатывал наш
+   * таймаут, а значит и до строки, которая записывает degraded-результат.
+   * Снаружи это выглядело как вечная задача в 'processing' — то есть как
+   * зависший спиннер у игрока. Уложиться в бюджет важнее, чем дождаться
+   * ответа: неполный разбор с честной пометкой лучше отсутствия любого.
+   */
+  budgetMs: number = LLM_TIMEOUT_MS,
 ): Promise<EvaluateGrammarResult> {
   // Провайдер может не знать response_format и отвечать на него 400 — тогда
   // повторяем без него, иначе судья не работает вообще (и, что хуже,
@@ -519,6 +546,7 @@ export async function evaluateGrammar(
   let useResponseFormat = true;
   const failures: string[] = [];
   let lastError = "";
+  const judgeStartedAt = Date.now();
 
   if (trivialProbeEnabled()) {
     // Громко и на каждый вызов: в этом режиме оценки НЕТ, всем ставится
@@ -535,6 +563,14 @@ export async function evaluateGrammar(
   for (let attempt = 0; attempt < 3; attempt++) {
     const startedAt = Date.now();
     try {
+      const left = budgetMs - (Date.now() - judgeStartedAt);
+      if (left < MIN_LLM_SLICE_MS) {
+        failures.push(
+          `попытка ${attempt}: бюджет задачи исчерпан, осталось ${Math.round(left / 1000)} с`,
+        );
+        lastError = `job budget exhausted before attempt ${attempt}`;
+        break;
+      }
       const raw = await callLlmOnce(
         transcript,
         targetLanguage,
@@ -543,6 +579,7 @@ export async function evaluateGrammar(
         level,
         expectedPhrase,
         useResponseFormat,
+        Math.min(LLM_TIMEOUT_MS, left),
       );
       const parsed = validate(extractJson(raw));
       if (parsed) {
