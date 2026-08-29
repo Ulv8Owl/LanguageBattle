@@ -22,14 +22,14 @@ REPO="$(pwd)"
 step() { printf '\n\033[1;33m==> %s\033[0m\n' "$1"; }
 fail() { printf '\n\033[1;31mОСТАНОВ: %s\033[0m\n' "$1" >&2; exit 1; }
 
-step "1/7 Проверяю, что нет несохранённых правок"
+step "1/8 Проверяю, что нет несохранённых правок"
 if [ -n "$(git status --porcelain)" ]; then
   git status --short
   fail "рабочее дерево грязное. Сначала закоммить или отбрось эти правки —
 иначе git checkout не переключит ветку, а собрано будет непонятно что."
 fi
 
-step "2/7 Переключаюсь на $BRANCH и подтягиваю"
+step "2/8 Переключаюсь на $BRANCH и подтягиваю"
 git fetch origin "$BRANCH"
 git checkout "$BRANCH"
 # --ff-only: если ветка разошлась с origin, лучше остановиться и разобраться,
@@ -41,24 +41,31 @@ BUILD_ID="$(git rev-parse --short HEAD)"
 echo "Ветка: $BRANCH"
 echo "Коммит: $BUILD_ID  $(git log -1 --format=%s)"
 
-step "3/7 Чищу прошлую сборку"
+step "3/8 Чищу прошлую сборку"
 # Без этого Gradle способен отдать старый libapp.so, и APK окажется свежим
 # по дате, но старым по содержимому.
 flutter clean >/dev/null
 
-step "4/7 Ставлю зависимости"
+step "4/8 Ставлю зависимости"
 flutter pub get >/dev/null
 
 APK="$REPO/build/app/outputs/flutter-apk/app-release.apk"
+PKG="$(sed -n 's/.*applicationId = "\(.*\)".*/\1/p' android/app/build.gradle.kts | head -1)"
+[ -n "$PKG" ] || fail "не нашёл applicationId в android/app/build.gradle.kts"
 rm -f "$APK"
 
-step "5/7 Собираю APK с меткой BUILD_ID=$BUILD_ID"
-flutter build apk --release --dart-define=BUILD_ID="$BUILD_ID"
+step "5/8 Собираю APK с меткой BUILD_ID=$BUILD_ID"
+# --build-name кладёт коммит в versionName пакета. Это единственная метка,
+# которую видно СНАРУЖИ приложения: по ней и adb, и «О приложении» в
+# настройках телефона отвечают, что на самом деле установлено.
+flutter build apk --release \
+  --dart-define=BUILD_ID="$BUILD_ID" \
+  --build-name="1.0.0-$BUILD_ID"
 
-step "6/7 Проверяю, что APK действительно новый"
+step "6/8 Проверяю, что APK действительно новый"
 [ -f "$APK" ] || fail "APK не появился — сборка не прошла. Смотри вывод выше."
 
-step "7/7 Проверяю, что внутрь APK попал именно этот коммит"
+step "7/8 Проверяю, что внутрь APK попал именно этот коммит"
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 SO="$(unzip -Z1 "$APK" 'lib/*/libapp.so' 2>/dev/null | head -1 || true)"
@@ -81,17 +88,54 @@ else
   fi
 fi
 
+step "8/8 Ставлю на телефон и проверяю, что встало именно это"
+# Самое слабое место всей цепочки — установка. Собранный APK легко остаётся
+# лежать на диске: команду не запустили, телефон не подключён, установка
+# отказала по несовпадению подписи. Снаружи это выглядит как «собрал, а
+# изменений нет», и отличить это от настоящей поломки нельзя. Поэтому
+# скрипт ставит сам и читает обратно версию с устройства.
+if ! command -v adb >/dev/null 2>&1; then
+  echo "  adb не найден — ставь вручную:"
+  echo "    $APK"
+  MANUAL=1
+elif [ -z "$(adb devices | awk 'NR>1 && $2=="device"')" ]; then
+  echo "  телефон не подключён (adb devices пуст) — ставь вручную:"
+  echo "    $APK"
+  MANUAL=1
+else
+  MANUAL=0
+  echo "  ставлю..."
+  if ! adb install -r "$APK"; then
+    fail "установка не прошла. Чаще всего мешает прежняя подпись — тогда:
+  adb uninstall $PKG && adb install \"$APK\""
+  fi
+  INSTALLED="$(adb shell dumpsys package "$PKG" 2>/dev/null \
+    | sed -n 's/.*versionName=//p' | head -1 | tr -d '\r')"
+  echo "  на телефоне сейчас: $INSTALLED"
+  [ "$INSTALLED" = "1.0.0-$BUILD_ID" ] \
+    || fail "на телефоне версия «$INSTALLED», а собрали «1.0.0-$BUILD_ID».
+Установка не заменила приложение. Снеси и поставь заново:
+  adb uninstall $PKG && adb install \"$APK\""
+fi
+
 cat <<EOF
 
 ────────────────────────────────────────────────
 ГОТОВО.  Коммит в сборке: $BUILD_ID
 APK: $APK
+EOF
+if [ "${MANUAL:-0}" = "1" ]; then
+cat <<EOF
 
-Поставить на телефон:
-  adb install -r "$APK"
+Приложение НЕ установлено — сделай это сам, а потом проверь, что встало
+именно оно. В приложении: «Одиночная Игра», под заголовком … · $BUILD_ID
+С компьютера: adb shell dumpsys package $PKG | grep versionName
+              -> должно быть versionName=1.0.0-$BUILD_ID
+EOF
+else
+cat <<EOF
 
-Или скинуть файл вручную. В приложении открой «Одиночная Игра» — под
-заголовком должно быть написано: … · $BUILD_ID
-Если там другой номер — на телефоне осталась прежняя сборка.
+Приложение установлено и проверено: versionName=1.0.0-$BUILD_ID
 ────────────────────────────────────────────────
 EOF
+fi
