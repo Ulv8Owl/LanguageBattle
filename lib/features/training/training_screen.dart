@@ -1014,6 +1014,15 @@ class _PipelineDebug extends StatelessWidget {
               kClientBuild,
               style: AppFonts.mono(fontSize: 9, color: AppColors.muted),
             ),
+            if (outcome.roundDebug != null)
+              Text(
+                _meta([
+                  'попытка ${outcome.roundDebug!['attempt']}',
+                  'источник: ${outcome.roundDebug!['attempt_source']}',
+                  'режим ${outcome.roundDebug!['verbosity']}',
+                ]),
+                style: AppFonts.mono(fontSize: 9, color: AppColors.muted),
+              ),
             const SizedBox(height: 8),
             // Диагностический режим подменяет промпт и заставляет модель
             // всегда отвечать «балл 1, ошибок нет». На экране это неотличимо

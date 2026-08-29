@@ -94,6 +94,11 @@ class RecordingOutcome {
   Map<String, dynamic>? get asrDebug => _section('asr');
   Map<String, dynamic>? get judgeDebug => _section('judge');
 
+  /// Какой попыткой сервер счёл эту запись и какой режим разбора выбрал.
+  /// Без этого «вторая попытка получила подробные объяснения» неотличимо
+  /// от исправной работы — ровно на этом баг и прятался.
+  Map<String, dynamic>? get roundDebug => _section('round');
+
   Map<String, dynamic>? _section(String key) {
     final value = debug?[key];
     return value is Map ? Map<String, dynamic>.from(value) : null;
