@@ -158,8 +158,18 @@ async function processJob(job_id: string): Promise<void> {
 
     const targetLanguage = recording.language_code ?? "en";
 
+    // Фраза раунда на изучаемом языке — то, что игрок должен был сказать.
+    // Нужна дважды: подсказкой распознавателю и эталоном судье, поэтому
+    // читается один раз здесь.
+    const expectedPhrase = await roundPhrase(supabase, recording);
+
     // Шаг 1 — распознавание речи.
-    const { transcript, status, debug: asrDebug } = await resolveTranscript(supabase, recording, targetLanguage);
+    const { transcript, status, debug: asrDebug } = await resolveTranscript(
+      supabase,
+      recording,
+      targetLanguage,
+      expectedPhrase,
+    );
     // Диагностика пайплайна для отладочной панели в игре (миграция 0016).
     const pipelineDebug: Record<string, unknown> = { asr: asrDebug };
 
@@ -170,6 +180,7 @@ async function processJob(job_id: string): Promise<void> {
     let feedback: string;
 
     let judgeStatus: JudgeStatus;
+    let correctedText = "";
 
     if (status === "failed") {
       score = NEUTRAL_SCORE;
@@ -206,12 +217,20 @@ async function processJob(job_id: string): Promise<void> {
       // должен понять, что исправить перед второй попыткой) — PvP получает
       // короткую пометку прямо в ленте боя. Балл считается одинаково.
       const detailed = recording.training_round_id != null;
-      const result = await evaluateGrammar(transcript, targetLanguage, nativeLanguage, detailed, level);
+      const result = await evaluateGrammar(
+        transcript,
+        targetLanguage,
+        nativeLanguage,
+        detailed,
+        level,
+        expectedPhrase,
+      );
 
       score = result.score;
       errors = result.errors;
       judgeStatus = result.degraded ? "degraded" : "ok";
       pipelineDebug.judge = result.debug;
+      correctedText = result.corrected;
       feedback = result.degraded
         ? "Не удалось получить разбор от ИИ — балл выставлен нейтральным."
         : errors.length === 0
@@ -228,7 +247,11 @@ async function processJob(job_id: string): Promise<void> {
 
     await supabase
       .from("voice_recordings")
-      .update({ judge_status: judgeStatus, pipeline_debug: pipelineDebug })
+      .update({
+        judge_status: judgeStatus,
+        pipeline_debug: pipelineDebug,
+        corrected_text: correctedText,
+      })
       .eq("id", recording.id);
 
     if (errors.length > 0) {
@@ -290,6 +313,7 @@ async function resolveTranscript(
   supabase: SupabaseClient,
   recording: VoiceRecordingRow,
   targetLanguage: string,
+  expectedPhrase: string,
 ): Promise<{ transcript: string; status: TranscriptStatus; debug: Record<string, unknown> }> {
   const existing = (recording.transcript ?? "").trim();
   if (existing.length > 0) {
@@ -328,7 +352,7 @@ async function resolveTranscript(
   // Отдаём её распознавателю подсказкой: он всё так же слышит настоящую
   // речь со всеми ошибками, но перестаёт угадывать слова из всего языка
   // сразу и заметно реже подставляет непохожие.
-  const asr = await transcribeAudio(audio, targetLanguage, await roundPhrase(supabase, recording));
+  const asr = await transcribeAudio(audio, targetLanguage, hintPhrases(expectedPhrase));
 
   const status: TranscriptStatus = asr.degraded ? "failed" : asr.transcript.length > 0 ? "ok" : "empty";
   await saveTranscript(supabase, recording.id, asr.transcript, asr.words, status);
@@ -343,32 +367,36 @@ async function resolveTranscript(
 async function roundPhrase(
   supabase: SupabaseClient,
   recording: VoiceRecordingRow,
-): Promise<string[]> {
+): Promise<string> {
   try {
     const { table, id } = recording.training_round_id
       ? { table: "training_rounds", id: recording.training_round_id }
       : { table: "rounds", id: recording.round_id };
-    if (!id) return [];
+    if (!id) return "";
 
     const { data } = await supabase
       .from(table)
       .select("generated_phrase")
       .eq("id", id)
       .maybeSingle();
-    const phrase = (data?.generated_phrase ?? "").trim();
-    if (phrase.length === 0) return [];
-
-    // Google ждёт короткие фразы-подсказки, а не абзац целиком: разбиваем
-    // по предложениям — так подсказка помогает на каждом из них, а не
-    // только при точном совпадении всего текста.
-    return phrase
-      .split(/(?<=[.!?])\s+/)
-      .map((part: string) => part.trim())
-      .filter((part: string) => part.length > 0);
+    return (data?.generated_phrase ?? "").trim();
   } catch (e) {
-    console.error("evaluate-recording: не смог получить фразу раунда для подсказки ASR", e);
-    return [];
+    console.error("evaluate-recording: не смог получить фразу раунда", e);
+    return "";
   }
+}
+
+/**
+ * Google ждёт короткие фразы-подсказки, а не абзац целиком: разбиваем по
+ * предложениям — так подсказка помогает на каждом из них, а не только при
+ * точном совпадении всего текста.
+ */
+function hintPhrases(phrase: string): string[] {
+  if (phrase.length === 0) return [];
+  return phrase
+    .split(/(?<=[.!?])\s+/)
+    .map((part: string) => part.trim())
+    .filter((part: string) => part.length > 0);
 }
 
 async function saveTranscript(

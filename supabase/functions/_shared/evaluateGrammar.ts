@@ -14,6 +14,14 @@ export interface GrammarError {
 export interface EvaluateGrammarResult {
   /** Балл 1-10 напрямую из ответа модели (раздел 9.4, MVP-версия). */
   score: number;
+
+  /**
+   * Ответ игрока целиком, исправленный: его же слова, но с исправленными
+   * ошибками и добавленными пропущенными. Клиент сравнивает его с
+   * распознанным текстом и подсвечивает разницу — так игрок видит правку
+   * наглядно, а не только списком объяснений.
+   */
+  corrected: string;
   errors: GrammarError[];
   /** true, если модель так и не вернула валидный ответ и балл нейтральный. */
   degraded: boolean;
@@ -35,20 +43,36 @@ export const NEUTRAL_SCORE = 7;
 
 const BASE_SYSTEM_PROMPT =
   `Ты — строгий, но доброжелательный судья грамматики для приложения изучения языков.
-Тебе дают транскрипт того, что сказал изучающий язык (уровень A1-B2), целевой язык и родной язык говорящего.
-Твоя задача — оценить сказанное по 10-балльной шкале и найти ошибки грамматики, орфографии и стиля в транскрипте.
+Игроку показали фразу на его родном языке, и он должен был ПЕРЕВЕСТИ её вслух на целевой язык.
+Тебе дают распознанный текст того, что он сказал, эталонный перевод этой фразы, целевой язык и
+родной язык говорящего.
 НЕ оценивай произношение — ты видишь только текст.
 НЕ штрафуй за то, что укладывается в разговорную норму или является допустимым вариантом.
 
+ЭТАЛОН — это ОДИН из верных переводов, а не единственно возможный. Не требуй дословного совпадения:
+другие слова и обороты с тем же смыслом — это правильный ответ, а не ошибка. Эталон нужен тебе для
+другого: понять, какую мысль игрок должен был выразить целиком. Если он передал только ЧАСТЬ фразы
+(например, перевёл одно предложение из двух или оборвал мысль на середине) — это серьёзный пропуск:
+укажи его как ошибку и заметно снизь балл, оценивая ответ по ВСЕЙ фразе, а не по сказанному куску.
+
+ПОЛНОСТЬЮ ИГНОРИРУЙ пунктуацию и регистр букв. Текст приходит от распознавания речи, которое само
+расставляет точки, запятые и заглавные буквы там, где игрок просто сделал паузу, — это НЕ его
+ошибки. Не считай их ошибками, не упоминай в разборе и не снижай за них балл. Оценивай только
+слова, их формы и порядок.
+
 Верни СТРОГО JSON без markdown-разметки в формате:
-{"score": number, "errors": [{"offset": number, "length": number, "message": string, "replacement": string, "category": "grammar"|"spelling"|"style"}]}
+{"score": number, "corrected": string, "errors": [{"offset": number, "length": number, "message": string, "replacement": string, "category": "grammar"|"spelling"|"style"}]}
 
 score — целое число от 1 до 10: 10 — безупречно и естественно, 7-9 — понятно с мелкими огрехами,
-4-6 — заметные ошибки, но смысл ясен, 1-3 — почти непонятно или не на том языке.
-offset/length — позиция символа в ПЕРЕДАННОМ транскрипте (0-indexed, по UTF-16 code units).
+4-6 — заметные ошибки, но смысл ясен, 1-3 — почти непонятно, не на том языке или передана лишь
+малая часть фразы.
+corrected — ВЕСЬ ответ игрока целиком, исправленный: те же его слова и обороты, но с исправленными
+ошибками и с ДОБАВЛЕННЫМИ словами, которые он пропустил. Не подменяй его перевод эталоном — правь
+именно то, что он сказал, дополняя пропущенное по смыслу эталона.
+offset/length — позиция символа в ПЕРЕДАННОМ тексте (0-indexed, по UTF-16 code units).
 replacement — как должно быть правильно.
 category — "grammar" или "spelling" для настоящих ошибок; "style" для необязательных стилистических советов.
-Если ошибок нет — верни {"score": 10, "errors": []}.
+Если ошибок нет — верни {"score": 10, "corrected": <текст игрока без изменений>, "errors": []}.
 
 ВАЖНО: не рассуждай перед ответом и не пиши ничего, кроме самого JSON — начинай ответ сразу с
 символа { и заканчивай символом }.
@@ -153,20 +177,29 @@ function buildSystemPrompt(detailed: boolean, level: CefrLevel): string {
   return `${BASE_SYSTEM_PROMPT}\n${levelBlock}\n${detailed ? DETAILED_MESSAGE_INSTRUCTION : BRIEF_MESSAGE_INSTRUCTION}`;
 }
 
-function buildUserPrompt(transcript: string, targetLanguage: string, nativeLanguage: string): string {
+function buildUserPrompt(
+  transcript: string,
+  targetLanguage: string,
+  nativeLanguage: string,
+  expectedPhrase: string,
+): string {
   // В диагностическом режиме сам транскрипт не важен — важна только
   // скорость обмена репликами.
   if (trivialProbeEnabled()) return "ping";
   return [
     `Целевой язык (на котором говорил учащийся): ${targetLanguage}`,
     `Родной язык учащегося (на нём объясняй ошибки): ${nativeLanguage}`,
-    `Транскрипт:`,
+    ...(expectedPhrase.length > 0
+      ? [`Эталонный перевод фразы целиком (один из верных вариантов):`, expectedPhrase, ""]
+      : []),
+    `Что сказал игрок:`,
     transcript,
   ].join("\n");
 }
 
 interface ParsedResult {
   score: number;
+  corrected: string;
   errors: GrammarError[];
 }
 
@@ -181,6 +214,10 @@ function validate(value: unknown): ParsedResult | null {
 
   if (typeof v.score !== "number" || !Number.isFinite(v.score)) return null;
   const score = Math.min(10, Math.max(1, Math.round(v.score)));
+
+  // corrected необязателен: если модель его не прислала, подсветку правки
+  // просто не покажем, но весь остальной разбор останется рабочим.
+  const corrected = typeof v.corrected === "string" ? v.corrected.trim() : "";
 
   if (!Array.isArray(v.errors)) return null;
   const errors: GrammarError[] = [];
@@ -206,7 +243,7 @@ function validate(value: unknown): ParsedResult | null {
   }
 
   // Ошибки НЕ обрезаются: игрок видит весь разбор, который дала модель.
-  return { score, errors };
+  return { score, corrected, errors };
 }
 
 /**
@@ -245,6 +282,7 @@ async function callLlmOnce(
   nativeLanguage: string,
   detailed: boolean,
   level: CefrLevel,
+  expectedPhrase: string,
   /**
    * false — повтор без `response_format` для провайдеров, которые этого
    * поля не знают и отвечают на него 400. Без такого отката судья у такого
@@ -305,7 +343,10 @@ async function callLlmOnce(
         model,
         messages: [
           { role: "system", content: buildSystemPrompt(detailed, level) },
-          { role: "user", content: buildUserPrompt(transcript, targetLanguage, nativeLanguage) },
+          {
+            role: "user",
+            content: buildUserPrompt(transcript, targetLanguage, nativeLanguage, expectedPhrase),
+          },
         ],
         // Явно нестриминговый ответ: нам нужен один цельный JSON-объект,
         // а не поток чанков (некоторые провайдеры включают стриминг по
@@ -402,6 +443,12 @@ export async function evaluateGrammar(
    * объяснений, не саму строгость оценки — см. LEVEL_SCORE_REMINDER.
    */
   level: CefrLevel = "A1",
+  /**
+   * Эталонный перевод фразы раунда на целевой язык. Нужен судье, чтобы
+   * видеть, ВСЮ ли мысль передал игрок: без него оценивался только
+   * сказанный кусок, и половина фразы получала балл как за целую.
+   */
+  expectedPhrase = "",
 ): Promise<EvaluateGrammarResult> {
   // Провайдер может не знать response_format и отвечать на него 400 — тогда
   // повторяем без него, иначе судья не работает вообще (и, что хуже,
@@ -431,6 +478,7 @@ export async function evaluateGrammar(
         nativeLanguage,
         detailed,
         level,
+        expectedPhrase,
         useResponseFormat,
       );
       const parsed = validate(extractJson(raw));
@@ -441,6 +489,7 @@ export async function evaluateGrammar(
         console.log(`evaluateGrammar: ответ за ${elapsed} мс, ошибок ${parsed.errors.length}`);
         return {
           score: parsed.score,
+          corrected: parsed.corrected,
           errors: parsed.errors,
           degraded: false,
           debug: {
@@ -488,6 +537,7 @@ export async function evaluateGrammar(
   console.error("evaluateGrammar: судья не дал результата:", reason);
   return {
     score: NEUTRAL_SCORE,
+    corrected: "",
     errors: [],
     degraded: true,
     failureReason: reason,

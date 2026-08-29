@@ -7,6 +7,7 @@ import '../../core/debug_flags.dart';
 import '../../core/game_access.dart';
 import '../../core/languages.dart';
 import '../../core/supabase_client.dart';
+import '../../core/text_diff.dart';
 import '../../core/theme.dart';
 import '../../data/phrase_bank.dart';
 import '../../data/voice_submission.dart';
@@ -704,6 +705,36 @@ class _Thinking extends StatelessWidget {
   }
 }
 
+/// Разметка правки: слово сказано неверно или пропущено — красным, верное
+/// — обычным цветом. Пропущенные подчёркиваются, неверные зачёркиваются,
+/// чтобы одно от другого отличалось не только на цвет.
+List<TextSpan> _correctionSpans(String transcript, String corrected) {
+  final parts = diffWords(transcript, corrected);
+  final spans = <TextSpan>[];
+  for (var i = 0; i < parts.length; i++) {
+    final part = parts[i];
+    spans.add(TextSpan(
+      text: part.text,
+      style: switch (part.kind) {
+        DiffKind.same => const TextStyle(color: AppColors.cream),
+        DiffKind.wrong => const TextStyle(
+            color: AppColors.danger,
+            decoration: TextDecoration.lineThrough,
+            decorationColor: AppColors.danger,
+          ),
+        DiffKind.missing => const TextStyle(
+            color: AppColors.danger,
+            fontWeight: FontWeight.w700,
+            decoration: TextDecoration.underline,
+            decorationColor: AppColors.danger,
+          ),
+      },
+    ));
+    if (i != parts.length - 1) spans.add(const TextSpan(text: ' '));
+  }
+  return spans;
+}
+
 /// Разбор ошибок после первой попытки — то, ради чего в соло есть вторая
 /// попытка (раздел 2.2, шаги 3-4).
 ///
@@ -743,6 +774,7 @@ class _ErrorReport extends StatelessWidget {
     };
 
     final transcript = attempt?.transcript ?? '';
+    final correction = attempt?.corrected ?? '';
 
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 8),
@@ -751,21 +783,31 @@ class _ErrorReport extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(title, style: AppFonts.mono(fontSize: 9, weight: FontWeight.w700, color: titleColor)),
-            const SizedBox(height: 8),
-            // Игрок должен видеть, что именно услышал распознаватель —
-            // иначе разбор ошибок в чужой по сути фразе выглядит абсурдом.
+            const SizedBox(height: 10),
+
+            // 1. Что услышал распознаватель — дословно, без правок.
             if (transcript.isNotEmpty) ...[
-              Text(
-                '«$transcript»',
-                style: const TextStyle(
-                  color: AppColors.cream,
-                  fontSize: 12,
-                  height: 1.4,
-                  fontStyle: FontStyle.italic,
-                ),
+              Text('Голосовое:', style: AppFonts.mono(fontSize: 10, weight: FontWeight.w700, color: AppColors.muted)),
+              const SizedBox(height: 3),
+              SelectableText(
+                transcript,
+                style: const TextStyle(color: AppColors.cream, fontSize: 13, height: 1.4),
               ),
-              const SizedBox(height: 8),
+              const SizedBox(height: 10),
             ],
+
+            // 2. Тот же текст с правкой: красным то, что сказано неверно,
+            // и красным же то, что было пропущено и должно быть добавлено.
+            if (transcript.isNotEmpty && correction.isNotEmpty) ...[
+              Text('Разбор:', style: AppFonts.mono(fontSize: 10, weight: FontWeight.w700, color: AppColors.muted)),
+              const SizedBox(height: 3),
+              SelectableText.rich(
+                TextSpan(children: _correctionSpans(transcript, correction)),
+                style: const TextStyle(fontSize: 13, height: 1.4),
+              ),
+              const SizedBox(height: 10),
+            ],
+
             if (errors.isEmpty || notRecognised || judgeBroken)
               Text(hint, style: const TextStyle(color: AppColors.muted, fontSize: 12, height: 1.4))
             else
