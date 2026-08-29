@@ -99,7 +99,7 @@ async function checkAsr(): Promise<CheckResult> {
             sampleRateHertz: 16000,
             audioChannelCount: 1,
             languageCode: bcp47For("en"),
-            model: Deno.env.get("ASR_MODEL") ?? "latest_short",
+            model: Deno.env.get("ASR_MODEL") ?? "latest_long",
           },
           audio: { content: toBase64(toneWavPcm()) },
         }),
@@ -216,7 +216,7 @@ async function checkJudge(): Promise<CheckResult & { probe?: unknown }> {
   }
 
   const startedAt = Date.now();
-  const result = await evaluateGrammar(JUDGE_PROBE, "en", "ru", true, "A1");
+  const result = await evaluateGrammar(JUDGE_PROBE, "en", "ru", "detailed", "A1");
   const elapsed = Date.now() - startedAt;
 
   // Диагностический режим меняет смысл всех остальных выводов этого блока,

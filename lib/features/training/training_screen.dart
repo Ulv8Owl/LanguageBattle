@@ -12,6 +12,7 @@ import '../../core/theme.dart';
 import '../../data/phrase_bank.dart';
 import '../../data/voice_submission.dart';
 import '../../widgets/chrolingo_widgets.dart';
+import '../../widgets/voice_message_bubble.dart';
 import '../../widgets/voice_recorder_dock.dart';
 import '../subscription/paywall_screen.dart';
 
@@ -79,6 +80,13 @@ class _TrainingScreenState extends State<TrainingScreen> {
   RecordingOutcome? _firstAttempt;
   RecordingOutcome? _secondAttempt;
 
+  /// Пути к голосовым текущего раунда — чтобы их можно было переслушать
+  /// прямо в ленте, как в мессенджере.
+  String? _firstAttemptAudio;
+  String? _secondAttemptAudio;
+
+  String _myName = 'Ты';
+
   int? _finalScore;
   int? _earnedCoins;
 
@@ -105,6 +113,7 @@ class _TrainingScreenState extends State<TrainingScreen> {
     _jobSub?.cancel();
     _roundSub?.cancel();
     _watchdog?.cancel();
+    _deleteSessionRecordings();
     _feedController.dispose();
     super.dispose();
   }
@@ -123,10 +132,11 @@ class _TrainingScreenState extends State<TrainingScreen> {
 
       final me = await supabase
           .from('users')
-          .select('native_language')
+          .select('username, native_language')
           .eq('id', _myId)
           .maybeSingle();
       _nativeLanguage = (me?['native_language'] as String?) ?? 'ru';
+      _myName = (me?['username'] as String?) ?? 'Ты';
 
       // start_training_session проверяет подписку и списывает энергию на
       // сервере — клиент не решает ни то, ни другое.
@@ -178,6 +188,8 @@ class _TrainingScreenState extends State<TrainingScreen> {
       _firstAttemptErrors = [];
       _firstAttempt = null;
       _secondAttempt = null;
+      _firstAttemptAudio = null;
+      _secondAttemptAudio = null;
       _finalScore = null;
       _earnedCoins = null;
       _stage = _Stage.awaitingFirst;
@@ -204,15 +216,17 @@ class _TrainingScreenState extends State<TrainingScreen> {
     if (roundId == null || sessionId == null) return;
     final attempt = _stage == _Stage.awaitingFirst ? 1 : 2;
 
+    final storagePath = trainingRecordingPath(
+      sessionId: sessionId,
+      roundId: roundId,
+      userId: _myId,
+      attempt: attempt,
+    );
+
     try {
       final recordingId = await submitVoiceRecording(
         filePath: take.filePath,
-        storagePath: trainingRecordingPath(
-          sessionId: sessionId,
-          roundId: roundId,
-          userId: _myId,
-          attempt: attempt,
-        ),
+        storagePath: storagePath,
         userId: _myId,
         languageCode: _targetLanguage,
         recordingSlot: 'target',
@@ -221,7 +235,14 @@ class _TrainingScreenState extends State<TrainingScreen> {
       );
 
       if (!mounted) return;
-      setState(() => _stage = attempt == 1 ? _Stage.gradingFirst : _Stage.gradingSecond);
+      setState(() {
+        _stage = attempt == 1 ? _Stage.gradingFirst : _Stage.gradingSecond;
+        if (attempt == 1) {
+          _firstAttemptAudio = storagePath;
+        } else {
+          _secondAttemptAudio = storagePath;
+        }
+      });
       _scrollToBottomSoon();
 
       if (attempt == 1) {
@@ -370,10 +391,12 @@ class _TrainingScreenState extends State<TrainingScreen> {
         debugPrint('claim_training_reward failed: $e');
       }
 
-      // Раунд оценён и награда начислена — обе попытки этого раунда больше
-      // не нужны, аудио не хранится "про запас" (см. deferred_suggestions.md,
-      // пункт 7 — реализовано по отдельному запросу владельца проекта).
-      unawaited(_deleteRoundRecordings(roundId));
+      // Удаление аудио отложено до конца сессии: пока игрок в ней, он
+      // должен иметь возможность переслушать свои голосовые прямо в ленте.
+      // "Про запас" оно по-прежнему не хранится (deferred_suggestions.md,
+      // пункт 7) — просто момент удаления сдвинут с конца раунда на выход
+      // с экрана.
+      _playedRoundIds.add(roundId);
 
       if (!mounted) return;
       setState(() {
@@ -383,6 +406,18 @@ class _TrainingScreenState extends State<TrainingScreen> {
       });
       _scrollToBottomSoon();
     });
+  }
+
+  /// Раунды сессии, аудио которых нужно удалить при выходе с экрана.
+  final Set<String> _playedRoundIds = {};
+
+  /// Удаление всех голосовых сессии — на выходе с экрана. Отдельно от
+  /// состояния виджета: вызывается из dispose(), когда setState уже нельзя.
+  void _deleteSessionRecordings() {
+    for (final roundId in _playedRoundIds) {
+      unawaited(_deleteRoundRecordings(roundId));
+    }
+    _playedRoundIds.clear();
   }
 
   Future<void> _deleteRoundRecordings(String trainingRoundId) async {
@@ -523,6 +558,20 @@ class _TrainingScreenState extends State<TrainingScreen> {
     );
   }
 
+  /// Отправленное голосовое в ленте — его можно переслушать.
+  List<Widget> _voiceBubble(String? storagePath, {int? score}) {
+    if (storagePath == null) return const [];
+    return [
+      VoiceMessageBubble(
+        key: ValueKey(storagePath),
+        audioStoragePath: storagePath,
+        name: _myName,
+        alignRight: true,
+        score: score,
+      ),
+    ];
+  }
+
   /// Техническая панель под попыткой — только пока включён kShowPipelineDebug.
   List<Widget> _debugPanels(String label, RecordingOutcome? attempt) {
     if (!kShowPipelineDebug || attempt == null) return const [];
@@ -579,20 +628,27 @@ class _TrainingScreenState extends State<TrainingScreen> {
 
     switch (_stage) {
       case _Stage.gradingFirst:
+        items.addAll(_voiceBubble(_firstAttemptAudio));
         items.add(const _Thinking(label: 'Разбираю первую попытку'));
         break;
       case _Stage.awaitingSecond:
+        items.addAll(_voiceBubble(_firstAttemptAudio));
         items.add(_ErrorReport(errors: _firstAttemptErrors, attempt: _firstAttempt));
         items.addAll(_debugPanels('Попытка 1', _firstAttempt));
         break;
       case _Stage.gradingSecond:
+        items.addAll(_voiceBubble(_firstAttemptAudio));
         items.add(_ErrorReport(errors: _firstAttemptErrors, attempt: _firstAttempt));
         items.addAll(_debugPanels('Попытка 1', _firstAttempt));
+        items.addAll(_voiceBubble(_secondAttemptAudio));
         items.add(const _Thinking(label: 'Оцениваю вторую попытку'));
         break;
       case _Stage.roundDone:
+        items.addAll(_voiceBubble(_firstAttemptAudio));
         items.add(_ErrorReport(errors: _firstAttemptErrors, attempt: _firstAttempt));
         items.addAll(_debugPanels('Попытка 1', _firstAttempt));
+        items.addAll(_voiceBubble(_secondAttemptAudio, score: _finalScore));
+        items.add(_ErrorReport(errors: const [], attempt: _secondAttempt, isSecondAttempt: true));
         items.add(_ScoreCard(score: _finalScore ?? 0, coins: _earnedCoins, attempt: _secondAttempt));
         items.addAll(_debugPanels('Попытка 2', _secondAttempt));
         break;
@@ -705,9 +761,8 @@ class _Thinking extends StatelessWidget {
   }
 }
 
-/// Разметка правки: слово сказано неверно или пропущено — красным, верное
-/// — обычным цветом. Пропущенные подчёркиваются, неверные зачёркиваются,
-/// чтобы одно от другого отличалось не только на цвет.
+/// Разметка правки: сказанное неверно — красным, пропущенное и добавленное
+/// — зелёным, верное — обычным цветом.
 List<TextSpan> _correctionSpans(String transcript, String corrected) {
   final parts = diffWords(transcript, corrected);
   final spans = <TextSpan>[];
@@ -717,17 +772,11 @@ List<TextSpan> _correctionSpans(String transcript, String corrected) {
       text: part.text,
       style: switch (part.kind) {
         DiffKind.same => const TextStyle(color: AppColors.cream),
-        DiffKind.wrong => const TextStyle(
-            color: AppColors.danger,
-            decoration: TextDecoration.lineThrough,
-            decorationColor: AppColors.danger,
-          ),
-        DiffKind.missing => const TextStyle(
-            color: AppColors.danger,
-            fontWeight: FontWeight.w700,
-            decoration: TextDecoration.underline,
-            decorationColor: AppColors.danger,
-          ),
+        // Красный — сказано неверно, зелёный — было пропущено и добавлено.
+        // Без подчёркиваний и зачёркиваний: цвета достаточно, а лишнее
+        // оформление только мешает читать строку целиком.
+        DiffKind.wrong => const TextStyle(color: AppColors.danger, fontWeight: FontWeight.w700),
+        DiffKind.missing => const TextStyle(color: AppColors.ok, fontWeight: FontWeight.w700),
       },
     ));
     if (i != parts.length - 1) spans.add(const TextSpan(text: ' '));
@@ -746,7 +795,16 @@ class _ErrorReport extends StatelessWidget {
   final List<Map<String, dynamic>> errors;
   final RecordingOutcome? attempt;
 
-  const _ErrorReport({required this.errors, required this.attempt});
+  /// Вторая попытка: показываем «Голосовое» и «Разбор» с подсветкой, но без
+  /// текстовых объяснений — их для неё судья и не генерирует (режим
+  /// marksOnly в evaluateGrammar.ts), чтобы не тратить время ответа.
+  final bool isSecondAttempt;
+
+  const _ErrorReport({
+    required this.errors,
+    required this.attempt,
+    this.isSecondAttempt = false,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -760,6 +818,7 @@ class _ErrorReport extends StatelessWidget {
       TranscriptStatus.failed => ('РЕЧЬ НЕ РАСПОЗНАНА', AppColors.muted),
       TranscriptStatus.empty => ('НИЧЕГО НЕ УСЛЫШАЛ', AppColors.muted),
       _ when judgeBroken => ('РАЗБОР НЕ ПОЛУЧЕН', AppColors.muted),
+      _ when isSecondAttempt => ('РАЗБОР ВТОРОЙ ПОПЫТКИ', AppColors.gold),
       _ => errors.isEmpty ? ('ОШИБОК НЕ НАЙДЕНО', AppColors.ok) : ('РАЗБОР ПЕРВОЙ ПОПЫТКИ', AppColors.gold),
     };
 
@@ -770,11 +829,15 @@ class _ErrorReport extends StatelessWidget {
         'Похоже, записалась тишина. Говори чётче и ближе к микрофону, удерживая кнопку всё время, пока говоришь.',
       _ when judgeBroken =>
         'ИИ-судья не ответил, поэтому разбора ошибок нет — это сбой на нашей стороне, а не признак того, что ошибок не было. Балл за него не снижается.',
+      _ when isSecondAttempt => 'Вторая попытка засчитана.',
       _ => 'Скажи фразу ещё раз — вторая попытка идёт в зачёт.',
     };
 
     final transcript = attempt?.transcript ?? '';
     final correction = attempt?.corrected ?? '';
+    // Сравниваем с очищенным текстом: если игрок поправил сам себя,
+    // брошенный вариант не должен подсветиться как ошибка.
+    final spoken = attempt?.spokenForDiff ?? '';
 
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 8),
@@ -802,13 +865,16 @@ class _ErrorReport extends StatelessWidget {
               Text('Разбор:', style: AppFonts.mono(fontSize: 10, weight: FontWeight.w700, color: AppColors.muted)),
               const SizedBox(height: 3),
               SelectableText.rich(
-                TextSpan(children: _correctionSpans(transcript, correction)),
+                TextSpan(children: _correctionSpans(spoken, correction)),
                 style: const TextStyle(fontSize: 13, height: 1.4),
               ),
               const SizedBox(height: 10),
             ],
 
-            if (errors.isEmpty || notRecognised || judgeBroken)
+            if (isSecondAttempt) ...[
+              if (notRecognised || judgeBroken || correction.isEmpty)
+                Text(hint, style: const TextStyle(color: AppColors.muted, fontSize: 12, height: 1.4)),
+            ] else if (errors.isEmpty || notRecognised || judgeBroken)
               Text(hint, style: const TextStyle(color: AppColors.muted, fontSize: 12, height: 1.4))
             else
               ...errors.map((e) => Padding(

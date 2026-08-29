@@ -22,6 +22,14 @@ export interface EvaluateGrammarResult {
    * наглядно, а не только списком объяснений.
    */
   corrected: string;
+
+  /**
+   * Что игрок сказал, за вычетом брошенных вариантов и повторов: если он
+   * поправил сам себя ("Go to magazine. Go to shop"), здесь остаётся только
+   * последний вариант. Именно с ним сравнивается corrected — иначе
+   * отброшенное показывалось бы игроку как ошибка.
+   */
+  cleaned: string;
   errors: GrammarError[];
   /** true, если модель так и не вернула валидный ответ и балл нейтральный. */
   degraded: boolean;
@@ -55,29 +63,47 @@ const BASE_SYSTEM_PROMPT =
 (например, перевёл одно предложение из двух или оборвал мысль на середине) — это серьёзный пропуск:
 укажи его как ошибку и заметно снизь балл, оценивая ответ по ВСЕЙ фразе, а не по сказанному куску.
 
+ИГРОК МОЖЕТ ПОПРАВИТЬ САМ СЕБЯ прямо в записи: сказать вариант, а сразу следом — другой
+("Go to magazine. Go to shop"). Засчитывай ТОЛЬКО последний вариант, а брошенный полностью
+отбрасывай: самоисправление — это не ошибка, а нормальная живая речь. То же самое с оговорками,
+запинками и повторами одного и того же куска подряд.
+
 ПОЛНОСТЬЮ ИГНОРИРУЙ пунктуацию и регистр букв. Текст приходит от распознавания речи, которое само
 расставляет точки, запятые и заглавные буквы там, где игрок просто сделал паузу, — это НЕ его
 ошибки. Не считай их ошибками, не упоминай в разборе и не снижай за них балл. Оценивай только
 слова, их формы и порядок.
 
 Верни СТРОГО JSON без markdown-разметки в формате:
-{"score": number, "corrected": string, "errors": [{"offset": number, "length": number, "message": string, "replacement": string, "category": "grammar"|"spelling"|"style"}]}
+{"score": number, "cleaned": string, "corrected": string, "errors": [{"offset": number, "length": number, "message": string, "replacement": string, "category": "grammar"|"spelling"|"style"}]}
 
 score — целое число от 1 до 10: 10 — безупречно и естественно, 7-9 — понятно с мелкими огрехами,
 4-6 — заметные ошибки, но смысл ясен, 1-3 — почти непонятно, не на том языке или передана лишь
 малая часть фразы.
+cleaned — то, что игрок сказал, ОЧИЩЕННОЕ от брошенных вариантов, оговорок и повторов: только
+последний вариант каждого куска, слово в слово как он его произнёс, БЕЗ исправления ошибок.
+Если он себя не поправлял — просто повтори его текст без изменений.
 corrected — ВЕСЬ ответ игрока целиком, исправленный: те же его слова и обороты, но с исправленными
-ошибками и с ДОБАВЛЕННЫМИ словами, которые он пропустил. Не подменяй его перевод эталоном — правь
-именно то, что он сказал, дополняя пропущенное по смыслу эталона.
+ошибками и с ДОБАВЛЕННЫМИ словами, которые он пропустил. Считай его ответом именно cleaned, а не
+исходный текст: брошенных вариантов в corrected быть не должно. Не подменяй его перевод эталоном —
+правь именно то, что он сказал, дополняя пропущенное по смыслу эталона.
 offset/length — позиция символа в ПЕРЕДАННОМ тексте (0-indexed, по UTF-16 code units).
 replacement — как должно быть правильно.
 category — "grammar" или "spelling" для настоящих ошибок; "style" для необязательных стилистических советов.
-Если ошибок нет — верни {"score": 10, "corrected": <текст игрока без изменений>, "errors": []}.
+Если ошибок нет — верни {"score": 10, "cleaned": <очищенный текст>, "corrected": <он же>, "errors": []}.
 
 ВАЖНО: не рассуждай перед ответом и не пиши ничего, кроме самого JSON — начинай ответ сразу с
 символа { и заканчивай символом }.
 Разбирай ВСЕ найденные ошибки, не ограничивай себя в их количестве. Сначала перечисляй самые
 грубые и самые важные для понимания.`;
+
+/**
+ * Насколько подробно судья объясняет ошибки.
+ *
+ * `marksOnly` существует ради скорости: объяснения по 3-5 предложений на
+ * ошибку — это основная часть генерации, и там, где на экране показывается
+ * только подсветка правки, платить за них временем ожидания незачем.
+ */
+export type JudgeVerbosity = "brief" | "detailed" | "marksOnly";
 
 /// Обычный режим (PvP, раздел 2.4): message — короткое, одна-две фразы,
 /// понятное с первого взгляда прямо в ленте боя.
@@ -94,6 +120,13 @@ const DETAILED_MESSAGE_INSTRUCTION =
 повтори replacement). Это учебный режим с двумя попытками подряд — объяснение должно быть настолько
 понятным, чтобы неноситель языка A1-B2 смог исправить ошибку во второй попытке, не просто скопировав
 исправление.`;
+
+/// Вторая попытка Одиночной Игры: на экране только подсветка правки, а
+/// текстовых объяснений нет — значит и генерировать их не нужно.
+const MARKS_ONLY_INSTRUCTION =
+  `Объяснения В ЭТОТ РАЗ НЕ НУЖНЫ: верни errors ПУСТЫМ массивом [].
+Заполни только score, cleaned и corrected — по ним игроку и так видно, что исправлено.
+Это экономит время ответа, поэтому не пиши объяснений даже частично.`;
 
 export type CefrLevel = "A1" | "A2" | "B1" | "B2" | "C1" | "C2";
 
@@ -171,10 +204,12 @@ const TRIVIAL_SYSTEM_PROMPT =
   `Отвечай СТРОГО одним и тем же JSON, что бы тебе ни прислали, без markdown и без пояснений:
 {"score": 1, "errors": []}`;
 
-function buildSystemPrompt(detailed: boolean, level: CefrLevel): string {
+function buildSystemPrompt(verbosity: JudgeVerbosity, level: CefrLevel): string {
   if (trivialProbeEnabled()) return TRIVIAL_SYSTEM_PROMPT;
+  if (verbosity === "marksOnly") return `${BASE_SYSTEM_PROMPT}\n${MARKS_ONLY_INSTRUCTION}`;
   const levelBlock = `${LEVEL_INSTRUCTIONS[level]}\n${LEVEL_SCORE_REMINDER}`;
-  return `${BASE_SYSTEM_PROMPT}\n${levelBlock}\n${detailed ? DETAILED_MESSAGE_INSTRUCTION : BRIEF_MESSAGE_INSTRUCTION}`;
+  const messageBlock = verbosity === "detailed" ? DETAILED_MESSAGE_INSTRUCTION : BRIEF_MESSAGE_INSTRUCTION;
+  return `${BASE_SYSTEM_PROMPT}\n${levelBlock}\n${messageBlock}`;
 }
 
 function buildUserPrompt(
@@ -200,6 +235,7 @@ function buildUserPrompt(
 interface ParsedResult {
   score: number;
   corrected: string;
+  cleaned: string;
   errors: GrammarError[];
 }
 
@@ -218,6 +254,7 @@ function validate(value: unknown): ParsedResult | null {
   // corrected необязателен: если модель его не прислала, подсветку правки
   // просто не покажем, но весь остальной разбор останется рабочим.
   const corrected = typeof v.corrected === "string" ? v.corrected.trim() : "";
+  const cleaned = typeof v.cleaned === "string" ? v.cleaned.trim() : "";
 
   if (!Array.isArray(v.errors)) return null;
   const errors: GrammarError[] = [];
@@ -243,7 +280,7 @@ function validate(value: unknown): ParsedResult | null {
   }
 
   // Ошибки НЕ обрезаются: игрок видит весь разбор, который дала модель.
-  return { score, corrected, errors };
+  return { score, corrected, cleaned, errors };
 }
 
 /**
@@ -280,7 +317,7 @@ async function callLlmOnce(
   transcript: string,
   targetLanguage: string,
   nativeLanguage: string,
-  detailed: boolean,
+  verbosity: JudgeVerbosity,
   level: CefrLevel,
   expectedPhrase: string,
   /**
@@ -342,7 +379,7 @@ async function callLlmOnce(
       body: JSON.stringify({
         model,
         messages: [
-          { role: "system", content: buildSystemPrompt(detailed, level) },
+          { role: "system", content: buildSystemPrompt(verbosity, level) },
           {
             role: "user",
             content: buildUserPrompt(transcript, targetLanguage, nativeLanguage, expectedPhrase),
@@ -431,12 +468,10 @@ export async function evaluateGrammar(
   targetLanguage: string,
   nativeLanguage: string,
   /**
-   * true — Одиночная Игра (раздел 2.2): подробный разбор ошибки между
-   * попыткой №1 и №2. false — PvP (раздел 2.4): короткая пометка в ленте
-   * боя. Балл (score) считается одинаково в обоих случаях — отличается
-   * только глубина текста в message у найденных ошибок.
+   * Глубина объяснений. Балл (score) и `corrected` считаются одинаково во
+   * всех режимах — отличается только объём текста в message.
    */
-  detailed = false,
+  verbosity: JudgeVerbosity = "brief",
   /**
    * Уровень говорящего (его лига, приравненная к CEFR — см.
    * supabase/migrations/0010). Ограничивает только сложность ТЕКСТА
@@ -476,7 +511,7 @@ export async function evaluateGrammar(
         transcript,
         targetLanguage,
         nativeLanguage,
-        detailed,
+        verbosity,
         level,
         expectedPhrase,
         useResponseFormat,
@@ -490,6 +525,7 @@ export async function evaluateGrammar(
         return {
           score: parsed.score,
           corrected: parsed.corrected,
+          cleaned: parsed.cleaned,
           errors: parsed.errors,
           degraded: false,
           debug: {
@@ -538,6 +574,7 @@ export async function evaluateGrammar(
   return {
     score: NEUTRAL_SCORE,
     corrected: "",
+    cleaned: "",
     errors: [],
     degraded: true,
     failureReason: reason,

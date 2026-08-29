@@ -21,7 +21,12 @@
 // deferred_suggestions.md, не добавлять их сюда без отдельного запроса.
 
 import { createClient, type SupabaseClient } from "jsr:@supabase/supabase-js@2";
-import { type CefrLevel, evaluateGrammar, NEUTRAL_SCORE } from "../_shared/evaluateGrammar.ts";
+import {
+  type CefrLevel,
+  evaluateGrammar,
+  type JudgeVerbosity,
+  NEUTRAL_SCORE,
+} from "../_shared/evaluateGrammar.ts";
 import { transcribeAudio } from "../_shared/transcribeAudio.ts";
 
 /**
@@ -173,6 +178,13 @@ async function processJob(job_id: string): Promise<void> {
     // Диагностика пайплайна для отладочной панели в игре (миграция 0016).
     const pipelineDebug: Record<string, unknown> = { asr: asrDebug };
 
+    // Номер попытки в соло нужен ДО вызова судьи: на второй попытке
+    // текстовые объяснения не показываются, а значит и генерировать их не
+    // надо — это основная часть времени ответа.
+    const attemptNumber = recording.training_round_id
+      ? await trainingAttemptNumber(supabase, recording)
+      : 1;
+
     // Шаг 2 — оценка. Три исхода распознавания дают три разных балла, и
     // путать их нельзя: за нашу поломку игрок не должен получать 1.
     let score: number;
@@ -181,6 +193,7 @@ async function processJob(job_id: string): Promise<void> {
 
     let judgeStatus: JudgeStatus;
     let correctedText = "";
+    let cleanedText = "";
 
     if (status === "failed") {
       score = NEUTRAL_SCORE;
@@ -213,15 +226,21 @@ async function processJob(job_id: string): Promise<void> {
         .single();
       const nativeLanguage = speaker?.native_language ?? "en";
 
-      // Одиночная Игра просит подробный разбор ошибки (раздел 2.2: игрок
-      // должен понять, что исправить перед второй попыткой) — PvP получает
-      // короткую пометку прямо в ленте боя. Балл считается одинаково.
-      const detailed = recording.training_round_id != null;
+      // Первая попытка Одиночной Игры просит подробный разбор (раздел 2.2:
+      // игрок должен понять, что исправить перед второй попыткой). Вторая
+      // показывает только подсветку правки — объяснения там не выводятся,
+      // поэтому не запрашиваются. PvP получает короткую пометку в ленте боя.
+      // Балл и исправленный текст считаются одинаково во всех режимах.
+      const verbosity: JudgeVerbosity = recording.training_round_id == null
+        ? "brief"
+        : attemptNumber >= 2
+        ? "marksOnly"
+        : "detailed";
       const result = await evaluateGrammar(
         transcript,
         targetLanguage,
         nativeLanguage,
-        detailed,
+        verbosity,
         level,
         expectedPhrase,
       );
@@ -231,6 +250,7 @@ async function processJob(job_id: string): Promise<void> {
       judgeStatus = result.degraded ? "degraded" : "ok";
       pipelineDebug.judge = result.debug;
       correctedText = result.corrected;
+      cleanedText = result.cleaned;
       feedback = result.degraded
         ? "Не удалось получить разбор от ИИ — балл выставлен нейтральным."
         : errors.length === 0
@@ -251,6 +271,7 @@ async function processJob(job_id: string): Promise<void> {
         judge_status: judgeStatus,
         pipeline_debug: pipelineDebug,
         corrected_text: correctedText,
+        cleaned_text: cleanedText,
       })
       .eq("id", recording.id);
 
@@ -278,12 +299,6 @@ async function processJob(job_id: string): Promise<void> {
       // финальный балл ставится по попытке №2. Попытки различаются по
       // порядку created_at внутри одного training_round — как в схеме
       // (раздел 4), без отдельного поля attempt.
-      const { count } = await supabase
-        .from("voice_recordings")
-        .select("id", { count: "exact", head: true })
-        .eq("training_round_id", recording.training_round_id)
-        .lte("created_at", recording.created_at);
-      const attemptNumber = count ?? 1;
       if (attemptNumber >= 2) {
         await supabase
           .from("training_rounds")
@@ -364,6 +379,22 @@ async function resolveTranscript(
  * раунда боя, смотря чей это слот. Пустой список, если фразы нет: подсказка
  * необязательна, без неё распознавание просто работает как раньше.
  */
+/**
+ * Какая это по счёту попытка внутри соло-раунда. Попытки различаются по
+ * порядку created_at (как в схеме, раздел 4), без отдельного поля attempt.
+ */
+async function trainingAttemptNumber(
+  supabase: SupabaseClient,
+  recording: VoiceRecordingRow,
+): Promise<number> {
+  const { count } = await supabase
+    .from("voice_recordings")
+    .select("id", { count: "exact", head: true })
+    .eq("training_round_id", recording.training_round_id!)
+    .lte("created_at", recording.created_at);
+  return count ?? 1;
+}
+
 async function roundPhrase(
   supabase: SupabaseClient,
   recording: VoiceRecordingRow,

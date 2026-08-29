@@ -63,6 +63,11 @@ class RecordingOutcome {
   /// строка — сравнивать не с чем: судья не отвечал или не прислал правку.
   final String corrected;
 
+  /// Что игрок сказал, за вычетом брошенных вариантов и повторов (миграция
+  /// 0018). Именно с ним сравнивается [corrected]: если сравнивать с
+  /// исходным текстом, самоисправление подсветилось бы как ошибка.
+  final String cleaned;
+
   /// Техническая диагностика пайплайна: что ответили ASR и судья
   /// (voice_recordings.pipeline_debug, миграция 0016). Показывается на
   /// экране, пока включён kShowPipelineDebug.
@@ -73,8 +78,13 @@ class RecordingOutcome {
     required this.status,
     this.judgeStatus = JudgeStatus.ok,
     this.corrected = '',
+    this.cleaned = '',
     this.debug,
   });
+
+  /// Текст, с которым сравнивается исправленный вариант: очищенный от
+  /// самоисправлений, если судья его прислал, иначе — что услышал ASR.
+  String get spokenForDiff => cleaned.isNotEmpty ? cleaned : transcript;
 
   Map<String, dynamic>? get asrDebug => _section('asr');
   Map<String, dynamic>? get judgeDebug => _section('judge');
@@ -145,7 +155,7 @@ Future<String> submitVoiceRecording({
 Future<RecordingOutcome> fetchRecordingOutcome(String recordingId) async {
   final row = await supabase
       .from('voice_recordings')
-      .select('transcript, transcript_status, judge_status, corrected_text, pipeline_debug')
+      .select('transcript, transcript_status, judge_status, corrected_text, cleaned_text, pipeline_debug')
       .eq('id', recordingId)
       .maybeSingle();
   return RecordingOutcome(
@@ -153,6 +163,7 @@ Future<RecordingOutcome> fetchRecordingOutcome(String recordingId) async {
     status: TranscriptStatus.parse(row?['transcript_status'] as String?),
     judgeStatus: JudgeStatus.parse(row?['judge_status'] as String?),
     corrected: ((row?['corrected_text'] as String?) ?? '').trim(),
+    cleaned: ((row?['cleaned_text'] as String?) ?? '').trim(),
     debug: row?['pipeline_debug'] is Map
         ? Map<String, dynamic>.from(row!['pipeline_debug'] as Map)
         : null,

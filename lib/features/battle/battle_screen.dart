@@ -1,6 +1,5 @@
 import 'dart:async';
 
-import 'package:audioplayers/audioplayers.dart';
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
@@ -9,7 +8,7 @@ import '../../core/supabase_client.dart';
 import '../../core/theme.dart';
 import '../../data/phrase_bank.dart';
 import '../../data/voice_submission.dart';
-import '../../widgets/chrolingo_widgets.dart';
+import '../../widgets/voice_message_bubble.dart';
 import '../../widgets/voice_recorder_dock.dart';
 import 'battle_models.dart';
 
@@ -469,9 +468,9 @@ class _BattleScreenState extends State<BattleScreen> {
         final myScore = slot == 'target' ? _scoreFor(round.id, _myId) : null;
         final theirScore = slot == 'target' ? _scoreFor(round.id, opponentId) : null;
         if (mine != null) {
-          items.add(_RecordingBubble(
+          items.add(VoiceMessageBubble(
             key: ValueKey('${mine.id}-mine'),
-            recording: mine,
+            audioStoragePath: mine.audioStoragePath,
             name: _myName,
             alignRight: false,
             score: myScore,
@@ -479,9 +478,9 @@ class _BattleScreenState extends State<BattleScreen> {
           ));
         }
         if (theirs != null) {
-          items.add(_RecordingBubble(
+          items.add(VoiceMessageBubble(
             key: ValueKey('${theirs.id}-theirs'),
-            recording: theirs,
+            audioStoragePath: theirs.audioStoragePath,
             name: _opponentName,
             alignRight: true,
             score: theirScore,
@@ -674,125 +673,3 @@ class _AiBubble extends StatelessWidget {
 
 /// Голосовое в ленте: своё — слева с аватаром и волной, соперника — справа
 /// зеркально. Балл за раунд прикрепляется к сообщению сразу после оценки.
-class _RecordingBubble extends StatefulWidget {
-  final VoiceRecordingData recording;
-  final String name;
-  final bool alignRight;
-  final int? score;
-
-  /// true для голосовых, за которые балл вообще предусмотрен (изучаемый
-  /// язык). Пока балла нет — на его месте крутится индикатор.
-  final bool scorePending;
-
-  const _RecordingBubble({
-    super.key,
-    required this.recording,
-    required this.name,
-    required this.alignRight,
-    required this.score,
-    required this.scorePending,
-  });
-
-  @override
-  State<_RecordingBubble> createState() => _RecordingBubbleState();
-}
-
-class _RecordingBubbleState extends State<_RecordingBubble> {
-  final _player = AudioPlayer();
-  bool _isPlaying = false;
-  bool _loadingUrl = false;
-
-  @override
-  void dispose() {
-    _player.dispose();
-    super.dispose();
-  }
-
-  Future<void> _togglePlay() async {
-    if (_isPlaying) {
-      await _player.stop();
-      if (mounted) setState(() => _isPlaying = false);
-      return;
-    }
-    setState(() => _loadingUrl = true);
-    try {
-      final url = await supabase.storage
-          .from('voice-recordings')
-          .createSignedUrl(widget.recording.audioStoragePath, 3600);
-      await _player.play(UrlSource(url));
-      if (!mounted) return;
-      setState(() {
-        _isPlaying = true;
-        _loadingUrl = false;
-      });
-      _player.onPlayerComplete.first.then((_) {
-        if (mounted) setState(() => _isPlaying = false);
-      });
-    } catch (e) {
-      if (mounted) {
-        setState(() => _loadingUrl = false);
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Не удалось воспроизвести: $e')),
-        );
-      }
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final accent = widget.alignRight ? AppColors.cyan : AppColors.gold;
-
-    final bubble = Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
-      decoration: BoxDecoration(
-        color: widget.alignRight ? AppColors.navy3 : AppColors.gold.withValues(alpha: 0.14),
-        border: Border.all(color: accent.withValues(alpha: 0.35)),
-        borderRadius: BorderRadius.circular(14),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          GestureDetector(
-            onTap: _loadingUrl ? null : _togglePlay,
-            child: _loadingUrl
-                ? const SizedBox(height: 18, width: 18, child: CircularProgressIndicator(strokeWidth: 2))
-                : Icon(_isPlaying ? Icons.stop : Icons.play_arrow, color: accent, size: 22),
-          ),
-          const SizedBox(width: 8),
-          ChWaveform(width: 96, color: accent),
-          if (widget.score != null) ...[
-            const SizedBox(width: 10),
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
-              decoration: BoxDecoration(color: accent, borderRadius: BorderRadius.circular(7)),
-              child: Text(
-                '${widget.score}',
-                style: AppFonts.ui(fontSize: 12, weight: FontWeight.w800, color: Colors.black),
-              ),
-            ),
-          ] else if (widget.scorePending) ...[
-            const SizedBox(width: 10),
-            const SizedBox(
-              height: 12,
-              width: 12,
-              child: CircularProgressIndicator(strokeWidth: 1.6, color: AppColors.muted),
-            ),
-          ],
-        ],
-      ),
-    );
-
-    final avatar = ChAvatar(name: widget.name, size: 28, ringColor: accent.withValues(alpha: 0.6));
-
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 4),
-      child: Row(
-        mainAxisAlignment: widget.alignRight ? MainAxisAlignment.end : MainAxisAlignment.start,
-        crossAxisAlignment: CrossAxisAlignment.end,
-        children: widget.alignRight
-            ? [Flexible(child: bubble), const SizedBox(width: 8), avatar]
-            : [avatar, const SizedBox(width: 8), Flexible(child: bubble)],
-      ),
-    );
-  }
-}

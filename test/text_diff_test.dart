@@ -51,6 +51,13 @@ void main() {
     expect(parts.length, 3);
   });
 
+  test('самоисправление игрока не считается ошибкой', () {
+    // Судья присылает cleaned без брошенного варианта, поэтому сравнение
+    // идёт уже с ним — «go to magazine» в подсветке не участвует.
+    final parts = diffWords('Go to shop', 'Go to the shop');
+    expect(render(parts), 'Go to [+the] shop');
+  });
+
   test('апостроф внутри слова сохраняется', () {
     final parts = diffWords('he dont like', "he doesn't like");
     expect(render(parts), "he [-dont] [+doesn't] like");
