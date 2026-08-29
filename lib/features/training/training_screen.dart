@@ -442,6 +442,8 @@ class _TrainingScreenState extends State<TrainingScreen> {
       score: _finalScore ?? 0,
       firstAttempt: _firstAttempt,
       secondAttempt: _secondAttempt,
+      firstAudio: _firstAttemptAudio,
+      secondAudio: _secondAttemptAudio,
     ));
     if (_roundNumber >= _roundsPerSession) {
       setState(() => _stage = _Stage.sessionDone);
@@ -588,10 +590,15 @@ class _TrainingScreenState extends State<TrainingScreen> {
         text: done.phrase,
         targetLanguage: _targetLanguage,
       ));
-      if (done.errors.isNotEmpty) {
-        items.add(_ErrorReport(errors: done.errors, attempt: done.firstAttempt));
-      }
+      // Сыгранный раунд показывается тем же набором блоков, что и текущий:
+      // иначе, шагнув «Дальше», игрок терял и свои голосовые, и разбор.
+      items.addAll(_voiceBubble(done.firstAudio));
+      items.add(_ErrorReport(errors: done.errors, attempt: done.firstAttempt));
+      items.addAll(_debugPanels('Раунд ${done.roundNumber}, попытка 1', done.firstAttempt));
+      items.addAll(_voiceBubble(done.secondAudio, score: done.score));
+      items.add(_ErrorReport(errors: const [], attempt: done.secondAttempt, isSecondAttempt: true));
       items.add(_ScoreCard(score: done.score, coins: null, attempt: done.secondAttempt));
+      items.addAll(_debugPanels('Раунд ${done.roundNumber}, попытка 2', done.secondAttempt));
     }
 
     if (_stage == _Stage.sessionDone) {
@@ -668,6 +675,13 @@ class _CompletedRound {
   final RecordingOutcome? firstAttempt;
   final RecordingOutcome? secondAttempt;
 
+  /// Пути к голосовым обеих попыток. Хранятся вместе с раундом, чтобы
+  /// сыгранные раунды не теряли свои голосовые: лента — это переписка, и
+  /// переслушать сказанное на третьем раунде должно быть можно и на
+  /// восьмом. Файлы живут до выхода с экрана (_deleteSessionRecordings).
+  final String? firstAudio;
+  final String? secondAudio;
+
   const _CompletedRound({
     required this.roundNumber,
     required this.phrase,
@@ -675,6 +689,8 @@ class _CompletedRound {
     required this.score,
     required this.firstAttempt,
     required this.secondAttempt,
+    required this.firstAudio,
+    required this.secondAudio,
   });
 }
 
@@ -808,6 +824,11 @@ class _ErrorReport extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // Разбора второй попытки без самой попытки не бывает: показывать пустую
+    // панель «Вторая попытка засчитана» не за чем — в ленте это был бы шум
+    // на каждом сыгранном раунде.
+    if (isSecondAttempt && attempt == null) return const SizedBox.shrink();
+
     final status = attempt?.status ?? TranscriptStatus.ok;
     final judge = attempt?.judgeStatus ?? JudgeStatus.ok;
     // Судья не ответил — пустой список ошибок НЕ значит, что ошибок нет.
@@ -865,7 +886,7 @@ class _ErrorReport extends StatelessWidget {
             ],
 
             // 2. Тот же текст с правкой: красным то, что сказано неверно,
-            // и красным же то, что было пропущено и должно быть добавлено.
+            // зелёным — то, что было пропущено и добавлено по эталону.
             if (transcript.isNotEmpty && correction.isNotEmpty) ...[
               Text('Разбор:', style: AppFonts.mono(fontSize: 10, weight: FontWeight.w700, color: AppColors.muted)),
               const SizedBox(height: 3),
