@@ -275,11 +275,19 @@ class _TrainingScreenState extends State<TrainingScreen> {
   }
 
   /// Сколько ждать результат от сервера, прежде чем признать, что он не
-  /// придёт. Оценка идёт асинхронно (распознавание + LLM), поэтому запас
-  /// большой — но НЕ бесконечный: воркер может быть убит платформой на
-  /// середине, и тогда статус задачи не изменится уже никогда, а игрок
-  /// смотрит на вечный спиннер. Раньше это был именно вечный спиннер.
-  static const _resultTimeout = Duration(seconds: 120);
+  /// придёт.
+  ///
+  /// Это НЕ ограничение на работу пайплайна, а защита от вечного спиннера:
+  /// воркер может быть убит платформой на середине, и тогда статус задачи
+  /// не изменится уже никогда. Запас заведомо больше суммы серверных
+  /// таймаутов (распознавание + судья, по 120 секунд каждый) — иначе клиент
+  /// сдавался бы раньше, чем сервер успевает ответить.
+  static const _resultTimeout = Duration(minutes: 5);
+
+  /// Задачу считаем зависшей только когда она заведомо старше всего, что
+  /// сервер мог бы делать легально. Раньше здесь стояло 60 секунд — это
+  /// убивало ЖИВЫЕ задачи, которые просто ещё считались.
+  static const _staleJobSeconds = 280;
 
   Timer? _watchdog;
 
@@ -293,7 +301,7 @@ class _TrainingScreenState extends State<TrainingScreen> {
   /// не за что, сбой не его вина.
   Future<void> _giveUpOnFirstAttempt(String recordingId) async {
     _jobSub?.cancel();
-    await supabase.rpc('fail_stale_evaluation_jobs', params: {'p_stale_seconds': 60}).catchError((e) {
+    await supabase.rpc('fail_stale_evaluation_jobs', params: {'p_stale_seconds': _staleJobSeconds}).catchError((e) {
       debugPrint('fail_stale_evaluation_jobs failed: $e');
       return null;
     });
@@ -309,7 +317,7 @@ class _TrainingScreenState extends State<TrainingScreen> {
   /// как и сервер при собственном сбое: наказывать игрока не за что.
   Future<void> _giveUpOnSecondAttempt() async {
     _roundSub?.cancel();
-    await supabase.rpc('fail_stale_evaluation_jobs', params: {'p_stale_seconds': 60}).catchError((e) {
+    await supabase.rpc('fail_stale_evaluation_jobs', params: {'p_stale_seconds': _staleJobSeconds}).catchError((e) {
       debugPrint('fail_stale_evaluation_jobs failed: $e');
       return null;
     });

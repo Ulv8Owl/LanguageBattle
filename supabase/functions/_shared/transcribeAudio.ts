@@ -17,6 +17,7 @@
 //   ASR_API_KEY     ключ провайдера
 //   ASR_BASE_URL    переопределение эндпоинта (обычно не нужно)
 //   ASR_MODEL       google: latest_long (по умолчанию); openai: whisper-1
+//   ASR_TIMEOUT_MS  таймаут запроса, по умолчанию 120000
 //
 // Провайдер openai — это любой эндпоинт с whisper-совместимым
 // /audio/transcriptions (в том числе тот же base_url, что у LLM-судьи),
@@ -56,8 +57,13 @@ export function bcp47For(languageCode: string): string {
   return BCP47_BY_LANGUAGE[languageCode] ?? "en-US";
 }
 
-/** Дольше держать запрос нет смысла: голосовое в раунде — секунды, не минуты. */
-const ASR_TIMEOUT_MS = 25_000;
+/**
+ * Таймаут запроса к ASR. Он НЕ ограничивает длину записи — только не даёт
+ * зависшему провайдеру утащить за собой всю задачу: без таймаута функцию
+ * убивает платформа ДО блока catch, и задача остаётся в 'processing'
+ * навсегда. Поэтому он щедрый и настраивается.
+ */
+const ASR_TIMEOUT_MS = Number(Deno.env.get("ASR_TIMEOUT_MS") ?? 120_000);
 
 function empty(debug: Record<string, unknown>): TranscriptionResult {
   return { transcript: "", confidence: 0, words: [], degraded: false, debug: { ...debug, status: "empty" } };
@@ -157,8 +163,14 @@ async function fetchWithTimeout(url: string, init: RequestInit): Promise<Respons
 
 /**
  * Google Cloud Speech-to-Text v1, синхронный speech:recognize.
- * Синхронный вариант ограничен минутой аудио — голосовые в раундах заведомо
- * короче, длинные записи сюда просто не попадают.
+ *
+ * ЕДИНСТВЕННОЕ оставшееся ограничение на длину — платформенное: синхронный
+ * speech:recognize принимает не больше минуты аудио. Снять его правкой
+ * параметров нельзя, для более длинных записей нужен асинхронный
+ * longrunningrecognize (запрос + опрос операции). Голосовое в раунде —
+ * секунды, поэтому этот путь пока не нужен; если записи станут длиннее
+ * минуты, провайдер вернёт понятную ошибку, и она попадёт в отладочную
+ * панель.
  */
 async function transcribeGoogle(
   audio: Uint8Array,
