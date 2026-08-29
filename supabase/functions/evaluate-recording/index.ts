@@ -64,6 +64,7 @@ interface VoiceRecordingRow {
   audio_storage_path: string;
   transcript: string | null;
   transcript_status: TranscriptStatus | null;
+  attempt_number: number | null;
   created_at: string;
 }
 
@@ -181,9 +182,10 @@ async function processJob(job_id: string): Promise<void> {
     // Номер попытки в соло нужен ДО вызова судьи: на второй попытке
     // текстовые объяснения не показываются, а значит и генерировать их не
     // надо — это основная часть времени ответа.
-    const attemptNumber = recording.training_round_id
+    const attempt = recording.training_round_id
       ? await trainingAttemptNumber(supabase, recording)
-      : 1;
+      : { attempt: 1, source: "PvP" };
+    const attemptNumber = attempt.attempt;
 
     // Шаг 2 — оценка. Три исхода распознавания дают три разных балла, и
     // путать их нельзя: за нашу поломку игрок не должен получать 1.
@@ -236,6 +238,13 @@ async function processJob(job_id: string): Promise<void> {
         : attemptNumber >= 2
         ? "marksOnly"
         : "detailed";
+      // Номер попытки и выбранный режим — в отладку: по экрану невозможно
+      // отличить «судью попросили объяснять» от «попытку сочли первой».
+      pipelineDebug.round = {
+        attempt: attemptNumber,
+        attempt_source: attempt.source,
+        verbosity,
+      };
       const result = await evaluateGrammar(
         transcript,
         targetLanguage,
@@ -375,26 +384,41 @@ async function resolveTranscript(
 }
 
 /**
- * Фраза, которую игрок повторяет в этом раунде — из соло-раунда или из
- * раунда боя, смотря чей это слот. Пустой список, если фразы нет: подсказка
- * необязательна, без неё распознавание просто работает как раньше.
- */
-/**
- * Какая это по счёту попытка внутри соло-раунда. Попытки различаются по
- * порядку created_at (как в схеме, раздел 4), без отдельного поля attempt.
+ * Какая это попытка в раунде.
+ *
+ * Основной источник — attempt_number, который проставляет клиент (миграция
+ * 0019): он этот номер знает точно. Подсчёт строк остался только для
+ * записей от прежних сборок, где столбца ещё нет.
+ *
+ * Раньше подсчёт был единственным источником и его ошибка не проверялась:
+ * `count ?? 1` превращал любой сбой запроса во «вторую попытку — это
+ * первая», а на экране это выглядело как исправная работа. Теперь неудача
+ * возвращается наружу и попадает в отладочную панель.
  */
 async function trainingAttemptNumber(
   supabase: SupabaseClient,
   recording: VoiceRecordingRow,
-): Promise<number> {
-  const { count } = await supabase
+): Promise<{ attempt: number; source: string }> {
+  if (recording.attempt_number != null) {
+    return { attempt: recording.attempt_number, source: "клиент" };
+  }
+  const { count, error } = await supabase
     .from("voice_recordings")
     .select("id", { count: "exact", head: true })
     .eq("training_round_id", recording.training_round_id!)
     .lte("created_at", recording.created_at);
-  return count ?? 1;
+  if (error || count == null) {
+    console.error("evaluate-recording: не смог посчитать попытку", error);
+    return { attempt: 1, source: `подсчёт не удался (${error?.message ?? "нет count"}) — считаем первой` };
+  }
+  return { attempt: count, source: "подсчёт строк (старый клиент)" };
 }
 
+/**
+ * Фраза раунда на изучаемом языке — из соло-раунда или из раунда боя, смотря
+ * чей это слот. Пустая строка, если фразы нет: и подсказка распознавателю, и
+ * эталон судье без неё просто не передаются.
+ */
 async function roundPhrase(
   supabase: SupabaseClient,
   recording: VoiceRecordingRow,

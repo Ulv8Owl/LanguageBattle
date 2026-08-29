@@ -112,6 +112,11 @@ class RecordingOutcome {
 /// самому аудио (см. supabase/functions/_shared/transcribeAudio.ts).
 /// Ровно один из roundId/trainingRoundId должен быть непустым — это же
 /// требование стоит CHECK-constraint'ом на таблице.
+///
+/// [attemptNumber] — какая это попытка в раунде (в PvP всегда 1). Сервер по
+/// нему решает, просить ли у судьи развёрнутые объяснения, и вычислять его
+/// подсчётом строк оказалось ненадёжно: сбой счётчика молча выдавал вторую
+/// попытку за первую. Клиент этот номер и так знает — он в имени файла.
 Future<String> submitVoiceRecording({
   required String filePath,
   required String storagePath,
@@ -121,6 +126,7 @@ Future<String> submitVoiceRecording({
   required double durationSeconds,
   String? roundId,
   String? trainingRoundId,
+  int attemptNumber = 1,
 }) async {
   assert(
     (roundId == null) != (trainingRoundId == null),
@@ -143,6 +149,7 @@ Future<String> submitVoiceRecording({
         'language_code': languageCode,
         'audio_storage_path': storagePath,
         'duration_seconds': durationSeconds,
+        'attempt_number': attemptNumber,
       })
       .select('id')
       .single();

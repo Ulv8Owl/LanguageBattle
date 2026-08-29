@@ -7,11 +7,11 @@ import '../../core/debug_flags.dart';
 import '../../core/game_access.dart';
 import '../../core/languages.dart';
 import '../../core/supabase_client.dart';
-import '../../core/text_diff.dart';
 import '../../core/theme.dart';
 import '../../data/phrase_bank.dart';
 import '../../data/voice_submission.dart';
 import '../../widgets/chrolingo_widgets.dart';
+import '../../widgets/correction_text.dart';
 import '../../widgets/voice_message_bubble.dart';
 import '../../widgets/voice_recorder_dock.dart';
 import '../subscription/paywall_screen.dart';
@@ -232,6 +232,7 @@ class _TrainingScreenState extends State<TrainingScreen> {
         recordingSlot: 'target',
         durationSeconds: take.durationSeconds,
         trainingRoundId: roundId,
+        attemptNumber: attempt,
       );
 
       if (!mounted) return;
@@ -777,29 +778,6 @@ class _Thinking extends StatelessWidget {
   }
 }
 
-/// Разметка правки: сказанное неверно — красным, пропущенное и добавленное
-/// — зелёным, верное — обычным цветом.
-List<TextSpan> _correctionSpans(String transcript, String corrected) {
-  final parts = diffWords(transcript, corrected);
-  final spans = <TextSpan>[];
-  for (var i = 0; i < parts.length; i++) {
-    final part = parts[i];
-    spans.add(TextSpan(
-      text: part.text,
-      style: switch (part.kind) {
-        DiffKind.same => const TextStyle(color: AppColors.cream),
-        // Красный — сказано неверно, зелёный — было пропущено и добавлено.
-        // Без подчёркиваний и зачёркиваний: цвета достаточно, а лишнее
-        // оформление только мешает читать строку целиком.
-        DiffKind.wrong => const TextStyle(color: AppColors.danger, fontWeight: FontWeight.w700),
-        DiffKind.missing => const TextStyle(color: AppColors.ok, fontWeight: FontWeight.w700),
-      },
-    ));
-    if (i != parts.length - 1) spans.add(const TextSpan(text: ' '));
-  }
-  return spans;
-}
-
 /// Разбор ошибок после первой попытки — то, ради чего в соло есть вторая
 /// попытка (раздел 2.2, шаги 3-4).
 ///
@@ -891,7 +869,7 @@ class _ErrorReport extends StatelessWidget {
               Text('Разбор:', style: AppFonts.mono(fontSize: 10, weight: FontWeight.w700, color: AppColors.muted)),
               const SizedBox(height: 3),
               SelectableText.rich(
-                TextSpan(children: _correctionSpans(spoken, correction)),
+                TextSpan(children: correctionSpans(spoken, correction)),
                 style: const TextStyle(fontSize: 13, height: 1.4),
               ),
               const SizedBox(height: 10),
