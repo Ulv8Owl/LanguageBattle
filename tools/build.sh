@@ -19,23 +19,16 @@ BRANCH="${1:-features}"
 cd "$(dirname "$0")/.."
 REPO="$(pwd)"
 
-step() { printf '\n\033[1;33m==> %s\033[0m\n' "$1"; }
-fail() { printf '\n\033[1;31mОСТАНОВ: %s\033[0m\n' "$1" >&2; exit 1; }
+# shellcheck source=tools/lib.sh
+source tools/lib.sh
 
-step "1/8 Проверяю, что нет несохранённых правок"
-if [ -n "$(git status --porcelain)" ]; then
-  git status --short
-  fail "рабочее дерево грязное. Сначала закоммить или отбрось эти правки —
-иначе git checkout не переключит ветку, а собрано будет непонятно что."
-fi
+step "1/8 Проверяю дерево и что оно совпадает с origin"
+require_clean_tree
+# Синхронизацией занимается release.sh, и намеренно НЕ занимаемся ей здесь:
+# скрипт, обновляющий сам себя, дальше выполняется уже наполовину устаревшим.
+require_synced "$BRANCH"
 
-step "2/8 Переключаюсь на $BRANCH и подтягиваю"
-git fetch origin "$BRANCH"
-git checkout "$BRANCH"
-# --ff-only: если ветка разошлась с origin, лучше остановиться и разобраться,
-# чем собрать молчаливый merge-результат.
-git merge --ff-only "origin/$BRANCH" || fail "локальная $BRANCH разошлась с origin/$BRANCH.
-Разберись с расхождением (см. .claude/skills/branch-flow/SKILL.md, сценарий Б)."
+step "2/8 Ветка и коммит"
 
 BUILD_ID="$(git rev-parse --short HEAD)"
 echo "Ветка: $BRANCH"
