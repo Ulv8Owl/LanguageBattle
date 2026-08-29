@@ -93,8 +93,26 @@ category — "grammar" или "spelling" для настоящих ошибок;
 
 ВАЖНО: не рассуждай перед ответом и не пиши ничего, кроме самого JSON — начинай ответ сразу с
 символа { и заканчивай символом }.
-Разбирай ВСЕ найденные ошибки, не ограничивай себя в их количестве. Сначала перечисляй самые
-грубые и самые важные для понимания.`;
+Сначала перечисляй самые грубые и самые важные для понимания ошибки.`;
+
+/**
+ * Сколько ошибок судья РАЗБИРАЕТ ТЕКСТОМ.
+ *
+ * Это не ограничение строгости: балл и `corrected` по-прежнему учитывают
+ * ВСЕ ошибки, потолок касается только числа развёрнутых объяснений.
+ *
+ * Он вернулся, потому что без него судья перестал укладываться в таймаут:
+ * подробный режим просит 3-5 предложений НА КАЖДУЮ ошибку, и на десятке
+ * ошибок ответ не приходил за 120 секунд вовсе — игрок получал
+ * «ИИ-судья не ответил» вместо любого разбора. Пять развёрнутых
+ * объяснений — это и максимум, который человек успевает применить между
+ * двумя попытками подряд.
+ */
+const MAX_EXPLAINED_ERRORS = Number(Deno.env.get("JUDGE_MAX_EXPLAINED") ?? 5);
+
+const EXPLAIN_LIMIT_INSTRUCTION =
+  `Разбирай ТЕКСТОМ не более ${MAX_EXPLAINED_ERRORS} ошибок — самых грубых и самых важных для
+понимания. Балл (score) и corrected при этом учитывают ВСЕ ошибки, включая неразобранные.`;
 
 /**
  * Насколько подробно судья объясняет ошибки.
@@ -209,7 +227,7 @@ function buildSystemPrompt(verbosity: JudgeVerbosity, level: CefrLevel): string 
   if (verbosity === "marksOnly") return `${BASE_SYSTEM_PROMPT}\n${MARKS_ONLY_INSTRUCTION}`;
   const levelBlock = `${LEVEL_INSTRUCTIONS[level]}\n${LEVEL_SCORE_REMINDER}`;
   const messageBlock = verbosity === "detailed" ? DETAILED_MESSAGE_INSTRUCTION : BRIEF_MESSAGE_INSTRUCTION;
-  return `${BASE_SYSTEM_PROMPT}\n${levelBlock}\n${messageBlock}`;
+  return `${BASE_SYSTEM_PROMPT}\n${levelBlock}\n${messageBlock}\n${EXPLAIN_LIMIT_INSTRUCTION}`;
 }
 
 function buildUserPrompt(
@@ -279,8 +297,8 @@ function validate(value: unknown): ParsedResult | null {
     });
   }
 
-  // Ошибки НЕ обрезаются: игрок видит весь разбор, который дала модель.
-  return { score, corrected, cleaned, errors };
+  // Страховка на случай, если модель проигнорирует потолок из промпта.
+  return { score, corrected, cleaned, errors: errors.slice(0, MAX_EXPLAINED_ERRORS) };
 }
 
 /**
@@ -362,7 +380,7 @@ async function callLlmOnce(
   // зависшему провайдеру утащить за собой всю задачу (без него функцию
   // убивает платформа ДО блока catch, и задача остаётся в 'processing'
   // навсегда, а игрок смотрит на вечный спиннер). Поэтому он щедрый.
-  const timeoutMs = Number(Deno.env.get("LLM_TIMEOUT_MS") ?? 120_000);
+  const timeoutMs = Number(Deno.env.get("LLM_TIMEOUT_MS") ?? 180_000);
   // 0 (значение по умолчанию) = не ограничивать длину ответа вообще.
   const maxTokens = Number(Deno.env.get("LLM_MAX_TOKENS") ?? 0);
   const controller = new AbortController();
