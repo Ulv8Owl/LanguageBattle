@@ -446,6 +446,10 @@ export async function evaluateGrammar(
           debug: {
             model: Deno.env.get("LLM_MODEL") ?? "(не задана)",
             status: "ok",
+            // Признак того, что оценки на самом деле НЕТ. Без него ответ
+            // диагностического режима — «балл 1, ошибок 0» — выглядит на
+            // экране как настоящая работа судьи.
+            trivial_probe: trivialProbeEnabled(),
             attempt,
             elapsed_ms: elapsed,
             score: parsed.score,
@@ -491,6 +495,7 @@ export async function evaluateGrammar(
       model: Deno.env.get("LLM_MODEL") ?? "(не задана)",
       base_url: Deno.env.get("LLM_BASE_URL") ?? "https://api.b.ai/v1",
       status: "degraded",
+      trivial_probe: trivialProbeEnabled(),
       attempts: failures.length,
       reason,
       raw: lastError.slice(0, 600),

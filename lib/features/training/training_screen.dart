@@ -899,6 +899,19 @@ class _PipelineDebug extends StatelessWidget {
               style: AppFonts.mono(fontSize: 9, weight: FontWeight.w700, color: AppColors.muted),
             ),
             const SizedBox(height: 8),
+            // Диагностический режим подменяет промпт и заставляет модель
+            // всегда отвечать «балл 1, ошибок нет». На экране это неотличимо
+            // от честной строгой оценки, поэтому предупреждение обязано быть
+            // первым и заметным.
+            if (judge?['trivial_probe'] == true) ...[
+              const SelectableText(
+                'ВКЛЮЧЁН ДИАГНОСТИЧЕСКИЙ РЕЖИМ LLM_TRIVIAL_PROBE — судья НЕ оценивает, '
+                'он возвращает один и тот же ответ на что угодно. Выключить: '
+                'npx supabase secrets unset LLM_TRIVIAL_PROBE',
+                style: TextStyle(color: AppColors.danger, fontSize: 11, height: 1.35),
+              ),
+              const SizedBox(height: 10),
+            ],
             _block(
               'ASR ответил',
               outcome.transcript.isNotEmpty ? '«${outcome.transcript}»' : _asrFallbackText(),
