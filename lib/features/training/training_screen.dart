@@ -467,7 +467,23 @@ class _TrainingScreenState extends State<TrainingScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Одиночная Игра'),
+        title: kShowPipelineDebug
+            // Метка сборки — в шапке, а не только в отладочной панели внизу:
+            // до панели надо доскроллить, а вопрос «тот ли это APK» встаёт
+            // раньше всех остальных.
+            ? Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Text('Одиночная Игра'),
+                  Text(
+                    kBuildLabel,
+                    style: AppFonts.mono(fontSize: 8, color: AppColors.muted),
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ],
+              )
+            : const Text('Одиночная Игра'),
         actions: [
           if (_stage != _Stage.starting && _stage != _Stage.failed)
             Padding(
@@ -1011,7 +1027,7 @@ class _PipelineDebug extends StatelessWidget {
               style: AppFonts.mono(fontSize: 9, weight: FontWeight.w700, color: AppColors.muted),
             ),
             Text(
-              kClientBuild,
+              kBuildLabel,
               style: AppFonts.mono(fontSize: 9, color: AppColors.muted),
             ),
             if (outcome.roundDebug != null)
