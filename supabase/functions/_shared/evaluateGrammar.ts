@@ -36,8 +36,8 @@ export const NEUTRAL_SCORE = 7;
 /**
  * Потолок на число разбираемых ошибок.
  *
- * Фраза раунда — пять предложений (см. lib/data/phrase_bank.dart), и у
- * новичка ошибок в ней бывает больше десятка. Подробный режим просит 3-5
+ * Фраза раунда — два предложения (см. lib/data/phrase_bank.dart), и у
+ * новичка ошибок в ней бывает много. Подробный режим просит 3-5
  * предложений объяснения НА КАЖДУЮ, то есть ответ разрастался до нескольких
  * тысяч токенов: он не влезал ни в таймаут, ни в max_tokens, а обрезанный
  * JSON невалиден целиком — судья деградировал, и игрок видел нейтральные 7
@@ -65,7 +65,9 @@ replacement — как должно быть правильно.
 category — "grammar" или "spelling" для настоящих ошибок; "style" для необязательных стилистических советов.
 Если ошибок нет — верни {"score": 10, "errors": []}.
 
-ВАЖНО: включай в errors НЕ БОЛЕЕ ${MAX_REPORTED_ERRORS} ошибок — самые грубые и самые важные для
+ВАЖНО: не рассуждай перед ответом и не пиши ничего, кроме самого JSON — начинай ответ сразу с
+символа { и заканчивай символом }.
+Включай в errors НЕ БОЛЕЕ ${MAX_REPORTED_ERRORS} ошибок — самые грубые и самые важные для
 понимания. Балл (score) при этом выставляй по ВСЕЙ фразе целиком, учитывая и те ошибки, которые
 в список не попали.`;
 
@@ -300,6 +302,7 @@ async function callLlmOnce(
   // видно как задачи длительностью ~63 секунды = 3 x 20 c + распознавание)
   // и деградировал, а игрок видел «ИИ-судья не отвечает».
   const timeoutMs = Number(Deno.env.get("LLM_TIMEOUT_MS") ?? 45_000);
+  const maxTokens = Number(Deno.env.get("LLM_MAX_TOKENS") ?? 8000);
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
 
@@ -323,13 +326,15 @@ async function callLlmOnce(
         stream: false,
         // Structured output там, где провайдер это поддерживает (раздел 9.3).
         ...(useResponseFormat ? { response_format: { type: "json_object" } } : {}),
-        // Потолок длины ответа. Без него модель на подробном режиме может
-        // писать сколь угодно долго и упереться в таймаут, не договорив —
-        // а недоговорённый JSON бесполезен целиком. Запаса хватает на
-        // десяток подробных объяснений. В диагностическом режиме ответ
-        // заведомо крошечный, и низкий потолок сам по себе исключает
-        // «модель долго генерирует» из числа возможных причин.
-        max_tokens: trivialProbeEnabled() ? 32 : 2000,
+        // Потолок длины ответа.
+        //
+        // Ставить его впритык нельзя: рассуждающие модели (а
+        // deepseek-v4-flash из них) тратят часть бюджета на внутренние
+        // рассуждения ДО того, как начнут писать ответ. При 2000 токенов
+        // это выглядело так: модель отвечала за 1-3 секунды, но её ответ
+        // обрывался на `{"score` — то есть до JSON дело просто не доходило,
+        // а в логах это выглядело как «модель вернула не JSON».
+        max_tokens: trivialProbeEnabled() ? 512 : maxTokens,
         temperature: 0.2,
       }),
       signal: controller.signal,
@@ -349,9 +354,33 @@ async function callLlmOnce(
   }
 
   const data = await res.json();
-  const content = data?.choices?.[0]?.message?.content;
+  const choice = data?.choices?.[0];
+  const content = choice?.message?.content;
+  const finishReason = choice?.finish_reason;
+
+  // finish_reason === "length" — это не «модель ответила ерундой», а
+  // «модель не успела договорить в отведённый бюджет токенов». Разница
+  // принципиальная: первое чинится разбором ответа, второе — только
+  // увеличением max_tokens, и путать их значит чинить не то.
+  if (finishReason === "length") {
+    const shown = typeof content === "string" && content.length > 0 ? content.slice(0, 200) : "(пусто)";
+    throw new Error(
+      `ответ обрезан по max_tokens=${maxTokens} (finish_reason=length), успело прийти: ${shown}`,
+    );
+  }
+
   if (typeof content !== "string") {
     throw new Error(`LLM response missing message content: ${JSON.stringify(data).slice(0, 400)}`);
+  }
+  if (content.trim().length === 0) {
+    // Пустой content при непустых рассуждениях — тот же симптом нехватки
+    // бюджета у рассуждающей модели.
+    const reasoning = choice?.message?.reasoning_content;
+    throw new Error(
+      `модель вернула пустой ответ (finish_reason=${finishReason}` +
+        (typeof reasoning === "string" ? `, рассуждений ${reasoning.length} символов` : "") +
+        ")",
+    );
   }
   return content;
 }
@@ -386,6 +415,7 @@ export async function evaluateGrammar(
   // молча: пустой список ошибок неотличим от «ошибок нет»).
   let useResponseFormat = true;
   const failures: string[] = [];
+  let lastError = "";
 
   if (trivialProbeEnabled()) {
     // Громко и на каждый вызов: в этом режиме оценки НЕТ, всем ставится
@@ -437,6 +467,7 @@ export async function evaluateGrammar(
     } catch (e) {
       const message = String(e);
       failures.push(`попытка ${attempt} (${Date.now() - startedAt} мс): ${message.slice(0, 300)}`);
+      lastError = message;
 
       // Неверная модель, неверный ключ, нет прав — повтор с тем же запросом
       // не поможет никогда, только сожжёт время работы функции и квоту.
@@ -469,6 +500,7 @@ export async function evaluateGrammar(
       status: "degraded",
       attempts: failures.length,
       reason,
+      raw: lastError.slice(0, 600),
       transcript_length: transcript.length,
     },
   };

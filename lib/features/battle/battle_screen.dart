@@ -4,6 +4,7 @@ import 'package:audioplayers/audioplayers.dart';
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../core/languages.dart';
 import '../../core/supabase_client.dart';
 import '../../core/theme.dart';
 import '../../data/phrase_bank.dart';
@@ -51,6 +52,11 @@ class _BattleScreenState extends State<BattleScreen> {
   MatchData? _match;
   String _opponentName = '…';
   String _myName = 'Ты';
+
+  /// Родной язык игрока — на нём показывается фраза раунда. Говорить нужно
+  /// на изучаемом: задание в том, чтобы ПЕРЕВЕСТИ фразу вслух, а не
+  /// прочитать готовый текст.
+  String _myNativeLanguage = 'ru';
   List<RoundData> _rounds = [];
   List<VoiceRecordingData> _recordings = [];
   List<RoundScoreData> _scores = [];
@@ -96,8 +102,13 @@ class _BattleScreenState extends State<BattleScreen> {
         final opp = await supabase.from('users').select('username').eq('id', opponentId).maybeSingle();
         _opponentName = (opp?['username'] as String?) ?? 'Соперник';
       }
-      final me = await supabase.from('users').select('username').eq('id', _myId).maybeSingle();
+      final me = await supabase
+          .from('users')
+          .select('username, native_language')
+          .eq('id', _myId)
+          .maybeSingle();
       _myName = (me?['username'] as String?) ?? 'Ты';
+      _myNativeLanguage = (me?['native_language'] as String?) ?? 'ru';
     } catch (e) {
       _actionError = 'Не удалось загрузить матч: $e';
     }
@@ -433,7 +444,23 @@ class _BattleScreenState extends State<BattleScreen> {
   List<Widget> _buildFeed(MatchData m, String? opponentId) {
     final items = <Widget>[];
     for (final round in _rounds) {
-      items.add(_AiBubble(roundNumber: round.roundNumber, text: round.generatedPhrase ?? '…'));
+      // Показываем фразу на РОДНОМ языке игрока: он должен перевести её
+      // вслух на изучаемый. В generated_phrase лежит вариант на изучаемом
+      // языке — это то, что игрок должен произнести, и оно идёт подсказкой
+      // распознавателю речи, поэтому на экран не годится.
+      final promptText = round.phraseIndex != null
+          ? PhraseBank.textFor(round.phraseIndex!, _myNativeLanguage)
+          : (round.generatedPhrase ?? '…');
+      // Подпись «на каком языке отвечать» — только у текущего раунда: в
+      // Дуэли слоты идут по очереди (сначала родной, потом изучаемый), и
+      // для уже сыгранных раундов правильного ответа на этот вопрос нет.
+      final isCurrent = round.id == _lastRound?.id;
+      final slot = _nextSlot;
+      items.add(_AiBubble(
+        roundNumber: round.roundNumber,
+        text: promptText,
+        targetLanguage: isCurrent && slot != null ? m.languageForSlot(_myId, slot) : null,
+      ));
       for (final slot in m.requiredSlots) {
         final mine = _recordingFor(round.id, _myId, slot);
         final theirs = opponentId == null ? null : _recordingFor(round.id, opponentId, slot);
@@ -590,7 +617,12 @@ class _AiBubble extends StatelessWidget {
   final int roundNumber;
   final String text;
 
-  const _AiBubble({required this.roundNumber, required this.text});
+  /// Язык, на котором нужно ОТВЕТИТЬ. Текст показан на родном языке
+  /// игрока — без подписи непонятно, повторить его или перевести.
+  /// null — для уже сыгранных раундов: там подсказывать нечего.
+  final String? targetLanguage;
+
+  const _AiBubble({required this.roundNumber, required this.text, required this.targetLanguage});
 
   @override
   Widget build(BuildContext context) {
@@ -623,6 +655,13 @@ class _AiBubble extends StatelessWidget {
                   Text('Раунд $roundNumber из 10', style: AppFonts.mono(fontSize: 9, color: AppColors.muted)),
                   const SizedBox(height: 5),
                   Text(text, style: const TextStyle(color: AppColors.cream, height: 1.4)),
+                  if (targetLanguage != null) ...[
+                    const SizedBox(height: 6),
+                    Text(
+                      speakInLabel(targetLanguage!),
+                      style: AppFonts.mono(fontSize: 9, weight: FontWeight.w700, color: AppColors.gold),
+                    ),
+                  ],
                 ],
               ),
             ),

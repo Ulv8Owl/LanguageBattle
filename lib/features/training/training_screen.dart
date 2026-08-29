@@ -5,6 +5,7 @@ import 'package:go_router/go_router.dart';
 
 import '../../core/debug_flags.dart';
 import '../../core/game_access.dart';
+import '../../core/languages.dart';
 import '../../core/supabase_client.dart';
 import '../../core/theme.dart';
 import '../../data/phrase_bank.dart';
@@ -57,7 +58,13 @@ class _TrainingScreenState extends State<TrainingScreen> {
   _Stage _stage = _Stage.starting;
   String? _error;
   String? _sessionId;
+
+  /// Язык, НА КОТОРОМ игрок должен говорить (изучаемый).
   String _targetLanguage = 'en';
+
+  /// Язык, на котором игроку ПОКАЗЫВАЕТСЯ фраза (родной). Задание — перевести
+  /// её на изучаемый язык вслух, а не повторить готовый текст.
+  String _nativeLanguage = 'ru';
 
   int _roundNumber = 0;
   String? _roundId;
@@ -113,6 +120,13 @@ class _TrainingScreenState extends State<TrainingScreen> {
           .maybeSingle();
       _targetLanguage = (learning?['language_code'] as String?) ?? 'en';
 
+      final me = await supabase
+          .from('users')
+          .select('native_language')
+          .eq('id', _myId)
+          .maybeSingle();
+      _nativeLanguage = (me?['native_language'] as String?) ?? 'ru';
+
       // start_training_session проверяет подписку и списывает энергию на
       // сервере — клиент не решает ни то, ни другое.
       final result = await supabase.rpc('start_training_session', params: {
@@ -145,17 +159,21 @@ class _TrainingScreenState extends State<TrainingScreen> {
   Future<void> _openRound(int n) async {
     final sessionId = _sessionId!;
     final phraseIndex = _phraseOrder[(n - 1) % _phraseOrder.length];
-    final phrase = PhraseBank.textFor(phraseIndex, _targetLanguage);
+    // Игроку показываем РОДНОЙ вариант — он должен перевести его вслух.
+    // В базу пишем вариант на изучаемом языке: это то, что игрок должен
+    // произнести, и именно он идёт подсказкой распознавателю речи.
+    final promptText = PhraseBank.textFor(phraseIndex, _nativeLanguage);
+    final expected = PhraseBank.textFor(phraseIndex, _targetLanguage);
     final row = await supabase
         .from('training_rounds')
-        .insert({'session_id': sessionId, 'round_number': n, 'generated_phrase': phrase})
+        .insert({'session_id': sessionId, 'round_number': n, 'generated_phrase': expected})
         .select()
         .single();
     if (!mounted) return;
     setState(() {
       _roundNumber = n;
       _roundId = row['id'] as String;
-      _phrase = phrase;
+      _phrase = promptText;
       _firstAttemptErrors = [];
       _firstAttempt = null;
       _secondAttempt = null;
@@ -506,7 +524,12 @@ class _TrainingScreenState extends State<TrainingScreen> {
     final items = <Widget>[];
 
     for (final done in _history) {
-      items.add(_AiSay(roundNumber: done.roundNumber, total: _roundsPerSession, text: done.phrase));
+      items.add(_AiSay(
+        roundNumber: done.roundNumber,
+        total: _roundsPerSession,
+        text: done.phrase,
+        targetLanguage: _targetLanguage,
+      ));
       if (done.errors.isNotEmpty) {
         items.add(_ErrorReport(errors: done.errors, attempt: done.firstAttempt));
       }
@@ -538,7 +561,12 @@ class _TrainingScreenState extends State<TrainingScreen> {
       return items;
     }
 
-    items.add(_AiSay(roundNumber: _roundNumber, total: _roundsPerSession, text: _phrase));
+    items.add(_AiSay(
+      roundNumber: _roundNumber,
+      total: _roundsPerSession,
+      text: _phrase,
+      targetLanguage: _targetLanguage,
+    ));
 
     switch (_stage) {
       case _Stage.gradingFirst:
@@ -590,7 +618,16 @@ class _AiSay extends StatelessWidget {
   final int total;
   final String text;
 
-  const _AiSay({required this.roundNumber, required this.total, required this.text});
+  /// Язык, на котором нужно ОТВЕТИТЬ. Сам текст показан на родном языке —
+  /// без этой подписи непонятно, повторить его или перевести.
+  final String targetLanguage;
+
+  const _AiSay({
+    required this.roundNumber,
+    required this.total,
+    required this.text,
+    required this.targetLanguage,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -623,6 +660,11 @@ class _AiSay extends StatelessWidget {
                   Text('Раунд $roundNumber из $total', style: AppFonts.mono(fontSize: 9, color: AppColors.muted)),
                   const SizedBox(height: 5),
                   Text(text, style: const TextStyle(color: AppColors.cream, height: 1.4)),
+                  const SizedBox(height: 6),
+                  Text(
+                    speakInLabel(targetLanguage),
+                    style: AppFonts.mono(fontSize: 9, weight: FontWeight.w700, color: AppColors.gold),
+                  ),
                 ],
               ),
             ),
