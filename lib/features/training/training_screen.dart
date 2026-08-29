@@ -476,8 +476,12 @@ class _TrainingScreenState extends State<TrainingScreen> {
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   const Text('Одиночная Игра'),
-                  Text(
-                    kBuildLabel,
+                  Text.rich(
+                    TextSpan(children: [
+                      TextSpan(text: kBuildParts[0]),
+                      const TextSpan(text: ' · '),
+                      TextSpan(text: kBuildParts[1]),
+                    ]),
                     style: AppFonts.mono(fontSize: 8, color: AppColors.muted),
                     overflow: TextOverflow.ellipsis,
                   ),
@@ -1026,8 +1030,12 @@ class _PipelineDebug extends StatelessWidget {
               'ОТЛАДКА · $label',
               style: AppFonts.mono(fontSize: 9, weight: FontWeight.w700, color: AppColors.muted),
             ),
-            Text(
-              kBuildLabel,
+            Text.rich(
+              TextSpan(children: [
+                TextSpan(text: kBuildParts[0]),
+                const TextSpan(text: ' · '),
+                TextSpan(text: kBuildParts[1]),
+              ]),
               style: AppFonts.mono(fontSize: 9, color: AppColors.muted),
             ),
             if (outcome.roundDebug != null)

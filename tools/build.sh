@@ -64,10 +64,21 @@ trap 'rm -rf "$TMP"' EXIT
 SO="$(unzip -Z1 "$APK" 'lib/*/libapp.so' 2>/dev/null | head -1 || true)"
 if [ -z "$SO" ]; then
   echo "  (libapp.so в APK не найден — пропускаю проверку метки)"
-elif unzip -p "$APK" "$SO" > "$TMP/libapp.so" 2>/dev/null && grep -aq "$BUILD_ID" "$TMP/libapp.so"; then
-  echo "  метка $BUILD_ID найдена внутри APK"
 else
-  fail "внутри APK нет метки $BUILD_ID — это НЕ та сборка. Не ставь её на телефон."
+  unzip -p "$APK" "$SO" > "$TMP/libapp.so" 2>/dev/null \
+    || fail "не смог распаковать $SO из APK — проверить метку нечем."
+  # Метку ищем двумя способами. Dart складывает строки в AOT-снимок
+  # однобайтовыми, только пока в них нет ничего, кроме латиницы; стоит метке
+  # попасть в один литерал с кириллицей — компилятор сворачивает всё в UTF-16,
+  # и `a33c377` лежит в файле как `a\0 3\0 3\0 …`. Первый вариант проверки
+  # именно на этом и споткнулся, забраковав совершенно исправную сборку.
+  if grep -aq "$BUILD_ID" "$TMP/libapp.so"; then
+    echo "  метка $BUILD_ID найдена внутри APK"
+  elif tr -d '\0' < "$TMP/libapp.so" | grep -aq "$BUILD_ID"; then
+    echo "  метка $BUILD_ID найдена внутри APK (UTF-16)"
+  else
+    fail "внутри APK нет метки $BUILD_ID — это НЕ та сборка. Не ставь её на телефон."
+  fi
 fi
 
 cat <<EOF

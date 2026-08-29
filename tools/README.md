@@ -24,7 +24,11 @@ adb install -r build/app/outputs/flutter-apk/app-release.apk
 Сверить, не заходя в приложение:
 
 ```
-git rev-parse --short HEAD
+ID=$(git rev-parse --short HEAD)
 unzip -p build/app/outputs/flutter-apk/app-release.apk lib/arm64-v8a/libapp.so \
-  | grep -ac "$(git rev-parse --short HEAD)"
+  | tr -d '\0' | grep -ac "$ID"
 ```
+
+`tr -d '\0'` здесь обязателен: если метка попадёт в один строковый литерал
+с кириллицей, Dart уложит её в снимок как UTF-16, и поиск по обычной строке
+ничего не найдёт — хотя сборка при этом совершенно правильная.
