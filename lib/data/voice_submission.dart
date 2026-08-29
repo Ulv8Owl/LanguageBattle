@@ -73,6 +73,17 @@ class RecordingOutcome {
   /// экране, пока включён kShowPipelineDebug.
   final Map<String, dynamic>? debug;
 
+  /// Заполняется КЛИЕНТОМ, когда результата от сервера не пришло вовсе:
+  /// задача не доехала до воркера, воркера убили на середине, истёк наш
+  /// собственный таймаут ожидания.
+  ///
+  /// Отдельно от [status] намеренно. Раньше такой случай подменялся на
+  /// `TranscriptStatus.failed`, и игрок читал «РЕЧЬ НЕ РАСПОЗНАНА» — то
+  /// есть его отправляли искать проблему в микрофоне там, где до
+  /// распознавания дело вообще не дошло. Ровно та же подмена одного сбоя
+  /// другим, из-за которой заводились миграции 0013 и 0014.
+  final String? clientFailure;
+
   const RecordingOutcome({
     required this.transcript,
     required this.status,
@@ -80,7 +91,21 @@ class RecordingOutcome {
     this.corrected = '',
     this.cleaned = '',
     this.debug,
+    this.clientFailure,
   });
+
+  /// Тот же результат, но с пометкой, что сервер до конца не ответил.
+  /// Всё, что он всё-таки успел записать (транскрипт, диагностика),
+  /// сохраняется: именно в нём обычно и лежит ответ, почему повисло.
+  RecordingOutcome withClientFailure(String reason) => RecordingOutcome(
+        transcript: transcript,
+        status: status,
+        judgeStatus: judgeStatus,
+        corrected: corrected,
+        cleaned: cleaned,
+        debug: debug,
+        clientFailure: reason,
+      );
 
   /// Текст, с которым сравнивается исправленный вариант: очищенный от
   /// самоисправлений, если судья его прислал, иначе — что услышал ASR.
@@ -185,6 +210,36 @@ Future<RecordingOutcome> fetchRecordingOutcome(String recordingId) async {
         ? Map<String, dynamic>.from(row!['pipeline_debug'] as Map)
         : null,
   );
+}
+
+/// Что стало с задачей оценки — для случая, когда результат так и не
+/// пришёл. Без этого «повисло» неотличимо от «сервер ответил отказом»: в
+/// первом случае задача осталась в processing, во втором она done/failed.
+Future<String> describeEvaluationJob(String recordingId) async {
+  try {
+    final row = await supabase
+        .from('evaluation_jobs')
+        .select('status, created_at, completed_at, worker_id')
+        .eq('voice_recording_id', recordingId)
+        .order('created_at', ascending: false)
+        .limit(1)
+        .maybeSingle();
+    if (row == null) {
+      return 'задача оценки не создана — запись до очереди не дошла';
+    }
+    final created = DateTime.tryParse((row['created_at'] as String?) ?? '');
+    final waited = created == null
+        ? null
+        : DateTime.now().toUtc().difference(created.toUtc()).inSeconds;
+    return [
+      'задача: ${row['status']}',
+      if (waited != null) 'в очереди $waited с',
+      if (row['worker_id'] != null) 'воркер ${row['worker_id']}',
+      if (row['completed_at'] != null) 'завершена ${row['completed_at']}',
+    ].join(' · ');
+  } catch (e) {
+    return 'состояние задачи прочитать не удалось: $e';
+  }
 }
 
 /// Путь в бакете voice-recordings. Схема путей завязана на RLS-политики

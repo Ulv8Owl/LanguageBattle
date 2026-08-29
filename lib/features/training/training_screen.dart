@@ -288,8 +288,12 @@ class _TrainingScreenState extends State<TrainingScreen> {
         _firstAttemptErrors = List<Map<String, dynamic>>.from(errors);
         // Задача упала целиком — разбора не будет, но вторую попытку
         // отбирать у игрока не за что.
+        // Задача упала целиком — но всё, что сервер успел записать до
+        // падения, остаётся самой ценной уликой. Раньше здесь стояла
+        // пустая заглушка, и диагностика выбрасывалась ровно в том
+        // единственном случае, ради которого её и собирают.
         _firstAttempt = jobStatus == 'failed'
-            ? const RecordingOutcome(transcript: '', status: TranscriptStatus.failed)
+            ? outcome.withClientFailure('Задача оценки завершилась отказом.')
             : outcome;
         _stage = _Stage.awaitingSecond;
       });
@@ -324,32 +328,57 @@ class _TrainingScreenState extends State<TrainingScreen> {
   /// не за что, сбой не его вина.
   Future<void> _giveUpOnFirstAttempt(String recordingId) async {
     _jobSub?.cancel();
+    final outcome = await _outcomeSoFar(recordingId);
+    final job = await describeEvaluationJob(recordingId);
     await supabase.rpc('fail_stale_evaluation_jobs', params: {'p_stale_seconds': _staleJobSeconds}).catchError((e) {
       debugPrint('fail_stale_evaluation_jobs failed: $e');
       return null;
     });
     if (!mounted) return;
     setState(() {
-      _firstAttempt = const RecordingOutcome(transcript: '', status: TranscriptStatus.failed);
+      _firstAttempt = outcome.withClientFailure(
+        'Результат не пришёл за ${_resultTimeout.inMinutes} мин. $job',
+      );
       _stage = _Stage.awaitingSecond;
     });
     _scrollToBottomSoon();
   }
 
+  /// Что сервер успел записать к моменту, когда мы сдались. Ошибку чтения
+  /// глушим: мы и так уже в аварийной ветке, и ронять её нечем.
+  Future<RecordingOutcome> _outcomeSoFar(String recordingId) async {
+    try {
+      return await fetchRecordingOutcome(recordingId);
+    } catch (e) {
+      debugPrint('fetchRecordingOutcome failed: $e');
+      return const RecordingOutcome(
+        transcript: '',
+        status: TranscriptStatus.pending,
+        judgeStatus: JudgeStatus.pending,
+      );
+    }
+  }
+
   /// То же для второй попытки, но здесь нужен балл — ставим нейтральный,
   /// как и сервер при собственном сбое: наказывать игрока не за что.
-  Future<void> _giveUpOnSecondAttempt() async {
+  Future<void> _giveUpOnSecondAttempt([String? recordingId]) async {
     _roundSub?.cancel();
+    final outcome = recordingId == null
+        ? const RecordingOutcome(
+            transcript: '',
+            status: TranscriptStatus.pending,
+            judgeStatus: JudgeStatus.pending,
+          )
+        : await _outcomeSoFar(recordingId);
+    final job = recordingId == null ? '' : await describeEvaluationJob(recordingId);
     await supabase.rpc('fail_stale_evaluation_jobs', params: {'p_stale_seconds': _staleJobSeconds}).catchError((e) {
       debugPrint('fail_stale_evaluation_jobs failed: $e');
       return null;
     });
     if (!mounted) return;
     setState(() {
-      _secondAttempt = const RecordingOutcome(
-        transcript: '',
-        status: TranscriptStatus.failed,
-        judgeStatus: JudgeStatus.degraded,
+      _secondAttempt = outcome.withClientFailure(
+        'Результат не пришёл за ${_resultTimeout.inMinutes} мин. $job',
       );
       _finalScore = _neutralScore;
       _earnedCoins = null;
@@ -365,7 +394,7 @@ class _TrainingScreenState extends State<TrainingScreen> {
   /// Финальный балл за раунд пишет воркер в training_rounds.final_score.
   void _watchFinalScore(String roundId, String recordingId) {
     _roundSub?.cancel();
-    _startWatchdog(_giveUpOnSecondAttempt);
+    _startWatchdog(() => _giveUpOnSecondAttempt(recordingId));
     _roundSub = supabase
         .from('training_rounds')
         .stream(primaryKey: ['id'])
@@ -832,8 +861,17 @@ class _ErrorReport extends StatelessWidget {
     // Судья не ответил — пустой список ошибок НЕ значит, что ошибок нет.
     final judgeBroken = judge == JudgeStatus.degraded;
     final notRecognised = status == TranscriptStatus.empty || status == TranscriptStatus.failed;
+    // Результата не было вовсе: список ошибок тут заведомо пуст, и показывать
+    // вместо объяснения пустоту нельзя — нужен текст причины.
+    final noResult = attempt?.clientFailure != null;
+
+    final clientFailure = attempt?.clientFailure;
 
     final (String title, Color titleColor) = switch (status) {
+      // Порядок важен: результата не было вовсе — это НЕ «речь не
+      // распознана». Отправлять игрока чинить микрофон там, где до
+      // микрофона дело не дошло, значит увести его от настоящей причины.
+      _ when clientFailure != null => ('РЕЗУЛЬТАТ НЕ ПРИШЁЛ', AppColors.danger),
       TranscriptStatus.failed => ('РЕЧЬ НЕ РАСПОЗНАНА', AppColors.muted),
       TranscriptStatus.empty => ('НИЧЕГО НЕ УСЛЫШАЛ', AppColors.muted),
       _ when judgeBroken && (attempt?.judgeHitProviderLimit ?? false) =>
@@ -844,6 +882,9 @@ class _ErrorReport extends StatelessWidget {
     };
 
     final String hint = switch (status) {
+      _ when clientFailure != null =>
+        'Сервер не ответил, разбора поэтому нет — это сбой на нашей стороне, '
+            'а не признак того, что ошибок не было. Балл не снижается.\n$clientFailure',
       TranscriptStatus.failed =>
         'Не удалось распознать речь — это сбой на нашей стороне, балл за него не снижается. Попробуй сказать фразу ещё раз.',
       TranscriptStatus.empty =>
@@ -896,9 +937,9 @@ class _ErrorReport extends StatelessWidget {
             ],
 
             if (isSecondAttempt) ...[
-              if (notRecognised || judgeBroken || correction.isEmpty)
+              if (noResult || notRecognised || judgeBroken || correction.isEmpty)
                 Text(hint, style: const TextStyle(color: AppColors.muted, fontSize: 12, height: 1.4)),
-            ] else if (errors.isEmpty || notRecognised || judgeBroken)
+            ] else if (noResult || errors.isEmpty || notRecognised || judgeBroken)
               Text(hint, style: const TextStyle(color: AppColors.muted, fontSize: 12, height: 1.4))
             else
               ...errors.map((e) => Padding(
@@ -1052,6 +1093,13 @@ class _PipelineDebug extends StatelessWidget {
             // всегда отвечать «балл 1, ошибок нет». На экране это неотличимо
             // от честной строгой оценки, поэтому предупреждение обязано быть
             // первым и заметным.
+            if (outcome.clientFailure != null) ...[
+              SelectableText(
+                'РЕЗУЛЬТАТ ОТ СЕРВЕРА НЕ ПРИШЁЛ. ${outcome.clientFailure}',
+                style: const TextStyle(color: AppColors.danger, fontSize: 11, height: 1.35),
+              ),
+              const SizedBox(height: 10),
+            ],
             if (judge?['trivial_probe'] == true) ...[
               const SelectableText(
                 'ВКЛЮЧЁН ДИАГНОСТИЧЕСКИЙ РЕЖИМ LLM_TRIVIAL_PROBE — судья НЕ оценивает, '
