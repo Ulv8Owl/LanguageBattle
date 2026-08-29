@@ -213,6 +213,16 @@ const LEVEL_SCORE_REMINDER =
  * балл 1 и не находит ошибок. Не оставлять включённым — поэтому и логируется
  * предупреждением на каждый вызов, и показывается в config-check.
  */
+/**
+ * Отказ провайдера по собственному лимиту, а не поломка у нас: кончился
+ * дневной бюджет, квота или сработал rate limit. Отличать важно — чинится
+ * это не кодом, а на стороне провайдера, и говорить игроку «сбой на нашей
+ * стороне» в таком случае неверно.
+ */
+export function isProviderLimit(message: string): boolean {
+  return /activity_cost_limit|quota|rate.?limit|insufficient|billing|HTTP 429/i.test(message);
+}
+
 export function trivialProbeEnabled(): boolean {
   const raw = (Deno.env.get("LLM_TRIVIAL_PROBE") ?? "").toLowerCase();
   return raw === "1" || raw === "true" || raw === "yes";
@@ -581,6 +591,12 @@ export async function evaluateGrammar(
       if (/timed out/i.test(message)) {
         break;
       }
+      // Провайдер упёрся в собственный лимит (дневной бюджет, квота, rate
+      // limit). Это отказ обслуживать, а не сбой запроса: три одинаковых
+      // отказа подряд приходят за доли секунды и ничего не меняют.
+      if (isProviderLimit(message)) {
+        break;
+      }
       if (useResponseFormat && /response_format|json_object|HTTP 4\d\d/i.test(message)) {
         useResponseFormat = false;
       }
@@ -600,6 +616,9 @@ export async function evaluateGrammar(
       model: Deno.env.get("LLM_MODEL") ?? "(не задана)",
       base_url: Deno.env.get("LLM_BASE_URL") ?? "https://api.b.ai/v1",
       status: "degraded",
+      // Отдельный признак: клиент по нему скажет игроку, что упёрлись в
+      // лимит провайдера, а не свалит вину на «сбой на нашей стороне».
+      provider_limit: isProviderLimit(reason),
       trivial_probe: trivialProbeEnabled(),
       attempts: failures.length,
       reason,

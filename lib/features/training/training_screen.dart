@@ -817,6 +817,8 @@ class _ErrorReport extends StatelessWidget {
     final (String title, Color titleColor) = switch (status) {
       TranscriptStatus.failed => ('РЕЧЬ НЕ РАСПОЗНАНА', AppColors.muted),
       TranscriptStatus.empty => ('НИЧЕГО НЕ УСЛЫШАЛ', AppColors.muted),
+      _ when judgeBroken && (attempt?.judgeHitProviderLimit ?? false) =>
+        ('ЛИМИТ ПРОВАЙДЕРА ИИ', AppColors.danger),
       _ when judgeBroken => ('РАЗБОР НЕ ПОЛУЧЕН', AppColors.muted),
       _ when isSecondAttempt => ('РАЗБОР ВТОРОЙ ПОПЫТКИ', AppColors.gold),
       _ => errors.isEmpty ? ('ОШИБОК НЕ НАЙДЕНО', AppColors.ok) : ('РАЗБОР ПЕРВОЙ ПОПЫТКИ', AppColors.gold),
@@ -827,6 +829,9 @@ class _ErrorReport extends StatelessWidget {
         'Не удалось распознать речь — это сбой на нашей стороне, балл за него не снижается. Попробуй сказать фразу ещё раз.',
       TranscriptStatus.empty =>
         'Похоже, записалась тишина. Говори чётче и ближе к микрофону, удерживая кнопку всё время, пока говоришь.',
+      _ when judgeBroken && (attempt?.judgeHitProviderLimit ?? false) =>
+        'У провайдера ИИ закончился дневной лимит — он отказывается отвечать. Разбора поэтому нет, '
+            'и это не признак того, что ошибок не было. Балл не снижается. Лимит снимается на стороне провайдера.',
       _ when judgeBroken =>
         'ИИ-судья не ответил, поэтому разбора ошибок нет — это сбой на нашей стороне, а не признак того, что ошибок не было. Балл за него не снижается.',
       _ when isSecondAttempt => 'Вторая попытка засчитана.',
@@ -1005,6 +1010,10 @@ class _PipelineDebug extends StatelessWidget {
             Text(
               'ОТЛАДКА · $label',
               style: AppFonts.mono(fontSize: 9, weight: FontWeight.w700, color: AppColors.muted),
+            ),
+            Text(
+              kClientBuild,
+              style: AppFonts.mono(fontSize: 9, color: AppColors.muted),
             ),
             const SizedBox(height: 8),
             // Диагностический режим подменяет промпт и заставляет модель

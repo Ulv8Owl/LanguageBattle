@@ -86,6 +86,11 @@ class RecordingOutcome {
   /// самоисправлений, если судья его прислал, иначе — что услышал ASR.
   String get spokenForDiff => cleaned.isNotEmpty ? cleaned : transcript;
 
+  /// true — судья не ответил потому, что ПРОВАЙДЕР отказал по своему
+  /// лимиту (дневной бюджет, квота, rate limit). Это не наша поломка, и
+  /// говорить игроку «сбой на нашей стороне» в таком случае неверно.
+  bool get judgeHitProviderLimit => judgeDebug?['provider_limit'] == true;
+
   Map<String, dynamic>? get asrDebug => _section('asr');
   Map<String, dynamic>? get judgeDebug => _section('judge');
 
