@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../core/debug_flags.dart';
 import '../../core/game_access.dart';
 import '../../core/supabase_client.dart';
 import '../../core/theme.dart';
@@ -495,6 +496,12 @@ class _TrainingScreenState extends State<TrainingScreen> {
     );
   }
 
+  /// Техническая панель под попыткой — только пока включён kShowPipelineDebug.
+  List<Widget> _debugPanels(String label, RecordingOutcome? attempt) {
+    if (!kShowPipelineDebug || attempt == null) return const [];
+    return [_PipelineDebug(label: label, outcome: attempt)];
+  }
+
   List<Widget> _buildFeed() {
     final items = <Widget>[];
 
@@ -539,14 +546,18 @@ class _TrainingScreenState extends State<TrainingScreen> {
         break;
       case _Stage.awaitingSecond:
         items.add(_ErrorReport(errors: _firstAttemptErrors, attempt: _firstAttempt));
+        items.addAll(_debugPanels('Попытка 1', _firstAttempt));
         break;
       case _Stage.gradingSecond:
         items.add(_ErrorReport(errors: _firstAttemptErrors, attempt: _firstAttempt));
+        items.addAll(_debugPanels('Попытка 1', _firstAttempt));
         items.add(const _Thinking(label: 'Оцениваю вторую попытку'));
         break;
       case _Stage.roundDone:
         items.add(_ErrorReport(errors: _firstAttemptErrors, attempt: _firstAttempt));
+        items.addAll(_debugPanels('Попытка 1', _firstAttempt));
         items.add(_ScoreCard(score: _finalScore ?? 0, coins: _earnedCoins, attempt: _secondAttempt));
+        items.addAll(_debugPanels('Попытка 2', _secondAttempt));
         break;
       default:
         break;
@@ -805,6 +816,114 @@ class _ScoreCard extends StatelessWidget {
           ],
         ),
       ),
+    );
+  }
+}
+
+/// Техническая панель пайплайна — что на самом деле ответили распознавание
+/// и судья. Включается константой kShowPipelineDebug.
+///
+/// Существует потому, что нейтральные 7 баллов при молчащем судье выглядят
+/// как настоящая оценка: по экрану невозможно было понять, сломалось ли
+/// что-то и что именно. Здесь показывается сырьё, а не пересказ.
+class _PipelineDebug extends StatelessWidget {
+  final String label;
+  final RecordingOutcome outcome;
+
+  const _PipelineDebug({required this.label, required this.outcome});
+
+  @override
+  Widget build(BuildContext context) {
+    final asr = outcome.asrDebug;
+    final judge = outcome.judgeDebug;
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 8),
+      child: ChPanel(
+        borderColor: AppColors.muted,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'ОТЛАДКА · $label',
+              style: AppFonts.mono(fontSize: 9, weight: FontWeight.w700, color: AppColors.muted),
+            ),
+            const SizedBox(height: 8),
+            _block(
+              'ASR ответил',
+              outcome.transcript.isNotEmpty ? '«${outcome.transcript}»' : _asrFallbackText(),
+              _meta([
+                if (asr?['provider'] != null) '${asr!['provider']}/${asr['model']}',
+                if (asr?['language'] != null) '${asr!['language']}',
+                if (asr?['audio_seconds'] != null) 'аудио ${asr!['audio_seconds']} с',
+                if (asr?['elapsed_ms'] != null) '${asr!['elapsed_ms']} мс',
+                if (asr?['confidence'] != null) 'уверенность ${asr!['confidence']}',
+                'статус ${outcome.status.name}',
+              ]),
+              asr?['error']?.toString(),
+            ),
+            const SizedBox(height: 10),
+            _block(
+              'LLM ответил',
+              _judgeText(judge),
+              _meta([
+                if (judge?['model'] != null) '${judge!['model']}',
+                if (judge?['elapsed_ms'] != null) '${judge!['elapsed_ms']} мс',
+                if (judge?['attempts'] != null) 'попыток ${judge!['attempts']}',
+                if (judge?['errors_count'] != null) 'ошибок ${judge!['errors_count']}',
+                'статус ${outcome.judgeStatus.name}',
+              ]),
+              judge?['reason']?.toString(),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  String _asrFallbackText() => switch (outcome.status) {
+        TranscriptStatus.empty => '(пусто — речи не услышал)',
+        TranscriptStatus.failed => '(сбой распознавания)',
+        _ => '(нет данных)',
+      };
+
+  /// Для судьи важнее всего СЫРОЙ ответ модели: именно по нему видно,
+  /// прислала ли она JSON не той формы, markdown-обёртку или вообще ничего.
+  String _judgeText(Map<String, dynamic>? judge) {
+    final raw = judge?['raw']?.toString();
+    if (raw != null && raw.isNotEmpty) return raw;
+    return switch (outcome.judgeStatus) {
+      JudgeStatus.skipped => '(не вызывался — ${judge?['reason'] ?? 'нечего разбирать'})',
+      JudgeStatus.degraded => '(ответа нет, см. причину ниже)',
+      JudgeStatus.pending => '(ещё не отработал)',
+      JudgeStatus.ok => '(ответ разобран, сырьё не сохранено)',
+    };
+  }
+
+  String _meta(List<String> parts) => parts.where((p) => p.isNotEmpty).join(' · ');
+
+  Widget _block(String title, String body, String meta, String? error) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(title, style: AppFonts.mono(fontSize: 10, weight: FontWeight.w700, color: AppColors.gold)),
+        const SizedBox(height: 3),
+        SelectableText(
+          body,
+          style: const TextStyle(color: AppColors.cream, fontSize: 11, height: 1.35),
+        ),
+        if (meta.isNotEmpty) ...[
+          const SizedBox(height: 3),
+          Text(meta, style: AppFonts.mono(fontSize: 9, color: AppColors.muted)),
+        ],
+        if (error != null && error.isNotEmpty) ...[
+          const SizedBox(height: 3),
+          SelectableText(
+            error,
+            style: const TextStyle(color: AppColors.danger, fontSize: 10, height: 1.3),
+          ),
+        ],
+      ],
     );
   }
 }

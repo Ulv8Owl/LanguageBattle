@@ -40,6 +40,9 @@ export interface TranscriptionResult {
    * здесь штрафовать игрока за нашу поломку нельзя.
    */
   degraded: boolean;
+
+  /** Техническая диагностика для отладочной панели в игре (миграция 0016). */
+  debug: Record<string, unknown>;
 }
 
 /** Язык приложения -> BCP-47, который ждут облачные ASR. */
@@ -56,11 +59,19 @@ export function bcp47For(languageCode: string): string {
 /** Дольше держать запрос нет смысла: голосовое в раунде — секунды, не минуты. */
 const ASR_TIMEOUT_MS = 25_000;
 
-const EMPTY: TranscriptionResult = { transcript: "", confidence: 0, words: [], degraded: false };
+function empty(debug: Record<string, unknown>): TranscriptionResult {
+  return { transcript: "", confidence: 0, words: [], degraded: false, debug: { ...debug, status: "empty" } };
+}
 
-function failed(reason: string): TranscriptionResult {
+function failed(reason: string, debug: Record<string, unknown> = {}): TranscriptionResult {
   console.error("transcribeAudio:", reason);
-  return { transcript: "", confidence: 0, words: [], degraded: true };
+  return {
+    transcript: "",
+    confidence: 0,
+    words: [],
+    degraded: true,
+    debug: { ...debug, status: "failed", error: reason },
+  };
 }
 
 /**
@@ -162,8 +173,11 @@ async function transcribeGoogle(
   // середине. Ровно то, что выглядело как «распознаёт не всё, что я сказал».
   const model = Deno.env.get("ASR_MODEL") ?? "latest_long";
 
+  const meta = { provider: "google", model, language: bcp47For(languageCode), audio_bytes: audio.byteLength };
+  const startedAt = Date.now();
+
   const wav = parseWav(audio);
-  if (!wav) return failed("audio is not a parseable WAV container");
+  if (!wav) return failed("audio is not a parseable WAV container", meta);
 
   const res = await fetchWithTimeout(`${baseUrl}/speech:recognize?key=${encodeURIComponent(apiKey)}`, {
     method: "POST",
@@ -203,12 +217,19 @@ async function transcribeGoogle(
 
   if (!res.ok) {
     const body = await res.text().catch(() => "");
-    return failed(`Google STT HTTP ${res.status}: ${body.slice(0, 500)}`);
+    return failed(`Google STT HTTP ${res.status}: ${body.slice(0, 500)}`, {
+      ...meta,
+      elapsed_ms: Date.now() - startedAt,
+      audio_seconds: Math.round((wav.pcm.byteLength / (wav.sampleRate * wav.channels * 2)) * 10) / 10,
+    });
   }
 
   const data = await res.json();
+  const audioSeconds = Math.round((wav.pcm.byteLength / (wav.sampleRate * wav.channels * 2)) * 10) / 10;
+  const base = { ...meta, elapsed_ms: Date.now() - startedAt, audio_seconds: audioSeconds, hints: hintPhrases.length };
+
   const results = Array.isArray(data?.results) ? data.results : [];
-  if (results.length === 0) return EMPTY;
+  if (results.length === 0) return empty(base);
 
   const parts: string[] = [];
   const words: TranscribedWord[] = [];
@@ -230,13 +251,15 @@ async function transcribeGoogle(
   }
 
   const transcript = parts.filter((p) => p.length > 0).join(" ").trim();
-  if (transcript.length === 0) return EMPTY;
+  if (transcript.length === 0) return empty(base);
 
+  const confidence = confidenceCount > 0 ? confidenceSum / confidenceCount : 0;
   return {
     transcript,
-    confidence: confidenceCount > 0 ? confidenceSum / confidenceCount : 0,
+    confidence,
     words,
     degraded: false,
+    debug: { ...base, status: "ok", transcript, confidence: Math.round(confidence * 100) / 100 },
   };
 }
 
@@ -253,6 +276,9 @@ async function transcribeOpenAi(
   const baseUrl = Deno.env.get("ASR_BASE_URL") ?? Deno.env.get("LLM_BASE_URL") ?? "https://api.openai.com/v1";
   const model = Deno.env.get("ASR_MODEL") ?? "whisper-1";
 
+  const meta = { provider: "openai", model, language: languageCode, audio_bytes: audio.byteLength };
+  const startedAt = Date.now();
+
   const form = new FormData();
   form.append("file", new Blob([audio], { type: "audio/wav" }), "recording.wav");
   form.append("model", model);
@@ -267,18 +293,20 @@ async function transcribeOpenAi(
 
   if (!res.ok) {
     const body = await res.text().catch(() => "");
-    return failed(`ASR HTTP ${res.status}: ${body.slice(0, 500)}`);
+    return failed(`ASR HTTP ${res.status}: ${body.slice(0, 500)}`, { ...meta, elapsed_ms: Date.now() - startedAt });
   }
 
   const data = await res.json();
+  const base = { ...meta, elapsed_ms: Date.now() - startedAt };
   const transcript = typeof data?.text === "string" ? data.text.trim() : "";
-  if (transcript.length === 0) return EMPTY;
+  if (transcript.length === 0) return empty(base);
 
   return {
     transcript,
     confidence: 0,
     words: transcript.split(/\s+/).map((word: string) => ({ word, confidence: 0 })),
     degraded: false,
+    debug: { ...base, status: "ok", transcript },
   };
 }
 

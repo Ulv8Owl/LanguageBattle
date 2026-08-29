@@ -59,11 +59,25 @@ class RecordingOutcome {
   final TranscriptStatus status;
   final JudgeStatus judgeStatus;
 
+  /// Техническая диагностика пайплайна: что ответили ASR и судья
+  /// (voice_recordings.pipeline_debug, миграция 0016). Показывается на
+  /// экране, пока включён kShowPipelineDebug.
+  final Map<String, dynamic>? debug;
+
   const RecordingOutcome({
     required this.transcript,
     required this.status,
     this.judgeStatus = JudgeStatus.ok,
+    this.debug,
   });
+
+  Map<String, dynamic>? get asrDebug => _section('asr');
+  Map<String, dynamic>? get judgeDebug => _section('judge');
+
+  Map<String, dynamic>? _section(String key) {
+    final value = debug?[key];
+    return value is Map ? Map<String, dynamic>.from(value) : null;
+  }
 }
 
 /// Отправка голосового: файл в Storage -> строка в voice_recordings ->
@@ -126,13 +140,16 @@ Future<String> submitVoiceRecording({
 Future<RecordingOutcome> fetchRecordingOutcome(String recordingId) async {
   final row = await supabase
       .from('voice_recordings')
-      .select('transcript, transcript_status, judge_status')
+      .select('transcript, transcript_status, judge_status, pipeline_debug')
       .eq('id', recordingId)
       .maybeSingle();
   return RecordingOutcome(
     transcript: ((row?['transcript'] as String?) ?? '').trim(),
     status: TranscriptStatus.parse(row?['transcript_status'] as String?),
     judgeStatus: JudgeStatus.parse(row?['judge_status'] as String?),
+    debug: row?['pipeline_debug'] is Map
+        ? Map<String, dynamic>.from(row!['pipeline_debug'] as Map)
+        : null,
   );
 }
 

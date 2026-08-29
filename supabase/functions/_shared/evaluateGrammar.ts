@@ -20,6 +20,9 @@ export interface EvaluateGrammarResult {
 
   /** Почему не получилось — только при degraded. Для логов и config-check. */
   failureReason?: string;
+
+  /** Техническая диагностика для отладочной панели в игре (миграция 0016). */
+  debug: Record<string, unknown>;
 }
 
 /**
@@ -409,12 +412,24 @@ export async function evaluateGrammar(
       );
       const parsed = validate(extractJson(raw));
       if (parsed) {
+        const elapsed = Date.now() - startedAt;
         // Время ответа в логах — чтобы «судья не отвечает» сразу отличалось
         // от «судья отвечает, но медленно» без раскопок по таблицам.
-        console.log(
-          `evaluateGrammar: ответ за ${Date.now() - startedAt} мс, ошибок ${parsed.errors.length}`,
-        );
-        return { score: parsed.score, errors: parsed.errors, degraded: false };
+        console.log(`evaluateGrammar: ответ за ${elapsed} мс, ошибок ${parsed.errors.length}`);
+        return {
+          score: parsed.score,
+          errors: parsed.errors,
+          degraded: false,
+          debug: {
+            model: Deno.env.get("LLM_MODEL") ?? "(не задана)",
+            status: "ok",
+            attempt,
+            elapsed_ms: elapsed,
+            score: parsed.score,
+            errors_count: parsed.errors.length,
+            raw: raw.slice(0, 600),
+          },
+        };
       }
       // Разобрали JSON, но форма не та — покажем, что именно вернула модель,
       // иначе причина неотличима от сетевого сбоя.
@@ -443,5 +458,18 @@ export async function evaluateGrammar(
 
   const reason = failures.join(" | ");
   console.error("evaluateGrammar: судья не дал результата:", reason);
-  return { score: NEUTRAL_SCORE, errors: [], degraded: true, failureReason: reason };
+  return {
+    score: NEUTRAL_SCORE,
+    errors: [],
+    degraded: true,
+    failureReason: reason,
+    debug: {
+      model: Deno.env.get("LLM_MODEL") ?? "(не задана)",
+      base_url: Deno.env.get("LLM_BASE_URL") ?? "https://api.b.ai/v1",
+      status: "degraded",
+      attempts: failures.length,
+      reason,
+      transcript_length: transcript.length,
+    },
+  };
 }

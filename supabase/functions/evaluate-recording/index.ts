@@ -159,7 +159,9 @@ async function processJob(job_id: string): Promise<void> {
     const targetLanguage = recording.language_code ?? "en";
 
     // Шаг 1 — распознавание речи.
-    const { transcript, status } = await resolveTranscript(supabase, recording, targetLanguage);
+    const { transcript, status, debug: asrDebug } = await resolveTranscript(supabase, recording, targetLanguage);
+    // Диагностика пайплайна для отладочной панели в игре (миграция 0016).
+    const pipelineDebug: Record<string, unknown> = { asr: asrDebug };
 
     // Шаг 2 — оценка. Три исхода распознавания дают три разных балла, и
     // путать их нельзя: за нашу поломку игрок не должен получать 1.
@@ -173,10 +175,12 @@ async function processJob(job_id: string): Promise<void> {
       score = NEUTRAL_SCORE;
       feedback = "Не удалось распознать речь — балл выставлен нейтральным.";
       judgeStatus = "skipped";
+      pipelineDebug.judge = { status: "skipped", reason: "речь не распознана — судью не звали" };
     } else if (status === "empty") {
       score = EMPTY_TRANSCRIPT_SCORE;
       feedback = "Не удалось разобрать речь — попробуй сказать чётче и ближе к микрофону.";
       judgeStatus = "skipped";
+      pipelineDebug.judge = { status: "skipped", reason: "записана тишина — судью не звали" };
     } else {
       // Лига говорящего на этом языке -> уровень CEFR (скрытая механика:
       // приравнивание лиг к A1-C2) — ограничивает только сложность текста
@@ -207,6 +211,7 @@ async function processJob(job_id: string): Promise<void> {
       score = result.score;
       errors = result.errors;
       judgeStatus = result.degraded ? "degraded" : "ok";
+      pipelineDebug.judge = result.debug;
       feedback = result.degraded
         ? "Не удалось получить разбор от ИИ — балл выставлен нейтральным."
         : errors.length === 0
@@ -223,7 +228,7 @@ async function processJob(job_id: string): Promise<void> {
 
     await supabase
       .from("voice_recordings")
-      .update({ judge_status: judgeStatus })
+      .update({ judge_status: judgeStatus, pipeline_debug: pipelineDebug })
       .eq("id", recording.id);
 
     if (errors.length > 0) {
@@ -285,17 +290,21 @@ async function resolveTranscript(
   supabase: SupabaseClient,
   recording: VoiceRecordingRow,
   targetLanguage: string,
-): Promise<{ transcript: string; status: TranscriptStatus }> {
+): Promise<{ transcript: string; status: TranscriptStatus; debug: Record<string, unknown> }> {
   const existing = (recording.transcript ?? "").trim();
   if (existing.length > 0) {
     if (recording.transcript_status !== "ok") {
       await saveTranscript(supabase, recording.id, existing, [], "ok");
     }
-    return { transcript: existing, status: "ok" };
+    return { transcript: existing, status: "ok", debug: { status: "ok", transcript: existing, cached: true } };
   }
   if (recording.transcript_status === "empty" || recording.transcript_status === "failed") {
     // Уже пробовали и не получилось — не тратим квоту провайдера повторно.
-    return { transcript: "", status: recording.transcript_status };
+    return {
+      transcript: "",
+      status: recording.transcript_status,
+      debug: { status: recording.transcript_status, cached: true },
+    };
   }
 
   const { data: file, error: downloadErr } = await supabase.storage
@@ -307,7 +316,11 @@ async function resolveTranscript(
       downloadErr,
     });
     await saveTranscript(supabase, recording.id, "", [], "failed");
-    return { transcript: "", status: "failed" };
+    return {
+      transcript: "",
+      status: "failed",
+      debug: { status: "failed", error: `не удалось скачать аудио: ${downloadErr?.message ?? downloadErr}` },
+    };
   }
 
   const audio = new Uint8Array(await file.arrayBuffer());
@@ -319,7 +332,7 @@ async function resolveTranscript(
 
   const status: TranscriptStatus = asr.degraded ? "failed" : asr.transcript.length > 0 ? "ok" : "empty";
   await saveTranscript(supabase, recording.id, asr.transcript, asr.words, status);
-  return { transcript: asr.transcript, status };
+  return { transcript: asr.transcript, status, debug: asr.debug };
 }
 
 /**
