@@ -3,8 +3,10 @@ import 'package:go_router/go_router.dart';
 
 import 'package:flutter/services.dart';
 
+import '../../core/app_events.dart';
 import '../../core/debug_flags.dart';
 import '../../core/languages.dart';
+import '../../core/leagues.dart';
 import '../../core/supabase_client.dart';
 import '../../data/training_session.dart';
 import '../../core/theme.dart';
@@ -37,6 +39,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
   int _deckSize = defaultTrainingDeckSize;
   bool _savingDeckSize = false;
 
+  /// Рейтинг по изучаемому языку. Здесь его можно задать вручную — это
+  /// отладочная возможность: дождаться перехода в следующую лигу честной
+  /// игрой это десятки матчей, а проверять надо все шесть.
+  int? _elo;
+  bool _savingElo = false;
+
   @override
   void initState() {
     super.initState();
@@ -51,10 +59,20 @@ class _SettingsScreenState extends State<SettingsScreen> {
           .eq('id', currentUserId)
           .maybeSingle();
       if (!mounted) return;
+      final learning = await supabase
+          .from('user_languages')
+          .select('elo')
+          .eq('user_id', currentUserId)
+          .eq('role', 'learning')
+          .eq('is_active', true)
+          .limit(1)
+          .maybeSingle();
+      if (!mounted) return;
       setState(() {
         _nativeLanguage = row?['native_language'] as String?;
         final size = (row?['training_deck_size'] as num?)?.toInt();
         if (size != null && trainingDeckSizes.contains(size)) _deckSize = size;
+        _elo = (learning?['elo'] as num?)?.toInt();
       });
     } catch (_) {
       // Не удалось — покажем прочерк, менять язык это не мешает.
@@ -206,6 +224,79 @@ class _SettingsScreenState extends State<SettingsScreen> {
     }
   }
 
+  Future<void> _editElo() async {
+    final controller = TextEditingController(text: '${_elo ?? 1000}');
+    final entered = await showDialog<int>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: AppColors.navy2,
+        title: const Text('Рейтинг'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              'Отладочная настройка: лига и сложность фраз считаются по рейтингу.',
+              style: TextStyle(color: AppColors.muted, fontSize: 12, height: 1.4),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: controller,
+              autofocus: true,
+              keyboardType: TextInputType.number,
+              decoration: const InputDecoration(labelText: 'Число'),
+            ),
+            const SizedBox(height: 10),
+            for (final band in leagueBands)
+              Text(
+                '${band.titleWithLevel}: от ${band.min}'
+                '${band.max > 90000 ? '' : ' до ${band.max - 1}'}',
+                style: AppFonts.mono(fontSize: 10, color: band.color),
+              ),
+          ],
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.of(ctx).pop(), child: const Text('Отмена')),
+          TextButton(
+            onPressed: () {
+              final value = int.tryParse(controller.text.trim());
+              Navigator.of(ctx).pop(value);
+            },
+            child: const Text('Применить'),
+          ),
+        ],
+      ),
+    );
+    if (entered == null || !mounted) return;
+    final value = entered.clamp(0, 99999);
+
+    setState(() => _savingElo = true);
+    try {
+      await supabase
+          .from('user_languages')
+          .update({'elo': value})
+          .eq('user_id', currentUserId)
+          .eq('role', 'learning')
+          .eq('is_active', true);
+      if (!mounted) return;
+      setState(() {
+        _elo = value;
+        _savingElo = false;
+      });
+      // Арена держит рейтинг в своём состоянии и сама его не перечитывает.
+      notifyProfileChanged();
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Рейтинг $value · ${leagueFor(value).titleWithLevel}')),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _savingElo = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Не удалось изменить рейтинг: $e')),
+      );
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -257,6 +348,23 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     ? const SizedBox(height: 14, width: 14, child: CircularProgressIndicator(strokeWidth: 2))
                     : Text('$_deckSize', style: AppFonts.mono(fontSize: 11, color: AppColors.muted)),
                 onTap: _savingDeckSize ? null : _pickDeckSize,
+              ),
+            ),
+            const SizedBox(height: 18),
+            Text('ОТЛАДКА', style: AppFonts.mono(fontSize: 9, weight: FontWeight.w700, color: AppColors.danger)),
+            const SizedBox(height: 8),
+            ChPanel(
+              padding: EdgeInsets.zero,
+              child: _Row(
+                icon: Icons.emoji_events_outlined,
+                title: 'Рейтинг и лига',
+                trailing: _savingElo
+                    ? const SizedBox(height: 14, width: 14, child: CircularProgressIndicator(strokeWidth: 2))
+                    : Text(
+                        _elo == null ? '—' : '$_elo · ${leagueFor(_elo!).cefr}',
+                        style: AppFonts.mono(fontSize: 11, color: AppColors.muted),
+                      ),
+                onTap: _savingElo ? null : _editElo,
               ),
             ),
             const SizedBox(height: 18),

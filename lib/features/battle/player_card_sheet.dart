@@ -78,7 +78,7 @@ class _PlayerCardState extends State<_PlayerCard> {
         // направления: иначе уже добавленный друг снова получал бы заявку.
         final rows = await supabase
             .from('friendships')
-            .select('id')
+            .select('user_id')
             .or('and(user_id.eq.$currentUserId,friend_id.eq.${widget.userId}),'
                 'and(user_id.eq.${widget.userId},friend_id.eq.$currentUserId)')
             .limit(1);

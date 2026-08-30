@@ -2,7 +2,9 @@ import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../core/game_access.dart';
+import '../../core/app_events.dart';
 import '../../core/leagues.dart';
+import '../../widgets/league_trophy.dart';
 import '../../core/nav_state.dart';
 import '../../core/supabase_client.dart';
 import '../../core/theme.dart';
@@ -36,6 +38,7 @@ class _ArenaScreenState extends State<ArenaScreen> {
   void initState() {
     super.initState();
     _load();
+    profileRevision.addListener(_load);
     // Смена языковой пары в Профиле должна сразу отразиться на Арене
     // (ELO, доступность режимов) — Арена не пересоздаётся при
     // переключении вкладок (IndexedStack), поэтому слушаем нотификатор.
@@ -44,6 +47,7 @@ class _ArenaScreenState extends State<ArenaScreen> {
 
   @override
   void dispose() {
+    profileRevision.removeListener(_load);
     languagePairVersion.removeListener(_load);
     super.dispose();
   }
@@ -416,47 +420,96 @@ class _ArenaScreenState extends State<ArenaScreen> {
           // только вводил в заблуждение.
           Column(
             children: [
-              Icon(Icons.emoji_events, size: 46, color: league.color),
-              const SizedBox(height: 2),
-              Text(league.name, style: AppFonts.ui(fontSize: 15, weight: FontWeight.w800, color: league.color)),
-              const SizedBox(height: 9),
-              Row(
-                children: [
-                  Text('${league.min}', style: AppFonts.mono(fontSize: 9)),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: ClipRRect(
-                      borderRadius: BorderRadius.circular(6),
-                      child: LinearProgressIndicator(
-                        value: bandProgress,
-                        minHeight: 11,
-                        backgroundColor: AppColors.navy1,
-                        valueColor: AlwaysStoppedAnimation(league.color),
-                      ),
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                  Text(league.max > 90000 ? '∞' : '${league.max}', style: AppFonts.mono(fontSize: 9)),
-                ],
+              LeagueTrophy(league: league, size: 88),
+              const SizedBox(height: 6),
+              Text(
+                league.titleWithLevel,
+                style: AppFonts.ui(fontSize: 16, weight: FontWeight.w800, color: league.color),
               ),
-              const SizedBox(height: 10),
+              const SizedBox(height: 12),
+              // Полоса анимированная: рейтинг меняется на ±16-32 внутри
+              // трёхсотенной полосы, и без движения этот сдвиг на глаз
+              // неотличим от полной неподвижности.
+              _LeagueProgress(league: league, elo: _elo, progress: bandProgress),
+              const SizedBox(height: 14),
               Row(
                 mainAxisAlignment: MainAxisAlignment.center,
-                children: leagueBands
-                    .map((b) => Padding(
-                          padding: const EdgeInsets.symmetric(horizontal: 3.5),
-                          child: Icon(
-                            Icons.emoji_events,
-                            size: 20,
-                            color: b.name == league.name ? b.color : b.color.withValues(alpha: 0.35),
-                          ),
-                        ))
-                    .toList(),
+                children: [
+                  for (final b in leagueBands)
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 2),
+                      child: LeagueTrophy(
+                        league: b,
+                        size: 46,
+                        active: b.name == league.name,
+                      ),
+                    ),
+                ],
               ),
             ],
           ),
         ],
       ),
+    );
+  }
+}
+
+/// Полоса продвижения внутри лиги: слева порог входа, справа порог
+/// следующей, посередине текущий рейтинг.
+class _LeagueProgress extends StatelessWidget {
+  final League league;
+  final int elo;
+  final double progress;
+
+  const _LeagueProgress({required this.league, required this.elo, required this.progress});
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      children: [
+        Row(
+          children: [
+            Text('${league.min}', style: AppFonts.mono(fontSize: 10, color: AppColors.muted)),
+            const SizedBox(width: 10),
+            Expanded(
+              child: TweenAnimationBuilder<double>(
+                tween: Tween(begin: 0, end: progress),
+                duration: const Duration(milliseconds: 700),
+                curve: Curves.easeOutCubic,
+                builder: (context, value, _) => ClipRRect(
+                  borderRadius: BorderRadius.circular(8),
+                  child: Stack(
+                    children: [
+                      Container(height: 14, color: AppColors.navy1),
+                      FractionallySizedBox(
+                        widthFactor: value,
+                        child: Container(
+                          height: 14,
+                          decoration: BoxDecoration(
+                            gradient: LinearGradient(
+                              colors: [league.color.withValues(alpha: 0.55), league.color],
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+            const SizedBox(width: 10),
+            Text(
+              league.max > 90000 ? '∞' : '${league.max}',
+              style: AppFonts.mono(fontSize: 10, color: AppColors.muted),
+            ),
+          ],
+        ),
+        const SizedBox(height: 6),
+        Text(
+          league.max > 90000 ? 'Рейтинг $elo' : 'Рейтинг $elo · до следующей лиги ${league.max - elo}',
+          style: AppFonts.mono(fontSize: 10, weight: FontWeight.w700, color: AppColors.cream),
+        ),
+      ],
     );
   }
 }
