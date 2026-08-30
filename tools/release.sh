@@ -20,7 +20,7 @@ git fetch origin "$BRANCH"
 git checkout "$BRANCH"
 git merge --ff-only "origin/$BRANCH" \
   || fail "локальная $BRANCH разошлась с origin/$BRANCH.
-Разберись с расхождением (см. .claude/skills/branch-flow/SKILL.md, сценарий Б)."
+Посмотри свои коммиты: git log --oneline origin/$BRANCH..HEAD"
 note "На $(git rev-parse --short HEAD)  $(git log -1 --format=%s)"
 
 # Мы только что могли обновить сами себя. Bash читает файл скрипта по мере
