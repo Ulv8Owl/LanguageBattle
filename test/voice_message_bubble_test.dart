@@ -33,13 +33,15 @@ void main() {
     expect(find.text('7'), findsOneWidget);
   });
 
-  testWidgets('пока балл считается — индикатор вместо числа', (tester) async {
+  testWidgets('без балла пузырь ничего не показывает на его месте', (tester) async {
+    // В бою балл и разбор приходят отдельным сообщением ниже. Индикатор на
+    // самом пузыре читался как «голосовое ещё грузится», хотя грузилась
+    // оценка, — поэтому здесь его быть не должно.
     await tester.pumpWidget(host(const VoiceMessageBubble(
       audioStoragePath: 'training/s/r/u_1.wav',
       name: 'Арсений',
       alignRight: false,
-      scorePending: true,
     )));
-    expect(find.byType(CircularProgressIndicator), findsOneWidget);
+    expect(find.byType(CircularProgressIndicator), findsNothing);
   });
 }

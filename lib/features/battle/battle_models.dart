@@ -6,6 +6,9 @@ class MatchData {
   final String? languagePair;
   final String status; // 'matchmaking' | 'in_progress' | 'completed' | 'abandoned'
   final String? winnerId;
+
+  /// Кто вышел из боя досрочно (миграция 0021). null — бой доигран.
+  final String? forfeitedBy;
   final DateTime createdAt;
 
   const MatchData({
@@ -16,6 +19,7 @@ class MatchData {
     required this.languagePair,
     required this.status,
     required this.winnerId,
+    required this.forfeitedBy,
     required this.createdAt,
   });
 
@@ -28,6 +32,7 @@ class MatchData {
       languagePair: row['language_pair'] as String?,
       status: row['status'] as String,
       winnerId: row['winner_id'] as String?,
+      forfeitedBy: row['forfeited_by'] as String?,
       createdAt: DateTime.parse(row['created_at'] as String),
     );
   }

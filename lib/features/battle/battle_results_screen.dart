@@ -108,6 +108,11 @@ class _BattleResultsScreenState extends State<BattleResultsScreen> {
 
     final iWon = m.winnerId == myId;
     final draw = m.winnerId == null;
+    // Бой не доигран, а брошен. Без этой пометки победа по чужому выходу
+    // выглядела бы как обычная — при том, что баллы за большинство раундов
+    // не выставлялись вовсе, и счёт внизу это подтверждает.
+    final forfeitedByMe = m.forfeitedBy != null && m.forfeitedBy == myId;
+    final forfeitedByThem = m.forfeitedBy != null && m.forfeitedBy != myId;
 
     return Scaffold(
       appBar: AppBar(title: const Text('Итоги матча')),
@@ -125,6 +130,18 @@ class _BattleResultsScreenState extends State<BattleResultsScreen> {
                 ),
               ),
             ),
+            if (forfeitedByThem || forfeitedByMe) ...[
+              const SizedBox(height: 10),
+              Text(
+                forfeitedByThem
+                    ? '$_opponentName покинул бой. Победа засчитана вам, '
+                        'рейтинга начислено вдвое меньше, чем за доигранный бой.'
+                    : 'Вы покинули бой. Поражение засчитано, '
+                        'рейтинга потеряно вдвое меньше, чем за доигранный бой.',
+                textAlign: TextAlign.center,
+                style: const TextStyle(color: AppColors.muted, fontSize: 13, height: 1.4),
+              ),
+            ],
             const SizedBox(height: 24),
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceEvenly,

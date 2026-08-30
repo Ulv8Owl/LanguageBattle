@@ -22,12 +22,12 @@ class VoiceMessageBubble extends StatefulWidget {
   final bool alignRight;
 
   /// Балл за это голосовое, если он предусмотрен и уже выставлен.
+  ///
+  /// В бою балла здесь больше нет: он и разбор приходят отдельным
+  /// сообщением ниже, как в Одиночной Игре. Значок на самом пузыре не
+  /// оставлял места разбору, а индикатор на нём читался как «голосовое
+  /// ещё грузится», хотя грузилась оценка.
   final int? score;
-
-  /// true — балл за это голосовое будет, но его ещё считают: на его месте
-  /// крутится индикатор. false — балла тут не бывает вовсе (родной слот
-  /// Дуэли, попытка №1 в соло).
-  final bool scorePending;
 
   const VoiceMessageBubble({
     super.key,
@@ -35,7 +35,6 @@ class VoiceMessageBubble extends StatefulWidget {
     required this.name,
     required this.alignRight,
     this.score,
-    this.scorePending = false,
   });
 
   @override
@@ -113,13 +112,6 @@ class _VoiceMessageBubbleState extends State<VoiceMessageBubble> {
                 '${widget.score}',
                 style: AppFonts.ui(fontSize: 12, weight: FontWeight.w800, color: Colors.black),
               ),
-            ),
-          ] else if (widget.scorePending) ...[
-            const SizedBox(width: 10),
-            const SizedBox(
-              height: 12,
-              width: 12,
-              child: CircularProgressIndicator(strokeWidth: 1.6, color: AppColors.muted),
             ),
           ],
         ],

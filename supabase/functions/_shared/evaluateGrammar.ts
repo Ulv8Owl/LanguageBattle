@@ -137,8 +137,19 @@ const MIN_LLM_SLICE_MS = 8_000;
 
 /// Обычный режим (PvP, раздел 2.4): message — короткое, одна-две фразы,
 /// понятное с первого взгляда прямо в ленте боя.
+///
+/// Здесь же — самое дешёвое, что можно сделать со временем ответа: не
+/// просить того, что не показывается. В бою на экране только балл и
+/// короткая подсказка, а `cleaned` и `corrected` — это две полные фразы,
+/// которые модель писала в каждом ответе впустую. Время генерации почти
+/// целиком определяется числом выходных токенов, так что убрать лишнее
+/// поле выгоднее любой правки таймаутов.
 const BRIEF_MESSAGE_INSTRUCTION =
-  `message — короткое объяснение ошибки (одно-два предложения) НА РОДНОМ ЯЗЫКЕ говорящего, понятное новичку.`;
+  `В ЭТОТ РАЗ отвечай КОРОТКО и верни ТОЛЬКО эти поля:
+{"score": number, "errors": [{"message": string, "replacement": string, "category": "grammar"|"spelling"|"style"}]}
+Поля cleaned, corrected, offset и length НЕ НУЖНЫ — не пиши их вовсе.
+message — одно короткое предложение НА РОДНОМ ЯЗЫКЕ говорящего, понятное новичку.
+Разбирай не больше ДВУХ самых грубых ошибок; если ошибок нет, верни errors: [].`;
 
 /// Одиночная Игра (раздел 2.2): между двумя попытками игрок должен понять,
 /// что именно исправить — здесь ИИ обязан объяснять подробнее, чем в PvP,
@@ -247,9 +258,12 @@ const TRIVIAL_SYSTEM_PROMPT =
 function buildSystemPrompt(verbosity: JudgeVerbosity, level: CefrLevel): string {
   if (trivialProbeEnabled()) return TRIVIAL_SYSTEM_PROMPT;
   if (verbosity === "marksOnly") return `${BASE_SYSTEM_PROMPT}\n${MARKS_ONLY_INSTRUCTION}`;
+  // В кратком режиме уровень говорящего не нужен: он ограничивает СЛОЖНОСТЬ
+  // развёрнутых объяснений, а объяснение здесь — одна строка. Блок длинный,
+  // и каждый его токен — это задержка перед первым словом ответа.
+  if (verbosity === "brief") return `${BASE_SYSTEM_PROMPT}\n${BRIEF_MESSAGE_INSTRUCTION}`;
   const levelBlock = `${LEVEL_INSTRUCTIONS[level]}\n${LEVEL_SCORE_REMINDER}`;
-  const messageBlock = verbosity === "detailed" ? DETAILED_MESSAGE_INSTRUCTION : BRIEF_MESSAGE_INSTRUCTION;
-  return `${BASE_SYSTEM_PROMPT}\n${levelBlock}\n${messageBlock}\n${EXPLAIN_LIMIT_INSTRUCTION}`;
+  return `${BASE_SYSTEM_PROMPT}\n${levelBlock}\n${DETAILED_MESSAGE_INSTRUCTION}\n${EXPLAIN_LIMIT_INSTRUCTION}`;
 }
 
 function buildUserPrompt(
@@ -301,9 +315,11 @@ function validate(value: unknown): ParsedResult | null {
   for (const e of v.errors) {
     if (typeof e !== "object" || e === null) return null;
     const err = e as Record<string, unknown>;
+    // offset/length НЕ обязательны. Модель возвращает их ненадёжно (см.
+    // миграцию 0017), подсветка правки на них не опирается, а требовать их
+    // — значит тратить выходные токены и получать отказ разбора целиком
+    // из-за поля, которым никто не пользуется.
     if (
-      typeof err.offset !== "number" ||
-      typeof err.length !== "number" ||
       typeof err.message !== "string" ||
       typeof err.replacement !== "string" ||
       (err.category !== "grammar" && err.category !== "spelling" && err.category !== "style")
@@ -311,8 +327,8 @@ function validate(value: unknown): ParsedResult | null {
       return null;
     }
     errors.push({
-      offset: Math.max(0, Math.round(err.offset)),
-      length: Math.max(0, Math.round(err.length)),
+      offset: typeof err.offset === "number" ? Math.max(0, Math.round(err.offset)) : 0,
+      length: typeof err.length === "number" ? Math.max(0, Math.round(err.length)) : 0,
       message: err.message,
       replacement: err.replacement,
       category: err.category,

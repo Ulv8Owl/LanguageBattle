@@ -26,7 +26,6 @@ class _ArenaScreenState extends State<ArenaScreen> {
   Map<String, dynamic>? _profile;
   WalletState _wallet = WalletState.empty;
   int _elo = 1000;
-  List<Map<String, dynamic>> _matches = [];
   bool _loading = true;
 
   /// null — ничего не подсвечено. Задаётся на время, пока открыта плашка
@@ -65,24 +64,11 @@ class _ArenaScreenState extends State<ArenaScreen> {
           .eq('is_active', true)
           .limit(1)
           .maybeSingle();
-      final asPlayerA = await supabase
-          .from('matches')
-          .select()
-          .eq('player_a_id', uid)
-          .inFilter('status', ['in_progress', 'completed']);
-      final asPlayerB = await supabase
-          .from('matches')
-          .select()
-          .eq('player_b_id', uid)
-          .inFilter('status', ['in_progress', 'completed']);
-      final all = [...asPlayerA, ...asPlayerB];
-      all.sort((a, b) => (b['created_at'] as String).compareTo(a['created_at'] as String));
       if (!mounted) return;
       setState(() {
         _profile = profile;
         _wallet = wallet;
         _elo = (learning?['elo'] as int?) ?? 1000;
-        _matches = all;
         _loading = false;
       });
     } catch (_) {
@@ -423,12 +409,11 @@ class _ArenaScreenState extends State<ArenaScreen> {
             onTap: () => _onModeTap(_ModeKey.duel, aiGated: true, sheetBuilder: _buildDuelSheet),
           ),
           const SizedBox(height: 24),
-          if (_matches.isNotEmpty) ...[
-            Text('АКТИВНЫЕ БОИ', style: AppFonts.mono(fontSize: 9, weight: FontWeight.w700, color: AppColors.gold)),
-            const SizedBox(height: 10),
-            ..._matches.map((m) => _MatchRow(match: m)),
-            const SizedBox(height: 20),
-          ],
+          // Список «Активные бои» убран: незавершённых боёв больше не
+          // бывает. Выход из боя завершает его сразу (forfeit_match,
+          // миграция 0021), так что возвращаться некуда — а список,
+          // предлагавший вернуться в бой, который соперник уже не ждёт,
+          // только вводил в заблуждение.
           Column(
             children: [
               Icon(Icons.emoji_events, size: 46, color: league.color),
@@ -526,45 +511,3 @@ class _StatCol extends StatelessWidget {
   }
 }
 
-class _MatchRow extends StatelessWidget {
-  final Map<String, dynamic> match;
-
-  const _MatchRow({required this.match});
-
-  @override
-  Widget build(BuildContext context) {
-    final status = match['status'] as String;
-    final completed = status == 'completed';
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 8),
-      child: ChPanel(
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-        child: InkWell(
-          onTap: () => context.push(completed ? '/battle/${match['id']}/results' : '/battle/${match['id']}'),
-          child: Row(
-            children: [
-              Icon(
-                match['game_mode'] == 'native_duel' ? Icons.local_fire_department : Icons.bolt,
-                color: AppColors.gold,
-                size: 20,
-              ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(match['game_mode'] == 'native_duel' ? 'Дуэль' : 'Состязание',
-                        style: AppFonts.ui(fontSize: 12)),
-                    Text(completed ? 'Завершён' : 'В процессе',
-                        style: const TextStyle(fontSize: 10, color: AppColors.muted)),
-                  ],
-                ),
-              ),
-              const Icon(Icons.chevron_right, color: AppColors.muted),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-}

@@ -9,6 +9,7 @@ import '../../core/supabase_client.dart';
 import '../../core/theme.dart';
 import '../../data/phrase_bank.dart';
 import '../../data/voice_submission.dart';
+import '../../widgets/ai_avatar.dart';
 import '../../widgets/voice_message_bubble.dart';
 import '../../widgets/voice_recorder_dock.dart';
 import 'battle_models.dart';
@@ -213,10 +214,15 @@ class _BattleScreenState extends State<BattleScreen> {
     return null;
   }
 
-  int? _scoreFor(String roundId, String? userId) {
+  int? _scoreFor(String roundId, String? userId) => _verdictFor(roundId, userId)?.score;
+
+  /// Оценка раунда целиком: балл плюс короткий разбор от судьи. В PvP на
+  /// экран идёт и то и другое — раньше показывался только балл, и от ИИ в
+  /// бою не было ни слова, хотя судья его писал.
+  RoundScoreData? _verdictFor(String roundId, String? userId) {
     if (userId == null) return null;
     for (final s in _scores) {
-      if (s.roundId == roundId && s.userId == userId) return s.score;
+      if (s.roundId == roundId && s.userId == userId) return s;
     }
     return null;
   }
@@ -416,8 +422,22 @@ class _BattleScreenState extends State<BattleScreen> {
     final slot = _nextSlot;
     final canRecord = slot != null && m.status == 'in_progress';
 
-    return Scaffold(
-      appBar: AppBar(title: Text(m.isDuel ? 'Дуэль' : 'Состязание')),
+    return PopScope(
+      // Системная кнопка «назад» — тот же выход из боя, что и стрелка.
+      canPop: false,
+      onPopInvokedWithResult: (didPop, _) {
+        if (!didPop) _confirmLeave();
+      },
+      child: Scaffold(
+      appBar: AppBar(
+        title: Text(m.isDuel ? 'Дуэль' : 'Состязание'),
+        // Своя стрелка: штатная просто закрывает экран, а выход из боя
+        // теперь его завершает и должен спрашивать подтверждение.
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back),
+          onPressed: _confirmLeave,
+        ),
+      ),
       // Тап мимо кнопки микрофона сбрасывает подготовленное голосовое
       // (раздел 5.2) — можно перезаписать заново.
       body: GestureDetector(
@@ -471,7 +491,72 @@ class _BattleScreenState extends State<BattleScreen> {
           ),
         ),
       ),
+      ),
     );
+  }
+
+  /// Выход из боя = поражение. Спрашиваем прежде, чем это случится:
+  /// стрелка «назад» раньше просто сворачивала бой, и нажать её случайно
+  /// ничего не стоило.
+  Future<void> _confirmLeave() async {
+    final m = _match;
+    // Бой уже завершён (доигран или соперник вышел) — уходить не с чего.
+    if (m == null || m.status != 'in_progress') {
+      if (mounted) _leaveScreen();
+      return;
+    }
+
+    final leave = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: AppColors.navy2,
+        title: const Text('Покинуть бой?'),
+        content: const Text(
+          'Вы автоматически проиграете, если покинете этот бой. '
+          'Рейтинга потеряется вдвое меньше, чем при обычном поражении, '
+          'а сопернику засчитают победу.',
+          style: TextStyle(height: 1.4),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text('Остаться'),
+          ),
+          TextButton(
+            style: TextButton.styleFrom(foregroundColor: AppColors.danger),
+            onPressed: () => Navigator.of(ctx).pop(true),
+            child: const Text('Покинуть'),
+          ),
+        ],
+      ),
+    );
+    if (leave != true || !mounted) return;
+
+    // Сдача засчитывается на сервере: соперник узнает о ней из того же
+    // стрима матча, что и о честном завершении, — отдельного уведомления
+    // не нужно.
+    try {
+      await supabase.rpc('forfeit_match', params: {'p_match_id': widget.matchId});
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Не удалось выйти из боя: $e')),
+      );
+      return;
+    }
+    if (!mounted) return;
+    // На экран итогов ведёт подписка на матч (статус стал completed), так
+    // что здесь просто не мешаем.
+    _navigatedAway = true;
+    context.go('/battle/${widget.matchId}/results');
+  }
+
+  void _leaveScreen() {
+    if (context.canPop()) {
+      context.pop();
+    } else {
+      context.go('/arena');
+    }
   }
 
   List<Widget> _buildFeed(MatchData m, String? opponentId) {
@@ -494,36 +579,138 @@ class _BattleScreenState extends State<BattleScreen> {
         text: promptText,
         targetLanguage: isCurrent && slot != null ? m.languageForSlot(_myId, slot) : null,
       ));
-      for (final slot in m.requiredSlots) {
-        final mine = _recordingFor(round.id, _myId, slot);
-        final theirs = opponentId == null ? null : _recordingFor(round.id, opponentId, slot);
+      // Голосовые раунда — в порядке отправки, а не «сначала мои, потом
+      // чужие»: лента изображает переписку, и кто ответил первым, тот и
+      // выше. Раньше своё голосовое всегда стояло над чужим, даже если
+      // соперник ответил раньше.
+      final spoken = _recordings.where((r) => r.roundId == round.id).toList()
+        ..sort((a, b) => a.createdAt.compareTo(b.createdAt));
+
+      for (final rec in spoken) {
+        final isMine = rec.userId == _myId;
+        if (!isMine && rec.userId != opponentId) continue;
+        items.add(VoiceMessageBubble(
+          key: ValueKey(rec.id),
+          audioStoragePath: rec.audioStoragePath,
+          name: isMine ? _myName : _opponentName,
+          // Свои сообщения справа, чужие слева — как в любом мессенджере.
+          alignRight: isMine,
+        ));
+
         // Балл ставится только за голосовое на изучаемом языке — родное
         // в Дуэли соперник просто слушает (раздел 2.4).
-        final myScore = slot == 'target' ? _scoreFor(round.id, _myId) : null;
-        final theirScore = slot == 'target' ? _scoreFor(round.id, opponentId) : null;
-        if (mine != null) {
-          items.add(VoiceMessageBubble(
-            key: ValueKey('${mine.id}-mine'),
-            audioStoragePath: mine.audioStoragePath,
-            name: _myName,
-            alignRight: false,
-            score: myScore,
-            scorePending: slot == 'target',
-          ));
-        }
-        if (theirs != null) {
-          items.add(VoiceMessageBubble(
-            key: ValueKey('${theirs.id}-theirs'),
-            audioStoragePath: theirs.audioStoragePath,
-            name: _opponentName,
-            alignRight: true,
-            score: theirScore,
-            scorePending: slot == 'target',
-          ));
-        }
+        if (rec.recordingSlot != 'target') continue;
+        final verdict = _verdictFor(round.id, rec.userId);
+        items.add(_AiVerdict(
+          key: ValueKey('${rec.id}-verdict'),
+          name: isMine ? _myName : _opponentName,
+          verdict: verdict,
+        ));
       }
     }
     return items;
+  }
+}
+
+/// Оценка одного голосового — отдельным сообщением ПОД ним, а не значком
+/// на самом голосовом.
+///
+/// Так сделано по двум причинам. Балл на пузыре не оставлял места разбору,
+/// и разбор от ИИ в бою не показывался вообще, хотя судья его писал. А
+/// крутящийся индикатор на пузыре читался как «голосовое ещё грузится», а
+/// не «ИИ его оценивает».
+///
+/// Сообщение всегда слева и с аватаром хамелеона: это говорит ИИ, а не
+/// игрок, — по тому же правилу, что и фраза раунда.
+class _AiVerdict extends StatelessWidget {
+  /// Чьё голосовое оценивается — иначе в бою непонятно, чей это балл.
+  final String name;
+
+  /// null — оценки ещё нет, судья считает.
+  final RoundScoreData? verdict;
+
+  const _AiVerdict({super.key, required this.name, required this.verdict});
+
+  @override
+  Widget build(BuildContext context) {
+    final score = verdict?.score;
+    final feedback = (verdict?.aiFeedback ?? '').trim();
+
+    return Padding(
+      padding: const EdgeInsets.only(left: 0, right: 40, top: 2, bottom: 8),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const AiAvatar(size: 24),
+          const SizedBox(width: 8),
+          Flexible(
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
+              decoration: BoxDecoration(
+                color: AppColors.navy3,
+                border: Border.all(color: AppColors.line),
+                borderRadius: const BorderRadius.only(
+                  topLeft: Radius.circular(4),
+                  topRight: Radius.circular(14),
+                  bottomLeft: Radius.circular(14),
+                  bottomRight: Radius.circular(14),
+                ),
+              ),
+              child: score == null
+                  ? Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const SizedBox(
+                          height: 13,
+                          width: 13,
+                          child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.gold),
+                        ),
+                        const SizedBox(width: 9),
+                        Text(
+                          'Оценка от ИИ',
+                          style: AppFonts.mono(fontSize: 10, weight: FontWeight.w700, color: AppColors.muted),
+                        ),
+                      ],
+                    )
+                  : Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+                              decoration: BoxDecoration(
+                                color: AppColors.gold,
+                                borderRadius: BorderRadius.circular(7),
+                              ),
+                              child: Text(
+                                '$score',
+                                style: AppFonts.ui(fontSize: 12, weight: FontWeight.w800, color: Colors.black),
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                            Text(
+                              name,
+                              style: AppFonts.mono(fontSize: 9, weight: FontWeight.w700, color: AppColors.muted),
+                            ),
+                          ],
+                        ),
+                        if (feedback.isNotEmpty) ...[
+                          const SizedBox(height: 6),
+                          Text(
+                            feedback,
+                            style: const TextStyle(color: AppColors.cream, fontSize: 12, height: 1.4),
+                          ),
+                        ],
+                      ],
+                    ),
+            ),
+          ),
+        ],
+      ),
+    );
   }
 }
 
@@ -553,12 +740,15 @@ class _ScoreHeader extends StatelessWidget {
           Row(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              _ScoreCircle(value: myWins, color: AppColors.gold, name: myName),
+              // Соперник слева, ты справа — как и сообщения в ленте: свои
+              // справа, чужие слева. Раньше было наоборот, и счёт читался
+              // против направления переписки.
+              _ScoreCircle(value: opponentWins, color: AppColors.cyan, name: opponentName),
               const Padding(
                 padding: EdgeInsets.symmetric(horizontal: 16),
                 child: Text('/', style: TextStyle(fontSize: 20, color: AppColors.muted, fontWeight: FontWeight.w700)),
               ),
-              _ScoreCircle(value: opponentWins, color: AppColors.cyan, name: opponentName),
+              _ScoreCircle(value: myWins, color: AppColors.gold, name: myName),
             ],
           ),
           if (secondsLeft != null) ...[
@@ -664,11 +854,7 @@ class _AiBubble extends StatelessWidget {
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const CircleAvatar(
-            radius: 14,
-            backgroundColor: AppColors.gold,
-            child: Icon(Icons.smart_toy, size: 16, color: Colors.black),
-          ),
+          const AiAvatar(),
           const SizedBox(width: 8),
           Flexible(
             child: Container(
