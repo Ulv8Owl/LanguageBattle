@@ -50,6 +50,12 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
         'native_language': _nativeLanguage,
       }).eq('id', userId);
 
+      // У ОБЕИХ строк набор ключей обязан совпадать. PostgREST на групповой
+      // вставке строит один список столбцов из объединения ключей всех
+      // объектов, и то, чего в объекте нет, подставляет явным NULL — а не
+      // значением по умолчанию из схемы. Пропущенный здесь is_active (в
+      // схеме он `not null default false`) уезжал на сервер как null и
+      // ронял регистрацию любого нового игрока на самом первом экране.
       await supabase.from('user_languages').insert([
         {
           'user_id': userId,
@@ -58,6 +64,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
           'cefr_level': 'C2',
           'elo': 1000,
           'league': 'bronze',
+          'is_active': false,
         },
         {
           'user_id': userId,
