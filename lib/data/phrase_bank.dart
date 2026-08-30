@@ -1,14 +1,24 @@
+import 'dart:convert';
 import 'dart:math';
+
+import 'package:flutter/services.dart' show rootBundle;
+
+import '../core/word_packs.dart';
 
 /// Один пункт банка фраз: одна и та же мысль на трёх языках (RU/EN/ES),
 /// параллельный перевод.
 class PhraseEntry {
-  final String topic;
   final String ru;
   final String en;
   final String es;
 
-  const PhraseEntry({required this.topic, required this.ru, required this.en, required this.es});
+  const PhraseEntry({required this.ru, required this.en, required this.es});
+
+  factory PhraseEntry.fromJson(Map<String, dynamic> json) => PhraseEntry(
+        ru: json['ru'] as String,
+        en: json['en'] as String,
+        es: json['es'] as String,
+      );
 
   String forLanguage(String languageCode) {
     switch (languageCode) {
@@ -23,102 +33,78 @@ class PhraseEntry {
   }
 }
 
-/// Банк фраз для раундов боя и Одиночной Игры — присланный владельцем
-/// проекта список (300_independent_phrases_clean.xlsx). ФРАЗЫ НЕ
-/// ГЕНЕРИРУЮТСЯ НЕЙРОСЕТЬЮ: LLM в этом приложении используется только для
-/// оценки грамматики и разбора ошибок (раздел 9), выбор фразы раунда —
-/// чистый рандом по этому фиксированному списку.
+/// Банк фраз для раундов боя и Одиночной Игры — по 100 фраз на каждый из
+/// шести уровней (A1..C2, они же лиги), ассеты
+/// assets/phrases/phrases_a1.json .. phrases_c2.json.
 ///
-/// В исходном файле было 300 строк, но фактически только 10 уникальных
-/// текстов (остальные — повторы с разным заголовком темы), и в 9 из 10
-/// строк английская и испанская колонки содержали непереведённый русский
-/// фрагмент внутри второго предложения (баг генератора исходной таблицы:
-/// "After that, анна usually goes..." вместо "After that, Anna usually
-/// goes..."). Здесь эта ошибка исправлена — подстановка имени/субъекта во
-/// втором предложении заменена на корректный вариант на том же языке,
-/// остальной текст не менялся.
+/// ФРАЗЫ НЕ ГЕНЕРИРУЮТСЯ НЕЙРОСЕТЬЮ В РАНТАЙМЕ: LLM в приложении только
+/// оценивает грамматику и разбирает ошибки (раздел 9), выбор фразы раунда —
+/// случайный выбор по этому фиксированному списку.
+///
+/// Фразы РАЗНЫЕ ДЛЯ РАЗНЫХ ЛИГ: в Медной лиге простое настоящее время и
+/// бытовая лексика, в Лиге Мастеров — сложный синтаксис и идиоматика.
+/// Раньше список был общим и состоял из десяти текстов, у которых второе
+/// предложение вообще совпадало дословно, так что игрок каждый раунд
+/// переводил одну и ту же фразу про свежие продукты.
+///
+/// Индекс фразы СКВОЗНОЙ (0..599): уровень = index ~/ 100. Так он влезает
+/// в один столбец rounds.phrase_index и не требует хранить уровень отдельно.
 class PhraseBank {
   PhraseBank._();
 
+  static const int perLevel = 100;
+
   static final Random _random = Random();
+  static final Map<int, List<PhraseEntry>> _cache = {};
 
-  static const List<PhraseEntry> phrases = [
-    PhraseEntry(
-      topic: 'Анна',
-      ru: 'Анна обожает рисовать красивые пейзажи акварелью и карандашами. После этого Анна обычно идет в магазин за свежими продуктами.',
-      en: 'Anna loves to paint beautiful landscapes with watercolors and pencils. After that, Anna usually goes to the store for fresh groceries.',
-      es: 'Anna adora pintar hermosos paisajes con acuarelas y lápices. Después de eso, Anna suele ir a la tienda a buscar productos frescos.',
-    ),
-    PhraseEntry(
-      topic: 'Сестра',
-      ru: 'Моя сестра любит читать книги в тишине своей уютной комнаты. После этого моя сестра обычно идет в магазин за свежими продуктами.',
-      en: 'My sister likes to read books in the silence of her cozy room. After that, my sister usually goes to the store for fresh groceries.',
-      es: 'A mi hermana le gusta leer libros en el silencio de su habitación acogedora. Después de eso, mi hermana suele ir a la tienda a buscar productos frescos.',
-    ),
-    PhraseEntry(
-      topic: 'Друг',
-      ru: 'Мой друг всегда начинает свой день с энергичной зарядки и душа. После этого мой друг обычно идет в магазин за свежими продуктами.',
-      en: 'My friend always starts his day with an energetic workout and a shower. After that, my friend usually goes to the store for fresh groceries.',
-      es: 'Mi amigo siempre empieza el día con un entrenamiento enérgico y una ducha. Después de eso, mi amigo suele ir a la tienda a buscar productos frescos.',
-    ),
-    PhraseEntry(
-      topic: 'Виктор',
-      ru: 'Виктор интересуется техникой и часто чинит старые компьютеры дома. После этого Виктор обычно идет в магазин за свежими продуктами.',
-      en: 'Victor is interested in technology and often repairs old computers at home. After that, Victor usually goes to the store for fresh groceries.',
-      es: 'Víctor se interesa por la tecnología y a menudo repara ordenadores viejos en casa. Después de eso, Víctor suele ir a la tienda a buscar productos frescos.',
-    ),
-    PhraseEntry(
-      topic: 'Отец',
-      ru: 'Мой отец работает в большой компании и часто ездит на важные встречи. После этого мой отец обычно идет в магазин за свежими продуктами.',
-      en: 'My father works in a large company and often travels to important meetings. After that, my father usually goes to the store for fresh groceries.',
-      es: 'Mi padre trabaja en una gran empresa y a menudo viaja a reuniones importantes. Después de eso, mi padre suele ir a la tienda a buscar productos frescos.',
-    ),
-    PhraseEntry(
-      topic: 'Мама',
-      ru: 'Моя мама каждое утро готовит вкусный завтрак для всей нашей семьи. После этого моя мама обычно идет в магазин за свежими продуктами.',
-      en: 'My mother prepares a delicious breakfast for our whole family every morning. After that, my mother usually goes to the store for fresh groceries.',
-      es: 'Mi madre prepara un desayuno delicioso para toda nuestra familia todas las mañanas. Después de eso, mi madre suele ir a la tienda a buscar productos frescos.',
-    ),
-    PhraseEntry(
-      topic: 'Ольга',
-      ru: 'Ольга работает в красивом цветочном магазине и помогает людям выбирать букеты. После этого Ольга обычно идет в магазин за свежими продуктами.',
-      en: 'Olga works in a beautiful flower shop and helps people choose bouquets. After that, Olga usually goes to the store for fresh groceries.',
-      es: 'Olga trabaja en una hermosa floristería y ayuda a la gente a elegir ramos. Después de eso, Olga suele ir a la tienda a buscar productos frescos.',
-    ),
-    PhraseEntry(
-      topic: 'Андрей',
-      ru: 'Андрей увлекается спортом и каждый вечер ходит на пробежку в парк. После этого Андрей обычно идет в магазин за свежими продуктами.',
-      en: 'Andrey is fond of sports and goes for a run in the park every evening. After that, Andrey usually goes to the store for fresh groceries.',
-      es: 'Andréi es aficionado al deporte y sale a correr al parque todas las tardes. Después de eso, Andréi suele ir a la tienda a buscar productos frescos.',
-    ),
-    PhraseEntry(
-      topic: 'Брат',
-      ru: 'Мой брат обычно просыпается по будильнику и быстро собирается на учебу. После этого мой брат обычно идет в магазин за свежими продуктами.',
-      en: 'My brother usually wakes up to an alarm clock and quickly gets ready for study. After that, my brother usually goes to the store for fresh groceries.',
-      es: 'Mi hermano normalmente se despierta con el despertador y se prepara rápido para estudiar. Después de eso, mi hermano suele ir a la tienda a buscar productos frescos.',
-    ),
-    PhraseEntry(
-      topic: 'От первого лица',
-      ru: 'Каждый день я стараюсь находить время для полезных занятий и отдыха. После этого я обычно иду в магазин за свежими продуктами.',
-      en: 'Every day I try to find time for useful activities and rest. After that, I usually go to the store for fresh groceries.',
-      es: 'Todos los días intento encontrar tiempo para actividades útiles y descanso. Después de eso, suelo ir a la tienda a buscar productos frescos.',
-    ),
-  ];
+  /// Фразы уровня [levelIndex] (0..5). Уровень грузится один раз на процесс.
+  static Future<List<PhraseEntry>> loadLevel(int levelIndex) async {
+    final level = levelIndex.clamp(0, wordLevelSlugs.length - 1);
+    final cached = _cache[level];
+    if (cached != null) return cached;
 
-  static int get count => phrases.length;
-
-  /// Случайный индекс фразы, исключая уже использованные в этом матче/
-  /// сессии (см. rounds.phrase_index) — чтобы за 10 раундов подряд фразы
-  /// не повторялись, пока не исчерпан весь банк. Если банк исчерпан (не
-  /// должно происходить при 10 раундах и 10 фразах, но на случай будущего
-  /// расширения) — снимает исключение и выбирает из полного списка.
-  static int randomIndex({Set<int> exclude = const {}}) {
-    final available = [for (var i = 0; i < phrases.length; i++) i]..removeWhere(exclude.contains);
-    final pool = available.isEmpty ? List.generate(phrases.length, (i) => i) : available;
-    return pool[_random.nextInt(pool.length)];
+    final raw = await rootBundle.loadString('assets/phrases/phrases_${wordLevelSlugs[level]}.json');
+    final entries = (jsonDecode(raw) as List)
+        .map((e) => PhraseEntry.fromJson(Map<String, dynamic>.from(e as Map)))
+        .toList(growable: false);
+    _cache[level] = entries;
+    return entries;
   }
 
-  static PhraseEntry entry(int index) => phrases[index % phrases.length];
+  /// Загрузить сразу все уровни — нужно там, где в ленте встречаются фразы
+  /// разных уровней (сыгранные раунды соперника в Дуэли).
+  static Future<void> loadAll() async {
+    for (var level = 0; level < wordLevelSlugs.length; level++) {
+      await loadLevel(level);
+    }
+  }
 
-  static String textFor(int index, String languageCode) => entry(index).forLanguage(languageCode);
+  /// Сквозной индекс случайной фразы уровня, кроме уже сыгранных.
+  ///
+  /// Если исключено всё — начинаем круг заново: лучше повтор, чем раунд без
+  /// фразы. Ста фраз хватает на десять матчей по десять раундов, так что на
+  /// практике это не срабатывает.
+  static int randomIndexForLevel(int levelIndex, {Set<int> exclude = const {}}) {
+    final level = levelIndex.clamp(0, wordLevelSlugs.length - 1);
+    final base = level * perLevel;
+    final free = [
+      for (var i = 0; i < perLevel; i++)
+        if (!exclude.contains(base + i)) base + i,
+    ];
+    if (free.isEmpty) return base + _random.nextInt(perLevel);
+    return free[_random.nextInt(free.length)];
+  }
+
+  /// Фраза по сквозному индексу. Уровень должен быть уже загружен —
+  /// иначе вернётся пустая фраза, а не исключение посреди раунда.
+  static PhraseEntry? entry(int globalIndex) {
+    final level = globalIndex ~/ perLevel;
+    final within = globalIndex % perLevel;
+    final entries = _cache[level];
+    if (entries == null || within >= entries.length) return null;
+    return entries[within];
+  }
+
+  static String textFor(int globalIndex, String languageCode) =>
+      entry(globalIndex)?.forLanguage(languageCode) ?? '';
 }

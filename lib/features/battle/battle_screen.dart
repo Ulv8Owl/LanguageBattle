@@ -6,6 +6,7 @@ import 'package:go_router/go_router.dart';
 import '../../core/languages.dart';
 import '../../core/stream_rows.dart';
 import '../../core/supabase_client.dart';
+import '../../core/word_packs.dart';
 import '../../core/theme.dart';
 import '../../data/phrase_bank.dart';
 import '../../data/voice_submission.dart';
@@ -61,6 +62,9 @@ class _BattleScreenState extends State<BattleScreen> {
   /// на изучаемом: задание в том, чтобы ПЕРЕВЕСТИ фразу вслух, а не
   /// прочитать готовый текст.
   String _myNativeLanguage = 'ru';
+
+  /// Уровень сложности фраз — лига игрока по изучаемому языку.
+  int _phraseLevel = 0;
   List<RoundData> _rounds = [];
   List<VoiceRecordingData> _recordings = [];
   List<RoundScoreData> _scores = [];
@@ -120,6 +124,20 @@ class _BattleScreenState extends State<BattleScreen> {
           .maybeSingle();
       _myName = (me?['username'] as String?) ?? 'Ты';
       _myNativeLanguage = (me?['native_language'] as String?) ?? 'ru';
+
+      final learning = await supabase
+          .from('user_languages')
+          .select('elo')
+          .eq('user_id', _myId)
+          .eq('role', 'learning')
+          .eq('is_active', true)
+          .limit(1)
+          .maybeSingle();
+      _phraseLevel = leagueIndexForElo((learning?['elo'] as num?)?.toInt() ?? 1000);
+      // В ленте встречаются фразы уже сыгранных раундов, а их уровень мог
+      // отличаться (лига игрока меняется прямо по ходу серии матчей) —
+      // поэтому грузим все уровни, а не только свой.
+      await PhraseBank.loadAll();
     } catch (e) {
       _actionError = 'Не удалось загрузить матч: $e';
     }
@@ -268,7 +286,10 @@ class _BattleScreenState extends State<BattleScreen> {
     // Рандом по фиксированному банку фраз (не генерация LLM — см.
     // lib/data/phrase_bank.dart), без повторов уже сыгранных в этом матче.
     final usedIndices = _rounds.map((r) => r.phraseIndex).whereType<int>().toSet();
-    final phraseIndex = PhraseBank.randomIndex(exclude: usedIndices);
+    // Фраза по лиге игрока: в Медной лиге простое настоящее время, в Лиге
+    // Мастеров — сложный синтаксис. Уровень берём свой: соперник в этом
+    // режиме всегда из той же лиги, иначе матча бы не было.
+    final phraseIndex = PhraseBank.randomIndexForLevel(_phraseLevel, exclude: usedIndices);
     final phrase = m.isDuel
         ? '${PhraseBank.textFor(phraseIndex, m.languageForSlot(m.playerAId!, 'target'))} / '
             '${PhraseBank.textFor(phraseIndex, m.languageForSlot(m.playerBId!, 'target'))}'

@@ -7,6 +7,7 @@ import '../../core/debug_flags.dart';
 import '../../core/game_access.dart';
 import '../../core/languages.dart';
 import '../../core/supabase_client.dart';
+import '../../core/word_packs.dart';
 import '../../core/theme.dart';
 import '../../data/phrase_bank.dart';
 import '../../data/voice_submission.dart';
@@ -98,7 +99,9 @@ class _TrainingScreenState extends State<TrainingScreen> {
   /// соло идут строго локально (одна сессия = один клиент), поэтому, в
   /// отличие от PvP, не нужно синхронизировать "уже использованные индексы"
   /// через БД: достаточно перетасовать банк один раз и идти по порядку.
-  late final List<int> _phraseOrder = List.generate(PhraseBank.count, (i) => i)..shuffle();
+  /// Порядок фраз этой сессии — сквозные индексы уровня игрока. Заполняется
+  /// после загрузки банка: до неё уровень ещё неизвестен.
+  List<int> _phraseOrder = const [];
 
   StreamSubscription? _jobSub;
   StreamSubscription? _roundSub;
@@ -123,13 +126,19 @@ class _TrainingScreenState extends State<TrainingScreen> {
     try {
       final learning = await supabase
           .from('user_languages')
-          .select('language_code')
+          .select('language_code, elo')
           .eq('user_id', _myId)
           .eq('role', 'learning')
           .eq('is_active', true)
           .limit(1)
           .maybeSingle();
       _targetLanguage = (learning?['language_code'] as String?) ?? 'en';
+      // Сложность фраз — по лиге игрока в изучаемом языке.
+      final level = leagueIndexForElo((learning?['elo'] as num?)?.toInt() ?? 1000);
+      await PhraseBank.loadLevel(level);
+      _phraseOrder = [
+        for (var i = 0; i < PhraseBank.perLevel; i++) level * PhraseBank.perLevel + i,
+      ]..shuffle();
 
       final me = await supabase
           .from('users')
