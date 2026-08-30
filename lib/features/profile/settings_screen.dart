@@ -6,6 +6,7 @@ import 'package:flutter/services.dart';
 import '../../core/debug_flags.dart';
 import '../../core/languages.dart';
 import '../../core/supabase_client.dart';
+import '../../data/training_session.dart';
 import '../../core/theme.dart';
 import '../../widgets/chrolingo_widgets.dart';
 
@@ -32,6 +33,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
   String? _nativeLanguage;
   bool _savingLanguage = false;
 
+  /// Сколько карточек выдаётся за одну тренировку.
+  int _deckSize = defaultTrainingDeckSize;
+  bool _savingDeckSize = false;
+
   @override
   void initState() {
     super.initState();
@@ -42,11 +47,15 @@ class _SettingsScreenState extends State<SettingsScreen> {
     try {
       final row = await supabase
           .from('users')
-          .select('native_language')
+          .select('native_language, training_deck_size')
           .eq('id', currentUserId)
           .maybeSingle();
       if (!mounted) return;
-      setState(() => _nativeLanguage = row?['native_language'] as String?);
+      setState(() {
+        _nativeLanguage = row?['native_language'] as String?;
+        final size = (row?['training_deck_size'] as num?)?.toInt();
+        if (size != null && trainingDeckSizes.contains(size)) _deckSize = size;
+      });
     } catch (_) {
       // Не удалось — покажем прочерк, менять язык это не мешает.
     }
@@ -143,6 +152,60 @@ class _SettingsScreenState extends State<SettingsScreen> {
     );
   }
 
+  Future<void> _pickDeckSize() async {
+    final picked = await showModalBottomSheet<int>(
+      context: context,
+      backgroundColor: AppColors.navy2,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const SizedBox(height: 16),
+            Text('Карточек за тренировку',
+                style: AppFonts.ui(fontSize: 15, weight: FontWeight.w800, color: AppColors.cream)),
+            const SizedBox(height: 4),
+            const Text(
+              'В колоде 100 карточек. За один заход выдаётся столько,\nследующий заход продолжит с того же места.',
+              textAlign: TextAlign.center,
+              style: TextStyle(color: AppColors.muted, fontSize: 11, height: 1.4),
+            ),
+            const SizedBox(height: 8),
+            for (final size in trainingDeckSizes)
+              ListTile(
+                title: Text('$size'),
+                trailing: size == _deckSize ? const Icon(Icons.check, color: AppColors.gold) : null,
+                onTap: () => Navigator.of(ctx).pop(size),
+              ),
+            const SizedBox(height: 12),
+          ],
+        ),
+      ),
+    );
+    if (picked == null || picked == _deckSize || !mounted) return;
+
+    setState(() => _savingDeckSize = true);
+    try {
+      await supabase
+          .from('users')
+          .update({'training_deck_size': picked})
+          .eq('id', currentUserId);
+      if (!mounted) return;
+      setState(() {
+        _deckSize = picked;
+        _savingDeckSize = false;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _savingDeckSize = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Не удалось сохранить: $e')),
+      );
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -180,6 +243,20 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     onTap: _savingLanguage ? null : _pickNativeLanguage,
                   ),
                 ],
+              ),
+            ),
+            const SizedBox(height: 18),
+            Text('ТРЕНИРОВКА', style: AppFonts.mono(fontSize: 9, weight: FontWeight.w700, color: AppColors.gold)),
+            const SizedBox(height: 8),
+            ChPanel(
+              padding: EdgeInsets.zero,
+              child: _Row(
+                icon: Icons.style,
+                title: 'Карточек за тренировку',
+                trailing: _savingDeckSize
+                    ? const SizedBox(height: 14, width: 14, child: CircularProgressIndicator(strokeWidth: 2))
+                    : Text('$_deckSize', style: AppFonts.mono(fontSize: 11, color: AppColors.muted)),
+                onTap: _savingDeckSize ? null : _pickDeckSize,
               ),
             ),
             const SizedBox(height: 18),

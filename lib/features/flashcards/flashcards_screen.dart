@@ -1,3 +1,5 @@
+import 'dart:math';
+
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
@@ -6,6 +8,7 @@ import '../../core/supabase_client.dart';
 import '../../core/theme.dart';
 import '../../core/word_packs.dart';
 import '../../data/flashcard_bank.dart';
+import '../../data/training_session.dart';
 import '../../widgets/chrolingo_widgets.dart';
 
 /// «Тренировка» — карточки со словами на языковой паре из профиля.
@@ -41,8 +44,18 @@ class _FlashcardsScreenState extends State<FlashcardsScreen> {
   List<FlashcardEntry> _levelWords = [];
   List<FlashcardEntry> _packWords = [];
 
-  late List<int> _order;
-  int _index = 0;
+  /// Текущая тренировка: очередь карточек и правила их возврата.
+  late TrainingSession _session;
+
+  /// С какой карточки колоды начата эта тренировка. Счётчик в шапке
+  /// показывает позицию в КОЛОДЕ (21 / 100), а не в тренировке (1 / 20):
+  /// игрок проходит сотню за несколько заходов, и важно, сколько её
+  /// осталось.
+  int _deckOffset = 0;
+
+  /// Сколько карточек выдаётся за тренировку — настройка игрока (10..50).
+  int _deckSize = defaultTrainingDeckSize;
+
   bool _flipped = false;
   int _known = 0;
   int _unknown = 0;
@@ -63,7 +76,11 @@ class _FlashcardsScreenState extends State<FlashcardsScreen> {
     setState(() => _loading = true);
     try {
       final uid = currentUserId;
-      final profile = await supabase.from('users').select('native_language').eq('id', uid).maybeSingle();
+      final profile = await supabase
+          .from('users')
+          .select('native_language, training_deck_size')
+          .eq('id', uid)
+          .maybeSingle();
       final learning = await supabase
           .from('user_languages')
           .select('language_code, elo')
@@ -106,6 +123,8 @@ class _FlashcardsScreenState extends State<FlashcardsScreen> {
 
       final levelWords = await FlashcardBank.loadLevel(level);
       final packWords = FlashcardBank.packSlice(levelWords, pack);
+      final deckSize = _clampDeckSize((profile?['training_deck_size'] as num?)?.toInt());
+      final offset = await _fetchProgress(uid, level, pack);
 
       if (!mounted) return;
       setState(() {
@@ -116,7 +135,9 @@ class _FlashcardsScreenState extends State<FlashcardsScreen> {
         _catalog = catalog;
         _levelWords = levelWords;
         _packWords = packWords;
-        _order = List.generate(packWords.length, (i) => i)..shuffle();
+        _deckSize = deckSize;
+        _deckOffset = offset;
+        _session = _newSession(packWords.length, offset, deckSize);
         _loading = false;
       });
     } catch (e) {
@@ -126,6 +147,39 @@ class _FlashcardsScreenState extends State<FlashcardsScreen> {
         _error = 'Не удалось загрузить карточки: $e';
       });
     }
+  }
+
+  /// Сколько карточек колоды игрок уже прошёл.
+  Future<int> _fetchProgress(String uid, int level, int pack) async {
+    try {
+      final row = await supabase
+          .from('user_pack_progress')
+          .select('served_count')
+          .eq('user_id', uid)
+          .eq('level_index', level)
+          .eq('pack_index', pack)
+          .maybeSingle();
+      return (row?['served_count'] as num?)?.toInt() ?? 0;
+    } catch (_) {
+      // Прогресс не прочитался — начнём колоду сначала. Хуже, чем точное
+      // место, но лучше, чем пустой экран.
+      return 0;
+    }
+  }
+
+  /// Очередной кусок колоды: [size] карточек начиная с [offset]. Ближе к
+  /// концу сотни кусок получается короче — добивать его началом колоды
+  /// нельзя, иначе одни и те же слова попадутся дважды за заход.
+  TrainingSession _newSession(int deckLength, int offset, int size) {
+    final end = min(deckLength, offset + size);
+    final indices = [for (var i = offset; i < end; i++) i]..shuffle();
+    return TrainingSession(indices);
+  }
+
+  int _clampDeckSize(int? value) {
+    if (value == null) return defaultTrainingDeckSize;
+    final steps = (value / 10).round().clamp(1, 5);
+    return steps * 10;
   }
 
   void _switchPack(WordPackInfo target) {
@@ -142,16 +196,20 @@ class _FlashcardsScreenState extends State<FlashcardsScreen> {
       ));
       return;
     }
-    setState(() {
-      _packIndex = target.packIndex;
-      _packWords = FlashcardBank.packSlice(_levelWords, target.packIndex);
-      _order = List.generate(_packWords.length, (i) => i)..shuffle();
-      _index = 0;
-      _flipped = false;
-      _known = 0;
-      _unknown = 0;
-      _coinsEarned = 0;
-      _done = false;
+    _packWords = FlashcardBank.packSlice(_levelWords, target.packIndex);
+    // Прогресс у каждой колоды свой — переключились, читаем её место.
+    _fetchProgress(currentUserId, _levelIndex, target.packIndex).then((offset) {
+      if (!mounted) return;
+      setState(() {
+        _packIndex = target.packIndex;
+        _deckOffset = offset;
+        _session = _newSession(_packWords.length, offset, _deckSize);
+        _flipped = false;
+        _known = 0;
+        _unknown = 0;
+        _coinsEarned = 0;
+        _done = false;
+      });
     });
   }
 
@@ -214,13 +272,25 @@ class _FlashcardsScreenState extends State<FlashcardsScreen> {
   }
 
   void _next(bool known) {
+    final card = _session.current;
+    if (card == null) return;
+
     if (known) {
-      final globalWordIndex = _packIndex * wordsPerPack + _order[_index];
+      final globalWordIndex = _packIndex * wordsPerPack + card;
       WordPackCatalog.markLearned(_levelIndex, globalWordIndex).then((coins) {
         if (!mounted || coins <= 0) return;
         setState(() => _coinsEarned += coins);
       });
     }
+
+    // Подсмотренный ответ — не то же самое, что знание: такая карточка
+    // возвращается ещё раз в конце тренировки (см. TrainingSession).
+    final outcome = !known
+        ? CardOutcome.unknown
+        : _flipped
+            ? CardOutcome.knownAfterFlip
+            : CardOutcome.known;
+
     setState(() {
       if (known) {
         _known++;
@@ -228,18 +298,34 @@ class _FlashcardsScreenState extends State<FlashcardsScreen> {
         _unknown++;
       }
       _flipped = false;
-      if (_index >= _order.length - 1) {
-        _done = true;
-      } else {
-        _index++;
-      }
+      _session.answer(outcome);
+      _done = _session.isDone;
     });
+
+    if (_session.isDone) _saveProgress();
   }
 
+  /// Сдвинуть место в колоде на пройденные карточки. Сотня закрыта —
+  /// сервер сам обнулит счётчик, и колода начнётся заново.
+  Future<void> _saveProgress() async {
+    try {
+      final next = await supabase.rpc('advance_pack_progress', params: {
+        'p_level_index': _levelIndex,
+        'p_pack_index': _packIndex,
+        'p_completed': _session.total,
+      });
+      if (!mounted) return;
+      setState(() => _deckOffset = (next as num?)?.toInt() ?? _deckOffset);
+    } catch (e) {
+      debugPrint('advance_pack_progress failed: $e');
+    }
+  }
+
+  /// Ещё одна тренировка по той же колоде — со СЛЕДУЮЩИХ карточек, а не с
+  /// тех же самых: прогресс уже сдвинут, повторять пройденное незачем.
   void _restart() {
     setState(() {
-      _order = List.generate(_packWords.length, (i) => i)..shuffle();
-      _index = 0;
+      _session = _newSession(_packWords.length, _deckOffset, _deckSize);
       _flipped = false;
       _known = 0;
       _unknown = 0;
@@ -260,7 +346,7 @@ class _FlashcardsScreenState extends State<FlashcardsScreen> {
                 padding: const EdgeInsets.only(right: 10),
                 child: Center(
                   child: Text(
-                    '${_index + 1} / ${_order.length}',
+                    '${_deckOffset + _session.completed + 1} / ${_packWords.length}',
                     style: AppFonts.mono(fontSize: 11, weight: FontWeight.w700, color: AppColors.gold),
                   ),
                 ),
@@ -363,7 +449,7 @@ class _FlashcardsScreenState extends State<FlashcardsScreen> {
       );
     }
 
-    final entry = _packWords[_order[_index]];
+    final entry = _packWords[_session.current!];
     final front = entry.forLanguage(_targetLanguage);
     final back = entry.forLanguage(_nativeLanguage);
 
@@ -374,7 +460,7 @@ class _FlashcardsScreenState extends State<FlashcardsScreen> {
           Expanded(
             child: Center(
               child: _FlipCard(
-                key: ValueKey('$_levelIndex-$_packIndex-$_index'),
+                key: ValueKey('$_levelIndex-$_packIndex-${_session.current}-${_session.completed}'),
                 front: front,
                 back: back,
                 flipped: _flipped,
