@@ -26,7 +26,8 @@ class VoiceTake {
 
 enum _MicState { idle, recording, ready }
 
-/// Короче этого удержание кнопки считается промахом, а не ответом.
+/// Короче этого запись считается промахом по кнопке, а не ответом:
+/// распознаватель вернёт пустоту, и игрок получит балл 1 за то, чего не делал.
 const _minRecordingMs = 400;
 
 /// Кнопка микрофона с тремя состояниями (раздел 5.2):
@@ -62,6 +63,13 @@ class VoiceRecorderDockState extends State<VoiceRecorderDock> with SingleTickerP
   Stopwatch? _stopwatch;
   bool _uploading = false;
 
+  /// Запись начата удержанием кнопки (а не одиночным нажатием).
+  ///
+  /// Различать обязательно: удержание заканчивается отпусканием, нажатие —
+  /// вторым нажатием. Если перепутать, запись, начатая тапом, оборвётся на
+  /// первом же случайном длинном касании.
+  bool _startedByHold = false;
+
   late final AnimationController _pulseController = AnimationController(
     vsync: this,
     duration: const Duration(milliseconds: 700),
@@ -77,8 +85,9 @@ class VoiceRecorderDockState extends State<VoiceRecorderDock> with SingleTickerP
     super.dispose();
   }
 
-  Future<void> _startRecording() async {
+  Future<void> _startRecording({required bool byHold}) async {
     if (_micState != _MicState.idle || _uploading) return;
+    _startedByHold = byHold;
     final hasPermission = await _recorder.hasPermission();
     if (!hasPermission) {
       if (mounted) {
@@ -121,7 +130,7 @@ class VoiceRecorderDockState extends State<VoiceRecorderDock> with SingleTickerP
     if ((_stopwatch?.elapsedMilliseconds ?? 0) < _minRecordingMs) {
       cancelPending();
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Слишком коротко — удерживай кнопку, пока говоришь')),
+        const SnackBar(content: Text('Слишком коротко — скажи фразу и останови запись')),
       );
       return;
     }
@@ -143,6 +152,7 @@ class VoiceRecorderDockState extends State<VoiceRecorderDock> with SingleTickerP
       _micState = _MicState.idle;
       _pendingFilePath = null;
       _stopwatch = null;
+      _startedByHold = false;
     });
   }
 
@@ -160,6 +170,7 @@ class VoiceRecorderDockState extends State<VoiceRecorderDock> with SingleTickerP
         _micState = _MicState.idle;
         _pendingFilePath = null;
         _stopwatch = null;
+        _startedByHold = false;
       });
     } finally {
       if (mounted) setState(() => _uploading = false);
@@ -168,22 +179,18 @@ class VoiceRecorderDockState extends State<VoiceRecorderDock> with SingleTickerP
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-      decoration: const BoxDecoration(
-        color: AppColors.navy2,
-        border: Border(top: BorderSide(color: AppColors.line)),
-      ),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          if (_micState == _MicState.ready) ...[
-            _PendingPreview(path: _pendingFilePath),
-            const SizedBox(height: 10),
-          ],
-          _buildButton(),
+    // Ни фона, ни рамки, ни полосы во всю ширину: док лежит поверх ленты и
+    // занимает ровно столько места, сколько занимает кнопка. Слева и справа
+    // от неё видна и прокручивается та же переписка, что и выше.
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        if (_micState == _MicState.ready) ...[
+          _PendingPreview(path: _pendingFilePath),
+          const SizedBox(height: 10),
         ],
-      ),
+        _buildButton(),
+      ],
     );
   }
 
@@ -231,12 +238,38 @@ class VoiceRecorderDockState extends State<VoiceRecorderDock> with SingleTickerP
         break;
     }
 
+    // Кнопка понимает оба способа, игрок выбирает удобный:
+    //   удержание — запись идёт, пока кнопка нажата, отпустил и готово;
+    //   нажатие   — первое начинает запись, второе останавливает.
+    //
+    // Раньше был только длинный жест, и короткое нажатие не делало НИЧЕГО:
+    // порог длинного нажатия во Flutter около 500 мс, а onTap вёл только к
+    // отправке. Снаружи это выглядело как заедающая кнопка — нажал, а она
+    // будто не работает.
     return GestureDetector(
-      onLongPressStart: disabled ? null : (_) => _startRecording(),
-      onLongPressEnd: disabled ? null : (_) => _stopRecording(),
-      onTap: (_micState == _MicState.ready && !_uploading) ? _send : null,
+      onTap: disabled ? null : _onTap,
+      onLongPressStart: disabled ? null : (_) => _startRecording(byHold: true),
+      onLongPressEnd: disabled ? null : (_) => _onHoldReleased(),
       child: circle,
     );
+  }
+
+  void _onTap() {
+    if (_uploading) return;
+    switch (_micState) {
+      case _MicState.idle:
+        _startRecording(byHold: false);
+      case _MicState.recording:
+        // Запись, начатая удержанием, останавливается отпусканием — сюда
+        // такое нажатие просто не дойдёт.
+        _stopRecording();
+      case _MicState.ready:
+        _send();
+    }
+  }
+
+  void _onHoldReleased() {
+    if (_micState == _MicState.recording && _startedByHold) _stopRecording();
   }
 }
 

@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../core/languages.dart';
+import '../../core/stream_rows.dart';
 import '../../core/supabase_client.dart';
 import '../../core/theme.dart';
 import '../../data/phrase_bank.dart';
@@ -68,9 +69,13 @@ class _BattleScreenState extends State<BattleScreen> {
   StreamSubscription? _recordingsSub;
   StreamSubscription? _scoresSub;
 
-  /// Сколько секунд даётся игроку на то, чтобы НАЧАТЬ отвечать в раунде
-  /// (не на длину самой записи) — раздел 7 спеки называет диапазон 30-45с.
-  static const _roundTimeoutSeconds = 40;
+  /// Сколько секунд даётся игроку на ответ в раунде (не на длину самой
+  /// записи). Спека называет 30-45 с, но пока оба игрока — это один человек
+  /// с двумя телефонами, и записать надо в оба, так что на время отладки
+  /// две минуты. Значение обязано совпадать с умолчанием
+  /// auto_skip_stale_rounds (миграция 0020), иначе сервер спишет раунд
+  /// раньше, чем на экране кончится отсчёт.
+  static const _roundTimeoutSeconds = 120;
 
   /// Раз в секунду будит build(), чтобы обратный отсчёт в шапке был живым.
   Timer? _tickTimer;
@@ -88,7 +93,10 @@ class _BattleScreenState extends State<BattleScreen> {
       if (mounted) setState(() {});
     });
     _sweepTimer = Timer.periodic(const Duration(seconds: 5), (_) {
-      supabase.rpc('auto_skip_stale_rounds').catchError((_) => null);
+      supabase.rpc(
+        'auto_skip_stale_rounds',
+        params: {'p_timeout_seconds': _roundTimeoutSeconds},
+      ).catchError((_) => null);
     });
   }
 
@@ -129,14 +137,20 @@ class _BattleScreenState extends State<BattleScreen> {
       }
     });
 
+    // Без .order(): у стрима supabase_flutter параметр ascending по
+    // умолчанию FALSE, поэтому `.order('round_number')` давал раунды в
+    // обратном порядке — новые сообщения уезжали вверх ленты. Порядок и
+    // защиту от повторов держим сами: локальный кэш стрима успевал отдать
+    // одну и ту же строку дважды, и раунд рисовался в ленте два раза.
     _roundsSub = supabase
         .from('rounds')
         .stream(primaryKey: ['id'])
         .eq('match_id', widget.matchId)
-        .order('round_number')
         .listen((rows) {
       if (!mounted) return;
-      setState(() => _rounds = rows.map(RoundData.fromRow).toList());
+      final rounds = dedupeById(rows).map(RoundData.fromRow).toList()
+        ..sort((a, b) => a.roundNumber.compareTo(b.roundNumber));
+      setState(() => _rounds = rounds);
       _scrollToBottomSoon();
       _maybeAdvance();
     });
@@ -149,7 +163,10 @@ class _BattleScreenState extends State<BattleScreen> {
     _recordingsSub = supabase.from('voice_recordings').stream(primaryKey: ['id']).listen((rows) {
       if (!mounted) return;
       setState(() {
-        _recordings = rows.where((r) => r['round_id'] != null).map(VoiceRecordingData.fromRow).toList();
+        _recordings = dedupeById(rows)
+            .where((r) => r['round_id'] != null)
+            .map(VoiceRecordingData.fromRow)
+            .toList();
       });
       _scrollToBottomSoon();
       _maybeAdvance();
@@ -157,7 +174,7 @@ class _BattleScreenState extends State<BattleScreen> {
 
     _scoresSub = supabase.from('round_scores').stream(primaryKey: ['id']).listen((rows) {
       if (!mounted) return;
-      setState(() => _scores = rows.map(RoundScoreData.fromRow).toList());
+      setState(() => _scores = dedupeById(rows).map(RoundScoreData.fromRow).toList());
       _maybeAdvance();
     });
   }
@@ -419,19 +436,36 @@ class _BattleScreenState extends State<BattleScreen> {
                 opponentName: _opponentName,
                 secondsLeft: _roundSecondsLeft,
               ),
+              // Кнопка микрофона лежит ПОВЕРХ ленты, а не отдельной полосой
+              // под ней: полоса во всю ширину отрезала кусок переписки без
+              // всякой пользы. Нижний отступ списка оставляет место, чтобы
+              // последнее сообщение не пряталось под кнопкой, а слева и
+              // справа от неё лента видна и прокручивается как обычно.
               Expanded(
-                child: _rounds.isEmpty
-                    ? const Center(child: CircularProgressIndicator())
-                    : ListView(
+                child: Stack(
+                  children: [
+                    if (_rounds.isEmpty)
+                      const Center(child: CircularProgressIndicator())
+                    else
+                      ListView(
                         controller: _feedController,
-                        padding: const EdgeInsets.fromLTRB(12, 4, 12, 12),
+                        padding: const EdgeInsets.fromLTRB(12, 4, 12, 108),
                         children: _buildFeed(m, opponentId),
                       ),
-              ),
-              VoiceRecorderDock(
-                key: _dockKey,
-                enabled: canRecord,
-                onSend: _sendTake,
+                    Positioned(
+                      left: 0,
+                      right: 0,
+                      bottom: 14,
+                      child: Center(
+                        child: VoiceRecorderDock(
+                          key: _dockKey,
+                          enabled: canRecord,
+                          onSend: _sendTake,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
               ),
             ],
           ),

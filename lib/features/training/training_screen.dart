@@ -544,6 +544,10 @@ class _TrainingScreenState extends State<TrainingScreen> {
       return const Center(child: CircularProgressIndicator());
     }
 
+    // Микрофон и кнопки перехода к следующему раунду взаимоисключают друг
+    // друга: на итогах раунда записывать уже нечего.
+    final showsMic = _stage != _Stage.sessionDone && _stage != _Stage.roundDone;
+
     return GestureDetector(
       behavior: HitTestBehavior.translucent,
       onTap: () {
@@ -552,11 +556,32 @@ class _TrainingScreenState extends State<TrainingScreen> {
       },
       child: Column(
         children: [
+          // Кнопка микрофона лежит поверх ленты и занимает только своё
+          // место — слева и справа от неё переписка видна и прокручивается.
+          // Кнопки «Следующий раунд» и «Завершить» остаются полосой во всю
+          // ширину: это осознанное действие, а не запись на ходу.
           Expanded(
-            child: ListView(
-              controller: _feedController,
-              padding: const EdgeInsets.fromLTRB(12, 8, 12, 12),
-              children: _buildFeed(),
+            child: Stack(
+              children: [
+                ListView(
+                  controller: _feedController,
+                  padding: EdgeInsets.fromLTRB(12, 8, 12, showsMic ? 108 : 12),
+                  children: _buildFeed(),
+                ),
+                if (showsMic)
+                  Positioned(
+                    left: 0,
+                    right: 0,
+                    bottom: 14,
+                    child: Center(
+                      child: VoiceRecorderDock(
+                        key: _dockKey,
+                        enabled: _stage == _Stage.awaitingFirst || _stage == _Stage.awaitingSecond,
+                        onSend: _sendTake,
+                      ),
+                    ),
+                  ),
+              ],
             ),
           ),
           if (_stage == _Stage.sessionDone)
@@ -580,12 +605,6 @@ class _TrainingScreenState extends State<TrainingScreen> {
                   child: Text(_roundNumber >= _roundsPerSession ? 'Итоги' : 'Следующий раунд'),
                 ),
               ),
-            )
-          else
-            VoiceRecorderDock(
-              key: _dockKey,
-              enabled: _stage == _Stage.awaitingFirst || _stage == _Stage.awaitingSecond,
-              onSend: _sendTake,
             ),
         ],
       ),
