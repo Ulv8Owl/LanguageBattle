@@ -788,12 +788,12 @@ class _AiSay extends StatelessWidget {
                 children: [
                   Text('Раунд $roundNumber из $total', style: AppFonts.mono(fontSize: 9, color: AppColors.muted)),
                   const SizedBox(height: 5),
-                  Text(text, style: const TextStyle(color: AppColors.cream, height: 1.4)),
-                  const SizedBox(height: 6),
                   Text(
-                    speakInLabel(targetLanguage),
-                    style: AppFonts.mono(fontSize: 9, weight: FontWeight.w700, color: AppColors.gold),
+                    translateToLabel(targetLanguage),
+                    style: AppFonts.mono(fontSize: 10, weight: FontWeight.w700, color: AppColors.gold),
                   ),
+                  const SizedBox(height: 5),
+                  Text(text, style: const TextStyle(color: AppColors.cream, height: 1.4)),
                 ],
               ),
             ),

@@ -582,7 +582,12 @@ class _BattleScreenState extends State<BattleScreen> {
       items.add(_AiBubble(
         roundNumber: round.roundNumber,
         text: promptText,
-        targetLanguage: isCurrent && slot != null ? m.languageForSlot(_myId, slot) : null,
+        // Подпись «Переведи на …» — только когда следующим идёт перевод. В
+        // Дуэли вторым слотом игрок читает ту же фразу на родном языке, и
+        // «переведи на русский» там было бы прямо неверной инструкцией: об
+        // этом шаге говорит отдельная реплика хамелеона.
+        targetLanguage:
+            isCurrent && slot == 'target' ? m.languageForSlot(_myId, slot!) : null,
       ));
       // Голосовые раунда — в порядке отправки, а не «сначала мои, потом
       // чужие»: лента изображает переписку, и кто ответил первым, тот и
@@ -602,6 +607,36 @@ class _BattleScreenState extends State<BattleScreen> {
           alignRight: isMine,
         ));
 
+        // В Дуэли за переводом идёт та же фраза на родном языке. Пока она
+        // не записана, разбор перевода не показываем: он бы отвлекал ровно
+        // в тот момент, когда надо говорить дальше. Оценка при этом уже
+        // считается на сервере, так что ждать её потом почти не придётся.
+        if (m.isDuel) {
+          final nativeDone = _recordingFor(round.id, rec.userId, 'native') != null;
+          if (rec.recordingSlot == 'target' && !nativeDone) {
+            if (isMine) {
+              items.add(const _AiNote(
+                key: ValueKey('await-native'),
+                text: 'Прочитай ещё раз текст, но уже на своём языке',
+              ));
+            }
+            continue;
+          }
+          if (rec.recordingSlot == 'native') {
+            // Родное голосовое соперника — это и есть образец носителя на
+            // ТВОЁМ изучаемом языке: в Дуэли родной язык одного всегда
+            // изучаемый для другого. Под своим таким же голосовым подпись
+            // не нужна — себя носителем слушать незачем.
+            if (!isMine) {
+              items.add(_AiNote(
+                key: ValueKey('${rec.id}-native-note'),
+                text: 'Запись голоса носителя ↑',
+              ));
+            }
+            continue;
+          }
+        }
+
         // Балл ставится только за голосовое на изучаемом языке — родное
         // в Дуэли соперник просто слушает (раздел 2.4).
         if (rec.recordingSlot != 'target') continue;
@@ -614,6 +649,50 @@ class _BattleScreenState extends State<BattleScreen> {
       }
     }
     return items;
+  }
+}
+
+/// Короткая реплика хамелеона в ленте — подсказка, что делать дальше.
+///
+/// Живёт только на экране и не пишется в базу: обе такие подсказки
+/// адресованы одному игроку («прочитай теперь на своём языке» — тому, кто
+/// записывает; «запись голоса носителя» — тому, кто слушает), а сообщение
+/// в общей ленте увидели бы оба.
+class _AiNote extends StatelessWidget {
+  final String text;
+
+  const _AiNote({super.key, required this.text});
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(right: 40, top: feedGap / 2, bottom: feedGap / 2),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const AiAvatar(),
+          const SizedBox(width: 8),
+          Flexible(
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+              decoration: const BoxDecoration(
+                color: AppColors.navy3,
+                borderRadius: BorderRadius.only(
+                  topLeft: Radius.circular(4),
+                  topRight: Radius.circular(14),
+                  bottomLeft: Radius.circular(14),
+                  bottomRight: Radius.circular(14),
+                ),
+              ),
+              child: Text(
+                text,
+                style: const TextStyle(color: AppColors.cream, fontSize: 13, height: 1.4),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
   }
 }
 
@@ -746,54 +825,58 @@ class _ScoreHeader extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // Шапка занимала четверть экрана боя: отдельная строка под таймер
+    // добавляла к её высоте столько же, сколько имена под аватарками.
+    // Таймер переехал под счёт — в ту же строку, что и аватарки, — и
+    // высота стала определяться только ими.
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 16),
-      child: Column(
+      padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 16),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.center,
         children: [
-          Row(
-            children: [
-              // Соперник слева, ты справа — как и сообщения в ленте.
-              Expanded(
-                child: _PlayerSide(
-                  name: opponentName,
-                  userId: opponentId,
-                  color: AppColors.cyan,
-                  isMe: false,
-                ),
-              ),
-              // Счёт по центру: крупные цифры между аватарками читаются как
-              // табло, а не как подпись под кружком.
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 10),
-                child: Row(
+          // Соперник слева, ты справа — как и сообщения в ленте.
+          Expanded(
+            child: _PlayerSide(
+              name: opponentName,
+              userId: opponentId,
+              color: AppColors.cyan,
+              isMe: false,
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 10),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     Text('$opponentWins',
-                        style: AppFonts.ui(fontSize: 26, weight: FontWeight.w800, color: AppColors.cyan)),
+                        style: AppFonts.ui(fontSize: 34, weight: FontWeight.w800, color: AppColors.cream)),
                     const Padding(
-                      padding: EdgeInsets.symmetric(horizontal: 8),
+                      padding: EdgeInsets.symmetric(horizontal: 7),
                       child: Text('/',
-                          style: TextStyle(fontSize: 20, color: AppColors.muted, fontWeight: FontWeight.w700)),
+                          style: TextStyle(fontSize: 28, color: AppColors.muted, fontWeight: FontWeight.w700)),
                     ),
                     Text('$myWins',
-                        style: AppFonts.ui(fontSize: 26, weight: FontWeight.w800, color: AppColors.gold)),
+                        style: AppFonts.ui(fontSize: 34, weight: FontWeight.w800, color: AppColors.gold)),
                   ],
                 ),
-              ),
-              Expanded(
-                child: _PlayerSide(
-                  name: myName,
-                  userId: myId,
-                  color: AppColors.gold,
-                  isMe: true,
-                ),
-              ),
-            ],
+                if (secondsLeft != null) ...[
+                  const SizedBox(height: 4),
+                  _RoundCountdown(seconds: secondsLeft!),
+                ],
+              ],
+            ),
           ),
-          if (secondsLeft != null) ...[
-            const SizedBox(height: 8),
-            _RoundCountdown(seconds: secondsLeft!),
-          ],
+          Expanded(
+            child: _PlayerSide(
+              name: myName,
+              userId: myId,
+              color: AppColors.gold,
+              isMe: true,
+            ),
+          ),
         ],
       ),
     );
@@ -826,7 +909,11 @@ class _PlayerSide extends StatelessWidget {
       behavior: HitTestBehavior.opaque,
       child: Column(
         children: [
-          ChAvatar(name: name, size: 58, ringColor: color),
+          // Без свечения: в шапке кружки крупные и стоят вплотную к ленте,
+          // и ореол вокруг них размывал границу с сообщениями. У аватарок
+          // в самой ленте свечение остаётся — там оно и различает своё
+          // сообщение от чужого.
+          ChAvatar(name: name, size: 54, ringColor: color, glow: false),
           const SizedBox(height: 5),
           Text(
             name,
@@ -912,14 +999,14 @@ class _AiBubble extends StatelessWidget {
                 children: [
                   Text('Раунд $roundNumber из 10', style: AppFonts.mono(fontSize: 9, color: AppColors.muted)),
                   const SizedBox(height: 5),
-                  Text(text, style: const TextStyle(color: AppColors.cream, height: 1.4)),
                   if (targetLanguage != null) ...[
-                    const SizedBox(height: 6),
                     Text(
-                      speakInLabel(targetLanguage!),
-                      style: AppFonts.mono(fontSize: 9, weight: FontWeight.w700, color: AppColors.gold),
+                      translateToLabel(targetLanguage!),
+                      style: AppFonts.mono(fontSize: 10, weight: FontWeight.w700, color: AppColors.gold),
                     ),
+                    const SizedBox(height: 5),
                   ],
+                  Text(text, style: const TextStyle(color: AppColors.cream, height: 1.4)),
                 ],
               ),
             ),

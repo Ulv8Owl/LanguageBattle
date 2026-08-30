@@ -39,8 +39,13 @@ class MatchData {
 
   bool get isDuel => gameMode == 'native_duel';
 
-  /// Slots each player must fill per round, in recording order.
-  List<String> get requiredSlots => isDuel ? const ['native', 'target'] : const ['target'];
+  /// Слоты, которые игрок заполняет за раунд, В ПОРЯДКЕ ЗАПИСИ.
+  ///
+  /// В Дуэли сначала ПЕРЕВОД (target), и только потом та же фраза на родном
+  /// языке (native). Обратный порядок обессмысливал раунд: игрок сперва
+  /// читал вслух родной текст, а потом переводил уже прочитанное вслух — то
+  /// есть переводил по памяти собственного голоса, а не с листа.
+  List<String> get requiredSlots => isDuel ? const ['target', 'native'] : const ['target'];
 
   /// The language a given player should record for a given slot, based on
   /// the `language_pair` convention documented in supabase/README.md:

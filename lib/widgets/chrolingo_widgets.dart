@@ -202,12 +202,17 @@ class ChAvatar extends StatelessWidget {
   final Color ringColor;
   final bool online;
 
+  /// Ореол вокруг кружка. В ленте он различает своё сообщение и чужое, а в
+  /// шапке боя только размывал границу с лентой.
+  final bool glow;
+
   const ChAvatar({
     super.key,
     required this.name,
     this.size = 40,
     this.ringColor = AppColors.lineStrong,
     this.online = false,
+    this.glow = true,
   });
 
   @override
@@ -223,7 +228,9 @@ class ChAvatar extends StatelessWidget {
             decoration: BoxDecoration(
               shape: BoxShape.circle,
               gradient: const LinearGradient(colors: [AppColors.navy4, AppColors.navy2]),
-              boxShadow: [BoxShadow(color: ringColor, blurRadius: size * 0.3, spreadRadius: size * 0.045)],
+              boxShadow: glow
+                  ? [BoxShadow(color: ringColor, blurRadius: size * 0.3, spreadRadius: size * 0.045)]
+                  : null,
               border: Border.all(color: ringColor, width: 2),
             ),
             child: Center(

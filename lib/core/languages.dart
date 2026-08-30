@@ -10,14 +10,16 @@ const languageNames = {
   'ru': 'Русский',
 };
 
-/// «Скажи это по-английски» — предложный оборот, а не название языка:
-/// в подписи к заданию он читается естественнее.
-String speakInLabel(String languageCode) {
-  const adverbs = {
-    'en': 'по-английски',
-    'es': 'по-испански',
-    'ru': 'по-русски',
+/// «Переведи на английский:» — подпись к заданию.
+///
+/// Стоит В НАЧАЛЕ сообщения, а не в конце: это инструкция, что делать с
+/// текстом ниже, и прочитать её нужно ДО текста, а не после.
+String translateToLabel(String languageCode) {
+  const targets = {
+    'en': 'английский',
+    'es': 'испанский',
+    'ru': 'русский',
   };
-  final adverb = adverbs[languageCode];
-  return adverb != null ? 'Скажи это $adverb' : 'Скажи это на изучаемом языке';
+  final target = targets[languageCode];
+  return target != null ? 'Переведи на $target:' : 'Переведи на изучаемый язык:';
 }
