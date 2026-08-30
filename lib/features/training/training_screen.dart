@@ -11,7 +11,8 @@ import '../../core/theme.dart';
 import '../../data/phrase_bank.dart';
 import '../../data/voice_submission.dart';
 import '../../widgets/chrolingo_widgets.dart';
-import '../../widgets/correction_text.dart';
+import '../../widgets/ai_avatar.dart';
+import '../../widgets/transcript_review.dart';
 import '../../widgets/voice_message_bubble.dart';
 import '../../widgets/voice_recorder_dock.dart';
 import '../subscription/paywall_screen.dart';
@@ -764,15 +765,11 @@ class _AiSay extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 8),
+      padding: const EdgeInsets.symmetric(vertical: feedGap / 2),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const CircleAvatar(
-            radius: 14,
-            backgroundColor: AppColors.gold,
-            child: Icon(Icons.smart_toy, size: 16, color: Colors.black),
-          ),
+          const AiAvatar(),
           const SizedBox(width: 8),
           Flexible(
             child: Container(
@@ -906,36 +903,28 @@ class _ErrorReport extends StatelessWidget {
     final spoken = attempt?.spokenForDiff ?? '';
 
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 8),
-      child: ChPanel(
+      padding: const EdgeInsets.symmetric(vertical: feedGap / 2),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // Разбор говорит тот же собеседник, что и задаёт фразу, — значит
+          // и аватар у него тот же.
+          const AiAvatar(),
+          const SizedBox(width: 8),
+          Expanded(
+            child: ChPanel(
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(title, style: AppFonts.mono(fontSize: 9, weight: FontWeight.w700, color: titleColor)),
             const SizedBox(height: 10),
 
-            // 1. Что услышал распознаватель — дословно, без правок.
-            if (transcript.isNotEmpty) ...[
-              Text('Голосовое:', style: AppFonts.mono(fontSize: 10, weight: FontWeight.w700, color: AppColors.muted)),
-              const SizedBox(height: 3),
-              SelectableText(
-                transcript,
-                style: const TextStyle(color: AppColors.cream, fontSize: 13, height: 1.4),
-              ),
-              const SizedBox(height: 10),
-            ],
-
-            // 2. Тот же текст с правкой: красным то, что сказано неверно,
-            // зелёным — то, что было пропущено и добавлено по эталону.
-            if (transcript.isNotEmpty && correction.isNotEmpty) ...[
-              Text('Разбор:', style: AppFonts.mono(fontSize: 10, weight: FontWeight.w700, color: AppColors.muted)),
-              const SizedBox(height: 3),
-              SelectableText.rich(
-                TextSpan(children: correctionSpans(spoken, correction)),
-                style: const TextStyle(fontSize: 13, height: 1.4),
-              ),
-              const SizedBox(height: 10),
-            ],
+            TranscriptReview(
+              transcript: transcript,
+              spoken: spoken,
+              corrected: correction,
+            ),
+            if (transcript.isNotEmpty) const SizedBox(height: 10),
 
             if (isSecondAttempt) ...[
               if (noResult || notRecognised || judgeBroken || correction.isEmpty)
@@ -962,6 +951,9 @@ class _ErrorReport extends StatelessWidget {
                   )),
           ],
         ),
+            ),
+          ),
+        ],
       ),
     );
   }

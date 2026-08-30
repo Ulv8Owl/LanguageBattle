@@ -97,6 +97,13 @@ class VoiceRecordingData {
   final String recordingSlot;
   final String? languageCode;
   final String audioStoragePath;
+
+  /// Что услышало распознавание и как это должно звучать. Приходят тем же
+  /// стримом, что и сама запись, поэтому разбор в бою не стоит ни одного
+  /// дополнительного запроса.
+  final String transcript;
+  final String correctedText;
+  final String cleanedText;
   final DateTime createdAt;
 
   const VoiceRecordingData({
@@ -106,8 +113,15 @@ class VoiceRecordingData {
     required this.recordingSlot,
     required this.languageCode,
     required this.audioStoragePath,
+    required this.transcript,
+    required this.correctedText,
+    required this.cleanedText,
     required this.createdAt,
   });
+
+  /// Текст, с которым сравнивается исправленный вариант: очищенный от
+  /// самоисправлений, если судья его прислал, иначе — что услышал ASR.
+  String get spokenForDiff => cleanedText.isNotEmpty ? cleanedText : transcript;
 
   factory VoiceRecordingData.fromRow(Map<String, dynamic> row) {
     return VoiceRecordingData(
@@ -117,6 +131,9 @@ class VoiceRecordingData {
       recordingSlot: row['recording_slot'] as String,
       languageCode: row['language_code'] as String?,
       audioStoragePath: row['audio_storage_path'] as String,
+      transcript: ((row['transcript'] as String?) ?? '').trim(),
+      correctedText: ((row['corrected_text'] as String?) ?? '').trim(),
+      cleanedText: ((row['cleaned_text'] as String?) ?? '').trim(),
       createdAt: DateTime.parse(row['created_at'] as String),
     );
   }

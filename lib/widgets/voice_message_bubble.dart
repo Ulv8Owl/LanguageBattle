@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 
 import '../core/supabase_client.dart';
 import '../core/theme.dart';
+import 'ai_avatar.dart';
 import 'chrolingo_widgets.dart';
 
 /// Отправленное голосовое в ленте — как в мессенджере: аватар, кнопка
@@ -83,12 +84,15 @@ class _VoiceMessageBubbleState extends State<VoiceMessageBubble> {
 
   @override
   Widget build(BuildContext context) {
-    final accent = widget.alignRight ? AppColors.cyan : AppColors.gold;
+    // Золотом светится СВОЁ голосовое (оно справа), соперник — холодным
+    // акцентом. Было наоборот: подсвечивался чужой ответ, и в ленте
+    // взгляд цеплялся не за то.
+    final accent = widget.alignRight ? AppColors.gold : AppColors.cyan;
 
     final bubble = Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
       decoration: BoxDecoration(
-        color: widget.alignRight ? AppColors.navy3 : AppColors.gold.withValues(alpha: 0.14),
+        color: widget.alignRight ? AppColors.gold.withValues(alpha: 0.14) : AppColors.navy3,
         border: Border.all(color: accent.withValues(alpha: 0.35)),
         borderRadius: BorderRadius.circular(14),
       ),
@@ -118,10 +122,13 @@ class _VoiceMessageBubbleState extends State<VoiceMessageBubble> {
       ),
     );
 
-    final avatar = ChAvatar(name: widget.name, size: 28, ringColor: accent.withValues(alpha: 0.6));
+    final avatar = ChAvatar(name: widget.name, size: avatarSize, ringColor: accent.withValues(alpha: 0.6));
 
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 4),
+      // Одинаковый вертикальный ритм со всеми остальными сообщениями ленты:
+      // раньше у голосовых и текстовых отступы отличались, и промежутки
+      // между соседними сообщениями получались разной величины.
+      padding: const EdgeInsets.symmetric(vertical: feedGap / 2),
       child: Row(
         mainAxisAlignment: widget.alignRight ? MainAxisAlignment.end : MainAxisAlignment.start,
         crossAxisAlignment: CrossAxisAlignment.end,

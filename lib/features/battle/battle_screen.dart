@@ -10,9 +10,12 @@ import '../../core/theme.dart';
 import '../../data/phrase_bank.dart';
 import '../../data/voice_submission.dart';
 import '../../widgets/ai_avatar.dart';
+import '../../widgets/chrolingo_widgets.dart';
+import '../../widgets/transcript_review.dart';
 import '../../widgets/voice_message_bubble.dart';
 import '../../widgets/voice_recorder_dock.dart';
 import 'battle_models.dart';
+import 'player_card_sheet.dart';
 
 /// Экран боя — непрерывная лента-переписка (раздел 5.2, задача 4 итерации).
 ///
@@ -454,6 +457,8 @@ class _BattleScreenState extends State<BattleScreen> {
                 opponentWins: opponentWins,
                 myName: _myName,
                 opponentName: _opponentName,
+                myId: _myId,
+                opponentId: opponentId,
                 secondsLeft: _roundSecondsLeft,
               ),
               // Кнопка микрофона лежит ПОВЕРХ ленты, а не отдельной полосой
@@ -600,11 +605,11 @@ class _BattleScreenState extends State<BattleScreen> {
         // Балл ставится только за голосовое на изучаемом языке — родное
         // в Дуэли соперник просто слушает (раздел 2.4).
         if (rec.recordingSlot != 'target') continue;
-        final verdict = _verdictFor(round.id, rec.userId);
         items.add(_AiVerdict(
           key: ValueKey('${rec.id}-verdict'),
           name: isMine ? _myName : _opponentName,
-          verdict: verdict,
+          recording: rec,
+          verdict: _verdictFor(round.id, rec.userId),
         ));
       }
     }
@@ -623,29 +628,31 @@ class _BattleScreenState extends State<BattleScreen> {
 /// Сообщение всегда слева и с аватаром хамелеона: это говорит ИИ, а не
 /// игрок, — по тому же правилу, что и фраза раунда.
 class _AiVerdict extends StatelessWidget {
-  /// Чьё голосовое оценивается — иначе в бою непонятно, чей это балл.
+  /// Чьё голосовое разбирают — иначе в бою непонятно, чей это балл.
   final String name;
+
+  /// Сама запись: из неё берутся распознанный текст и правка.
+  final VoiceRecordingData recording;
 
   /// null — оценки ещё нет, судья считает.
   final RoundScoreData? verdict;
 
-  const _AiVerdict({super.key, required this.name, required this.verdict});
+  const _AiVerdict({super.key, required this.name, required this.recording, required this.verdict});
 
   @override
   Widget build(BuildContext context) {
     final score = verdict?.score;
-    final feedback = (verdict?.aiFeedback ?? '').trim();
 
     return Padding(
-      padding: const EdgeInsets.only(left: 0, right: 40, top: 2, bottom: 8),
+      padding: const EdgeInsets.only(right: 40, top: feedGap / 2, bottom: feedGap / 2),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const AiAvatar(size: 24),
+          const AiAvatar(),
           const SizedBox(width: 8),
           Flexible(
             child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
               decoration: BoxDecoration(
                 color: AppColors.navy3,
                 border: Border.all(color: AppColors.line),
@@ -697,13 +704,15 @@ class _AiVerdict extends StatelessWidget {
                             ),
                           ],
                         ),
-                        if (feedback.isNotEmpty) ...[
-                          const SizedBox(height: 6),
-                          Text(
-                            feedback,
-                            style: const TextStyle(color: AppColors.cream, fontSize: 12, height: 1.4),
-                          ),
-                        ],
+                        const SizedBox(height: 8),
+                        // В бою — только разбор, без текстовых пояснений:
+                        // сравнить свою фразу с правильной можно за секунду,
+                        // а читать абзац объяснений посреди матча некогда.
+                        TranscriptReview(
+                          transcript: recording.transcript,
+                          spoken: recording.spokenForDiff,
+                          corrected: recording.correctedText,
+                        ),
                       ],
                     ),
             ),
@@ -721,6 +730,8 @@ class _ScoreHeader extends StatelessWidget {
   final int opponentWins;
   final String myName;
   final String opponentName;
+  final String myId;
+  final String? opponentId;
   final int? secondsLeft;
 
   const _ScoreHeader({
@@ -728,33 +739,102 @@ class _ScoreHeader extends StatelessWidget {
     required this.opponentWins,
     required this.myName,
     required this.opponentName,
+    required this.myId,
+    required this.opponentId,
     required this.secondsLeft,
   });
 
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 12),
+      padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 16),
       child: Column(
         children: [
           Row(
-            mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              // Соперник слева, ты справа — как и сообщения в ленте: свои
-              // справа, чужие слева. Раньше было наоборот, и счёт читался
-              // против направления переписки.
-              _ScoreCircle(value: opponentWins, color: AppColors.cyan, name: opponentName),
-              const Padding(
-                padding: EdgeInsets.symmetric(horizontal: 16),
-                child: Text('/', style: TextStyle(fontSize: 20, color: AppColors.muted, fontWeight: FontWeight.w700)),
+              // Соперник слева, ты справа — как и сообщения в ленте.
+              Expanded(
+                child: _PlayerSide(
+                  name: opponentName,
+                  userId: opponentId,
+                  color: AppColors.cyan,
+                  isMe: false,
+                ),
               ),
-              _ScoreCircle(value: myWins, color: AppColors.gold, name: myName),
+              // Счёт по центру: крупные цифры между аватарками читаются как
+              // табло, а не как подпись под кружком.
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 10),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text('$opponentWins',
+                        style: AppFonts.ui(fontSize: 26, weight: FontWeight.w800, color: AppColors.cyan)),
+                    const Padding(
+                      padding: EdgeInsets.symmetric(horizontal: 8),
+                      child: Text('/',
+                          style: TextStyle(fontSize: 20, color: AppColors.muted, fontWeight: FontWeight.w700)),
+                    ),
+                    Text('$myWins',
+                        style: AppFonts.ui(fontSize: 26, weight: FontWeight.w800, color: AppColors.gold)),
+                  ],
+                ),
+              ),
+              Expanded(
+                child: _PlayerSide(
+                  name: myName,
+                  userId: myId,
+                  color: AppColors.gold,
+                  isMe: true,
+                ),
+              ),
             ],
           ),
           if (secondsLeft != null) ...[
             const SizedBox(height: 8),
             _RoundCountdown(seconds: secondsLeft!),
           ],
+        ],
+      ),
+    );
+  }
+}
+
+/// Аватарка участника в шапке с именем под ней. По нажатию открывается
+/// публичная карточка — рейтинг, лига, языковая пара, а у соперника ещё и
+/// приглашение в друзья.
+class _PlayerSide extends StatelessWidget {
+  final String name;
+  final String? userId;
+  final Color color;
+  final bool isMe;
+
+  const _PlayerSide({
+    required this.name,
+    required this.userId,
+    required this.color,
+    required this.isMe,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final id = userId;
+    return GestureDetector(
+      onTap: id == null
+          ? null
+          : () => showPlayerCard(context, userId: id, name: name, isMe: isMe),
+      behavior: HitTestBehavior.opaque,
+      child: Column(
+        children: [
+          ChAvatar(name: name, size: 58, ringColor: color),
+          const SizedBox(height: 5),
+          Text(
+            name,
+            textAlign: TextAlign.center,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: AppFonts.mono(fontSize: 10, weight: FontWeight.w700, color: AppColors.muted),
+          ),
         ],
       ),
     );
@@ -795,47 +875,6 @@ class _RoundCountdown extends StatelessWidget {
   }
 }
 
-class _ScoreCircle extends StatelessWidget {
-  final int value;
-  final Color color;
-  final String name;
-
-  const _ScoreCircle({required this.value, required this.color, required this.name});
-
-  @override
-  Widget build(BuildContext context) {
-    return Column(
-      children: [
-        Container(
-          height: 46,
-          width: 46,
-          decoration: BoxDecoration(
-            shape: BoxShape.circle,
-            color: AppColors.navy3,
-            border: Border.all(color: color, width: 2.5),
-            boxShadow: [BoxShadow(color: color.withValues(alpha: 0.35), blurRadius: 12)],
-          ),
-          child: Center(
-            child: Text('$value', style: AppFonts.ui(fontSize: 18, weight: FontWeight.w800, color: color)),
-          ),
-        ),
-        const SizedBox(height: 4),
-        SizedBox(
-          width: 78,
-          child: Text(
-            name,
-            textAlign: TextAlign.center,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: AppFonts.mono(fontSize: 9, color: AppColors.muted),
-          ),
-        ),
-      ],
-    );
-  }
-}
-
-/// Фраза от ИИ — входящее сообщение с иконкой.
 class _AiBubble extends StatelessWidget {
   final int roundNumber;
   final String text;
@@ -850,7 +889,7 @@ class _AiBubble extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 8),
+      padding: const EdgeInsets.symmetric(vertical: feedGap / 2),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [

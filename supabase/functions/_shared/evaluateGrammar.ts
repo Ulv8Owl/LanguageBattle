@@ -68,6 +68,14 @@ const BASE_SYSTEM_PROMPT =
 отбрасывай: самоисправление — это не ошибка, а нормальная живая речь. То же самое с оговорками,
 запинками и повторами одного и того же куска подряд.
 
+РАСПОЗНАВАНИЕ РЕЧИ ОШИБАЕТСЯ, и его ошибки — не ошибки игрока. Если слово в транскрипте
+похоже ПО ЗВУЧАНИЮ на слово из эталона и на своём месте («Only good» вместо «Olga», «tree»
+вместо «three», «shop» вместо «shopping»), считай, что игрок сказал слово из эталона, и НЕ
+штрафуй за это. В corrected в таком случае ставь слово из эталона, но ошибкой это не помечай.
+Правило действует только на созвучные замены: если сказано другое слово с другим звучанием,
+это настоящая ошибка. Ниже может быть список слов, в которых распознавание не уверено, —
+к ним это правило применяй в первую очередь.
+
 ПОЛНОСТЬЮ ИГНОРИРУЙ пунктуацию и регистр букв. Текст приходит от распознавания речи, которое само
 расставляет точки, запятые и заглавные буквы там, где игрок просто сделал паузу, — это НЕ его
 ошибки. Не считай их ошибками, не упоминай в разборе и не снижай за них балл. Оценивай только
@@ -145,11 +153,9 @@ const MIN_LLM_SLICE_MS = 8_000;
 /// целиком определяется числом выходных токенов, так что убрать лишнее
 /// поле выгоднее любой правки таймаутов.
 const BRIEF_MESSAGE_INSTRUCTION =
-  `В ЭТОТ РАЗ отвечай КОРОТКО и верни ТОЛЬКО эти поля:
-{"score": number, "errors": [{"message": string, "replacement": string, "category": "grammar"|"spelling"|"style"}]}
-Поля cleaned, corrected, offset и length НЕ НУЖНЫ — не пиши их вовсе.
-message — одно короткое предложение НА РОДНОМ ЯЗЫКЕ говорящего, понятное новичку.
-Разбирай не больше ДВУХ самых грубых ошибок; если ошибок нет, верни errors: [].`;
+  `В ЭТОМ РЕЖИМЕ объяснения НЕ НУЖНЫ — игроку показывают только исправленную фразу.
+Верни errors ПУСТЫМ массивом [] и заполни только score, cleaned и corrected.
+Не пиши ни одного предложения объяснений: они не отображаются, а время ответа тратят.`;
 
 /// Одиночная Игра (раздел 2.2): между двумя попытками игрок должен понять,
 /// что именно исправить — здесь ИИ обязан объяснять подробнее, чем в PvP,
@@ -261,6 +267,11 @@ function buildSystemPrompt(verbosity: JudgeVerbosity, level: CefrLevel): string 
   // В кратком режиме уровень говорящего не нужен: он ограничивает СЛОЖНОСТЬ
   // развёрнутых объяснений, а объяснение здесь — одна строка. Блок длинный,
   // и каждый его токен — это задержка перед первым словом ответа.
+  // В бою на экран идёт только подсветка правки, поэтому и просить больше
+  // нечего: ни объяснений, ни уровня говорящего (он ограничивает сложность
+  // ТЕКСТА объяснений, которых здесь нет). Время ответа почти целиком
+  // определяется числом выходных токенов — не генерировать лишнего выгоднее
+  // любой правки таймаутов.
   if (verbosity === "brief") return `${BASE_SYSTEM_PROMPT}\n${BRIEF_MESSAGE_INSTRUCTION}`;
   const levelBlock = `${LEVEL_INSTRUCTIONS[level]}\n${LEVEL_SCORE_REMINDER}`;
   return `${BASE_SYSTEM_PROMPT}\n${levelBlock}\n${DETAILED_MESSAGE_INSTRUCTION}\n${EXPLAIN_LIMIT_INSTRUCTION}`;
@@ -271,6 +282,15 @@ function buildUserPrompt(
   targetLanguage: string,
   nativeLanguage: string,
   expectedPhrase: string,
+  /**
+   * Слова, в которых распознавание само не уверено.
+   *
+   * Именно на них случается «сказал Olga — услышал Only good»: игрок
+   * получает разбор чужой фразы и не понимает, за что. Судья по одному
+   * тексту отличить ослышку от ошибки не может, а с этим списком —
+   * вполне.
+   */
+  uncertainWords: string[] = [],
 ): string {
   // В диагностическом режиме сам транскрипт не важен — важна только
   // скорость обмена репликами.
@@ -283,6 +303,9 @@ function buildUserPrompt(
       : []),
     `Что сказал игрок:`,
     transcript,
+    ...(uncertainWords.length > 0
+      ? ["", `Слова, в которых распознавание не уверено: ${uncertainWords.join(", ")}`]
+      : []),
   ].join("\n");
 }
 
@@ -376,6 +399,7 @@ async function callLlmOnce(
   verbosity: JudgeVerbosity,
   level: CefrLevel,
   expectedPhrase: string,
+  uncertainWords: string[],
   /**
    * false — повтор без `response_format` для провайдеров, которые этого
    * поля не знают и отвечают на него 400. Без такого отката судья у такого
@@ -442,7 +466,13 @@ async function callLlmOnce(
           { role: "system", content: buildSystemPrompt(verbosity, level) },
           {
             role: "user",
-            content: buildUserPrompt(transcript, targetLanguage, nativeLanguage, expectedPhrase),
+            content: buildUserPrompt(
+              transcript,
+              targetLanguage,
+              nativeLanguage,
+              expectedPhrase,
+              uncertainWords,
+            ),
           },
         ],
         // Явно нестриминговый ответ: нам нужен один цельный JSON-объект,
@@ -555,6 +585,8 @@ export async function evaluateGrammar(
    * ответа: неполный разбор с честной пометкой лучше отсутствия любого.
    */
   budgetMs: number = LLM_TIMEOUT_MS,
+  /** Слова, распознанные неуверенно — см. buildUserPrompt. */
+  uncertainWords: string[] = [],
 ): Promise<EvaluateGrammarResult> {
   // Провайдер может не знать response_format и отвечать на него 400 — тогда
   // повторяем без него, иначе судья не работает вообще (и, что хуже,
@@ -594,6 +626,7 @@ export async function evaluateGrammar(
         verbosity,
         level,
         expectedPhrase,
+        uncertainWords,
         useResponseFormat,
         Math.min(LLM_TIMEOUT_MS, left),
       );

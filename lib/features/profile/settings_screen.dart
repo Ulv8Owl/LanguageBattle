@@ -4,6 +4,7 @@ import 'package:go_router/go_router.dart';
 import 'package:flutter/services.dart';
 
 import '../../core/debug_flags.dart';
+import '../../core/languages.dart';
 import '../../core/supabase_client.dart';
 import '../../core/theme.dart';
 import '../../widgets/chrolingo_widgets.dart';
@@ -26,6 +27,110 @@ class SettingsScreen extends StatefulWidget {
 class _SettingsScreenState extends State<SettingsScreen> {
   bool _notifications = true;
   bool _hideFromLeaderboard = false;
+
+  /// Родной язык — на нём показываются фразы раундов и объяснения ошибок.
+  String? _nativeLanguage;
+  bool _savingLanguage = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadNativeLanguage();
+  }
+
+  Future<void> _loadNativeLanguage() async {
+    try {
+      final row = await supabase
+          .from('users')
+          .select('native_language')
+          .eq('id', currentUserId)
+          .maybeSingle();
+      if (!mounted) return;
+      setState(() => _nativeLanguage = row?['native_language'] as String?);
+    } catch (_) {
+      // Не удалось — покажем прочерк, менять язык это не мешает.
+    }
+  }
+
+  Future<void> _pickNativeLanguage() async {
+    // Изучаемый язык нужен здесь не для показа, а для запрета: родной и
+    // изучаемый совпадать не могут, иначе переводить будет не с чего.
+    String? learning;
+    try {
+      final row = await supabase
+          .from('user_languages')
+          .select('language_code')
+          .eq('user_id', currentUserId)
+          .eq('role', 'learning')
+          .eq('is_active', true)
+          .limit(1)
+          .maybeSingle();
+      learning = row?['language_code'] as String?;
+    } catch (_) {
+      learning = null;
+    }
+    if (!mounted) return;
+
+    final picked = await showModalBottomSheet<String>(
+      context: context,
+      backgroundColor: AppColors.navy2,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const SizedBox(height: 16),
+            Text('Родной язык',
+                style: AppFonts.ui(fontSize: 15, weight: FontWeight.w800, color: AppColors.cream)),
+            const SizedBox(height: 8),
+            for (final entry in languageNames.entries)
+              ListTile(
+                title: Text(entry.value),
+                subtitle: entry.key == learning
+                    ? const Text('Сейчас это изучаемый язык', style: TextStyle(fontSize: 11))
+                    : null,
+                trailing: entry.key == _nativeLanguage
+                    ? const Icon(Icons.check, color: AppColors.gold)
+                    : null,
+                enabled: entry.key != learning,
+                onTap: () => Navigator.of(ctx).pop(entry.key),
+              ),
+            const SizedBox(height: 12),
+          ],
+        ),
+      ),
+    );
+    if (picked == null || picked == _nativeLanguage || !mounted) return;
+
+    setState(() => _savingLanguage = true);
+    try {
+      await supabase.from('users').update({'native_language': picked}).eq('id', currentUserId);
+      // Строка родного языка в user_languages идёт в паре с полем в users:
+      // по ней считается языковая пара в матчах, и рассинхрон означал бы,
+      // что игрок в бою говорит не на том языке, что показан в профиле.
+      await supabase
+          .from('user_languages')
+          .update({'language_code': picked})
+          .eq('user_id', currentUserId)
+          .eq('role', 'native');
+      if (!mounted) return;
+      setState(() {
+        _nativeLanguage = picked;
+        _savingLanguage = false;
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Родной язык: ${languageNames[picked] ?? picked}')),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _savingLanguage = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Не удалось сменить язык: $e')),
+      );
+    }
+  }
 
   Future<void> _signOut() async {
     await supabase.auth.signOut();
@@ -57,6 +162,22 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     title: 'Язык интерфейса',
                     trailing: Text('Русский', style: AppFonts.mono(fontSize: 11, color: AppColors.muted)),
                     onTap: () => _notReadyYet('Переключение языка интерфейса'),
+                  ),
+                  const Divider(height: 1, color: AppColors.line),
+                  _Row(
+                    icon: Icons.translate,
+                    title: 'Родной язык',
+                    trailing: _savingLanguage
+                        ? const SizedBox(
+                            height: 14,
+                            width: 14,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
+                        : Text(
+                            languageNames[_nativeLanguage] ?? '—',
+                            style: AppFonts.mono(fontSize: 11, color: AppColors.muted),
+                          ),
+                    onTap: _savingLanguage ? null : _pickNativeLanguage,
                   ),
                 ],
               ),

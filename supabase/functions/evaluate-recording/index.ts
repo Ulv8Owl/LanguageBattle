@@ -192,7 +192,7 @@ async function processJob(job_id: string): Promise<void> {
     const expectedPhrase = await roundPhrase(supabase, recording);
 
     // Шаг 1 — распознавание речи.
-    const { transcript, status, debug: asrDebug } = await resolveTranscript(
+    const { transcript, status, debug: asrDebug, uncertainWords } = await resolveTranscript(
       supabase,
       recording,
       targetLanguage,
@@ -277,6 +277,7 @@ async function processJob(job_id: string): Promise<void> {
         level,
         expectedPhrase,
         budgetLeft(),
+        uncertainWords,
       );
 
       score = result.score;
@@ -285,11 +286,18 @@ async function processJob(job_id: string): Promise<void> {
       pipelineDebug.judge = result.debug;
       correctedText = result.corrected;
       cleanedText = result.cleaned;
+      // Пустой список ошибок значит «ошибок нет» ТОЛЬКО если объяснения
+      // вообще запрашивались. В бою их не просят (verbosity brief), и
+      // писать там «ошибок не найдено» — значит утверждать то, чего судья
+      // не говорил: правка при этом может быть на пол-фразы.
+      const explanationsAsked = verbosity === "detailed";
       feedback = result.degraded
         ? "Не удалось получить разбор от ИИ — балл выставлен нейтральным."
-        : errors.length === 0
+        : errors.length > 0
+        ? errors.map((e) => e.message).slice(0, 3).join(" ")
+        : explanationsAsked
         ? "Отлично, ошибок не найдено!"
-        : errors.map((e) => e.message).slice(0, 3).join(" ");
+        : "Разбор показан подсветкой правки.";
 
       if (result.degraded) {
         console.error("evaluate-recording: судья деградировал", {
@@ -365,13 +373,24 @@ async function resolveTranscript(
   expectedPhrase: string,
   /** Остаток бюджета задачи — распознавание не должно его пережить. */
   budgetMs: number,
-): Promise<{ transcript: string; status: TranscriptStatus; debug: Record<string, unknown> }> {
+): Promise<{
+  transcript: string;
+  status: TranscriptStatus;
+  debug: Record<string, unknown>;
+  /** Слова, в которых распознавание не уверено, — судье в помощь. */
+  uncertainWords: string[];
+}> {
   const existing = (recording.transcript ?? "").trim();
   if (existing.length > 0) {
     if (recording.transcript_status !== "ok") {
       await saveTranscript(supabase, recording.id, existing, [], "ok");
     }
-    return { transcript: existing, status: "ok", debug: { status: "ok", transcript: existing, cached: true } };
+    return {
+      transcript: existing,
+      status: "ok",
+      debug: { status: "ok", transcript: existing, cached: true },
+      uncertainWords: [],
+    };
   }
   if (recording.transcript_status === "empty" || recording.transcript_status === "failed") {
     // Уже пробовали и не получилось — не тратим квоту провайдера повторно.
@@ -379,6 +398,7 @@ async function resolveTranscript(
       transcript: "",
       status: recording.transcript_status,
       debug: { status: recording.transcript_status, cached: true },
+      uncertainWords: [],
     };
   }
 
@@ -395,6 +415,7 @@ async function resolveTranscript(
       transcript: "",
       status: "failed",
       debug: { status: "failed", error: `не удалось скачать аудио: ${downloadErr?.message ?? downloadErr}` },
+      uncertainWords: [],
     };
   }
 
@@ -407,7 +428,17 @@ async function resolveTranscript(
 
   const status: TranscriptStatus = asr.degraded ? "failed" : asr.transcript.length > 0 ? "ok" : "empty";
   await saveTranscript(supabase, recording.id, asr.transcript, asr.words, status);
-  return { transcript: asr.transcript, status, debug: asr.debug };
+  return {
+    transcript: asr.transcript,
+    status,
+    debug: asr.debug,
+    // Порог намеренно высокий: лучше показать судье лишнее слово, чем
+    // пропустить то самое, на котором распознаватель ослышался.
+    uncertainWords: asr.words
+      .filter((w) => w.confidence > 0 && w.confidence < 0.85)
+      .map((w) => w.word)
+      .slice(0, 12),
+    };
 }
 
 /**
