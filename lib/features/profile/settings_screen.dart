@@ -1,6 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
+import 'package:flutter/services.dart';
+
+import '../../core/debug_flags.dart';
 import '../../core/supabase_client.dart';
 import '../../core/theme.dart';
 import '../../widgets/chrolingo_widgets.dart';
@@ -108,6 +111,31 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     onTap: () => _notReadyYet('История жалоб'),
                   ),
                 ],
+              ),
+            ),
+            const SizedBox(height: 18),
+            Text('О ПРИЛОЖЕНИИ', style: AppFonts.mono(fontSize: 9, weight: FontWeight.w700, color: AppColors.gold)),
+            const SizedBox(height: 8),
+            ChPanel(
+              padding: EdgeInsets.zero,
+              child: _Row(
+                icon: Icons.info_outline,
+                title: 'Версия сборки',
+                // Метка коммита, вшитая при сборке (--dart-define=BUILD_ID).
+                // Живёт здесь, а не на игровых экранах: спрашивают её редко,
+                // но когда спрашивают — ответ нужен точный, и «какой у тебя
+                // билд» иначе выясняется сравнением скриншотов с историей git.
+                trailing: Text(
+                  kBuildId,
+                  style: AppFonts.mono(fontSize: 11, color: AppColors.muted),
+                ),
+                // Скопировать удобнее, чем переписывать семь символов с экрана.
+                onTap: () {
+                  Clipboard.setData(ClipboardData(text: kBuildParts.join(' · ')));
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('Версия скопирована')),
+                  );
+                },
               ),
             ),
             const SizedBox(height: 26),

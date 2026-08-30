@@ -496,27 +496,9 @@ class _TrainingScreenState extends State<TrainingScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: kShowPipelineDebug
-            // Метка сборки — в шапке, а не только в отладочной панели внизу:
-            // до панели надо доскроллить, а вопрос «тот ли это APK» встаёт
-            // раньше всех остальных.
-            ? Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  const Text('Одиночная Игра'),
-                  Text.rich(
-                    TextSpan(children: [
-                      TextSpan(text: kBuildParts[0]),
-                      const TextSpan(text: ' · '),
-                      TextSpan(text: kBuildParts[1]),
-                    ]),
-                    style: AppFonts.mono(fontSize: 8, color: AppColors.muted),
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                ],
-              )
-            : const Text('Одиночная Игра'),
+        // Версия сборки живёт в Настройках, а не в шапке игрового экрана:
+        // во время раунда она только мешает.
+        title: const Text('Одиночная Игра'),
         actions: [
           if (_stage != _Stage.starting && _stage != _Stage.failed)
             Padding(

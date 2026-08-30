@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../core/supabase_client.dart';
+import '../../data/signup_rows.dart';
 
 const _supportedLanguages = {
   'en': 'English',
@@ -50,32 +51,11 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
         'native_language': _nativeLanguage,
       }).eq('id', userId);
 
-      // У ОБЕИХ строк набор ключей обязан совпадать. PostgREST на групповой
-      // вставке строит один список столбцов из объединения ключей всех
-      // объектов, и то, чего в объекте нет, подставляет явным NULL — а не
-      // значением по умолчанию из схемы. Пропущенный здесь is_active (в
-      // схеме он `not null default false`) уезжал на сервер как null и
-      // ронял регистрацию любого нового игрока на самом первом экране.
-      await supabase.from('user_languages').insert([
-        {
-          'user_id': userId,
-          'language_code': _nativeLanguage,
-          'role': 'native',
-          'cefr_level': 'C2',
-          'elo': 1000,
-          'league': 'bronze',
-          'is_active': false,
-        },
-        {
-          'user_id': userId,
-          'language_code': _targetLanguage,
-          'role': 'learning',
-          'cefr_level': 'A1',
-          'elo': 1000,
-          'league': 'bronze',
-          'is_active': true,
-        },
-      ]);
+      await supabase.from('user_languages').insert(signupLanguageRows(
+        userId: userId,
+        nativeLanguage: _nativeLanguage,
+        targetLanguage: _targetLanguage,
+      ));
 
       if (!mounted) return;
       context.go('/arena');

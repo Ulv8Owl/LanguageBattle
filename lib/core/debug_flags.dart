@@ -30,7 +30,7 @@ const String kBuildId = String.fromEnvironment(
 );
 
 /// Человекочитаемая подпись сборки рядом с коммитом.
-const String kClientBuild = 'цвета · голосовые · marksOnly · бюджет';
+const String kClientBuild = 'chrolingo';
 
 /// Подпись сборки для шапки экрана и отладочной панели.
 ///
