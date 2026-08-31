@@ -43,10 +43,44 @@ require_synced() {
   local head remote
   head="$(git rev-parse HEAD)"
   remote="$(git rev-parse "origin/$branch")"
-  if [ "$head" != "$remote" ]; then
-    fail "рабочее дерево не совпадает с origin/$branch.
+  [ "$head" = "$remote" ] && return 0
+
+  local ahead behind elsewhere advice
+  ahead="$(git rev-list --count "origin/$branch..HEAD")"
+  behind="$(git rev-list --count "HEAD..origin/$branch")"
+
+  # Самый частый и самый непонятный случай: человек стоит на одной ветке, а
+  # подтянул в неё чужую (`git pull origin другая-ветка`). Коммиты при этом
+  # никуда не делись и лежат на origin/другая-ветка — но выглядит это как
+  # «моя ветка обогнала origin на пять коммитов», и совет «запушь их» здесь
+  # ровно противоположен правильному. Поэтому сначала проверяем, не лежит ли
+  # текущий HEAD целиком на какой-то другой ветке origin.
+  elsewhere="$(git branch --remotes --contains HEAD --format='%(refname:short)' 2>/dev/null \
+    | grep -v "^origin/$branch\$" | grep -v '^origin/HEAD' | head -1)"
+
+  if [ -n "$elsewhere" ] && [ "$behind" = "0" ]; then
+    advice="Твои $ahead коммит(ов) целиком лежат на ${elsewhere} — похоже, ты просто
+не на ту ветку встал: сделал 'git pull origin ${elsewhere#origin/}', стоя на '$branch'.
+Ничего не потеряно, всё уже на origin. Разложить по местам:
+
+  git checkout -B ${elsewhere#origin/} $elsewhere
+  git branch -f $branch origin/$branch
+
+Первая строка ставит тебя на нужную ветку, вторая возвращает '$branch' на место."
+  elif [ "$behind" = "0" ]; then
+    advice="У тебя $ahead локальных коммит(ов), которых нет на origin/$branch.
+Запушь их: git push -u origin $branch"
+  elif [ "$ahead" = "0" ]; then
+    advice="Отстаёшь на $behind коммит(ов). Запусти ./tools/release.sh $branch —
+он синхронизирует и сделает всё по порядку."
+  else
+    advice="Ветки разошлись: $ahead своих коммит(ов), $behind чужих.
+Посмотри свои: git log --oneline origin/$branch..HEAD"
+  fi
+
+  fail "рабочее дерево не совпадает с origin/$branch.
   на диске:  $(git rev-parse --short HEAD)  $(git log -1 --format=%s)
   на origin: $(git rev-parse --short "origin/$branch")  $(git log -1 --format=%s "origin/$branch")
-Запусти ./tools/release.sh $branch — он синхронизирует и сделает всё по порядку."
-  fi
+
+$advice"
 }
