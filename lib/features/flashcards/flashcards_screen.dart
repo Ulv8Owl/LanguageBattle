@@ -122,6 +122,20 @@ class _FlashcardsScreenState extends State<FlashcardsScreen> {
       }
 
       final levelWords = await FlashcardBank.loadLevel(level);
+
+      // Слова для языка есть, только если для него переведён ВЕСЬ уровень
+      // (см. инвариант в FlashcardBank) — а переведены пока только en/ru/es.
+      // Игрок с редким языком в паре видит понятную причину вместо колоды
+      // из пустых карточек.
+      if (!FlashcardBank.hasContentFor(level, target) || !FlashcardBank.hasContentFor(level, native)) {
+        setState(() {
+          _loading = false;
+          _error = 'Для этой языковой пары в Тренировке пока нет слов — '
+              'контент на изучаемый и родной языки ещё не готов.';
+        });
+        return;
+      }
+
       final packWords = FlashcardBank.packSlice(levelWords, pack);
       final deckSize = _clampDeckSize((profile?['training_deck_size'] as num?)?.toInt());
       final offset = await _fetchProgress(uid, level, pack);
@@ -450,8 +464,10 @@ class _FlashcardsScreenState extends State<FlashcardsScreen> {
     }
 
     final entry = _packWords[_session.current!];
-    final front = entry.forLanguage(_targetLanguage);
-    final back = entry.forLanguage(_nativeLanguage);
+    // Пустая строка здесь недостижима на практике: _load() уже проверил
+    // hasContentFor на оба языка до того, как показать хоть одну карточку.
+    final front = entry.forLanguage(_targetLanguage) ?? '';
+    final back = entry.forLanguage(_nativeLanguage) ?? '';
 
     return Padding(
       padding: const EdgeInsets.all(20),

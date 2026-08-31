@@ -67,6 +67,31 @@ void main() {
     expect(all.toSet().length, 6000, reason: 'дубликаты слов');
   });
 
+  test('любой язык сверх en/ru/es переведён либо во ВСЕХ пунктах уровня, либо ни в одном', () {
+    // PhraseBank/FlashcardBank проверяют доступность языка по ОДНОМУ пункту
+    // (см. hasContentFor) — это дёшево, но полагается на то, что контент
+    // никогда не бывает переведён наполовину. Здесь эта гарантия
+    // проверяется по-настоящему, по всем ста/тысяче пунктам, а не по
+    // одному: наполовину переведённый уровень пройдёт мимо ручной проверки,
+    // но не мимо этого теста.
+    for (final level in levels) {
+      for (final MapEntry(key: file, value: expectedCount) in {
+        'assets/phrases/phrases_$level.json': 100,
+        'assets/vocab/words_$level.json': 1000,
+      }.entries) {
+        final items = read(file);
+        final extraLanguages = items
+            .expand((item) => item.keys)
+            .where((k) => k != 'en' && k != 'ru' && k != 'es')
+            .toSet();
+        for (final lang in extraLanguages) {
+          final withLang = items.where((item) => (item[lang] as String?)?.trim().isNotEmpty ?? false);
+          expect(withLang.length, expectedCount, reason: '$file/$lang: переведена не вся колода');
+        }
+      }
+    }
+  });
+
   test('первая колода уровня целиком собрана из его же фраз', () {
     // Ради этого весь словарь и пересобирался: колода, которую игрок
     // открывает первой, должна готовить ровно к тем фразам, что ему

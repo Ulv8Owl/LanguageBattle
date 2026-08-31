@@ -41,6 +41,10 @@ dependencies:
   record: ^7.1.1
   audioplayers: ^6.1.0
   path_provider: ^2.1.5
+  # Уже тянулся транзитивно через supabase_flutter (зафиксирован в
+  # pubspec.lock на 1.6.0) — переводим в прямую зависимость, потому что
+  # теперь на нём напрямую держится RemoteContent (lib/data/remote_content.dart).
+  http: ^1.2.0
   permission_handler: ^11.3.1
   uuid: ^4.5.1
   intl: ^0.19.0

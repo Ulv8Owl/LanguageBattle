@@ -6,6 +6,7 @@ import 'package:go_router/go_router.dart';
 import '../../core/game_access.dart';
 import '../../core/supabase_client.dart';
 import '../../core/theme.dart';
+import '../../data/phrase_bank.dart';
 import '../../data/player_rating.dart';
 import '../battle/battle_models.dart';
 import '../../widgets/chrolingo_widgets.dart';
@@ -85,7 +86,7 @@ class _MatchmakingScreenState extends State<MatchmakingScreen> {
           .maybeSingle();
       final learning = await supabase
           .from('user_languages')
-          .select('language_code')
+          .select('language_code, ${PlayerRating.columns}')
           .eq('user_id', currentUserId)
           .eq('role', 'learning')
           .eq('is_active', true)
@@ -98,6 +99,21 @@ class _MatchmakingScreenState extends State<MatchmakingScreen> {
         setState(() {
           _phase = _Phase.failed;
           _error = 'Сначала выбери языковую пару в онбординге.';
+        });
+        return;
+      }
+
+      // Фразы для раунда есть, только если уровень переведён на ОБА языка
+      // пары — а переведены пока только en/ru/es. Проверяем ДО постановки
+      // в очередь: найденный соперник уже реальный человек, и обрывать бой
+      // на середине из-за пустой фразы куда хуже, чем не пустить в поиск.
+      final level = PlayerRating.fromRow(learning).levelIndex;
+      await PhraseBank.loadLevel(level);
+      if (!PhraseBank.hasContentFor(level, nativeLanguage, targetLanguage)) {
+        setState(() {
+          _phase = _Phase.failed;
+          _error = 'Для этой языковой пары пока нет фраз — контент на '
+              'изучаемый и родной языки ещё не готов.';
         });
         return;
       }

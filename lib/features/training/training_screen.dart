@@ -136,10 +136,6 @@ class _TrainingScreenState extends State<TrainingScreen> {
       // Сложность фраз — по лиге игрока в изучаемом языке, то есть по
       // консервативной оценке Glicko-2, а не по сырому рейтингу.
       final level = PlayerRating.fromRow(learning).levelIndex;
-      await PhraseBank.loadLevel(level);
-      _phraseOrder = [
-        for (var i = 0; i < PhraseBank.perLevel; i++) level * PhraseBank.perLevel + i,
-      ]..shuffle();
 
       final me = await supabase
           .from('users')
@@ -148,6 +144,23 @@ class _TrainingScreenState extends State<TrainingScreen> {
           .maybeSingle();
       _nativeLanguage = (me?['native_language'] as String?) ?? 'ru';
       _myName = (me?['username'] as String?) ?? 'Ты';
+
+      await PhraseBank.loadLevel(level);
+      // Фразы есть, только если уровень переведён на ОБА языка пары — а
+      // переведены пока только en/ru/es. Проверяем до списания энергии
+      // (start_training_session ниже), чтобы не тратить её на сессию,
+      // которую нечем наполнить.
+      if (!PhraseBank.hasContentFor(level, _nativeLanguage, _targetLanguage)) {
+        setState(() {
+          _stage = _Stage.failed;
+          _error = 'Для этой языковой пары в Одиночной Игре пока нет фраз — '
+              'контент на изучаемый и родной языки ещё не готов.';
+        });
+        return;
+      }
+      _phraseOrder = [
+        for (var i = 0; i < PhraseBank.perLevel; i++) level * PhraseBank.perLevel + i,
+      ]..shuffle();
 
       // start_training_session проверяет подписку и списывает энергию на
       // сервере — клиент не решает ни то, ни другое.
