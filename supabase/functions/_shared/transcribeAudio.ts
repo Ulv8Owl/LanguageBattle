@@ -57,58 +57,215 @@ export interface TranscriptionResult {
   debug: Record<string, unknown>;
 }
 
-/** Язык приложения -> BCP-47, который ждут облачные ASR. */
-const BCP47_BY_LANGUAGE: Record<string, string> = {
-  en: "en-US",
-  es: "es-ES",
-  ru: "ru-RU",
+/**
+ * Языки: код приложения -> BCP-47 и письменность.
+ *
+ * Таблица рассчитана на РОСТ. Языков в игре сейчас три, но будет несколько
+ * десятков, и добавление нового должно быть одной строкой данных, а не
+ * правкой логики. Поэтому здесь перечислены и те языки, которых в игре
+ * пока нет: лишние строки ничего не стоят, а забытая строка в момент,
+ * когда язык включат, стоит сломанной проверки.
+ *
+ * ВАЖНО: список того, что реально можно выбрать в игре, живёт не здесь, а
+ * в languageNames в lib/core/languages.dart — там он ограничен языками, на
+ * которые у нас есть банк фраз и слов. Эта таблица только описывает языки,
+ * она их не включает.
+ */
+interface LanguageInfo {
+  /** Тег для провайдеров ASR. */
+  bcp47: string;
+  /**
+   * Письменности, в которых распознаватель выдаёт текст на этом языке.
+   *
+   * Именно ВЫДАЁТ, а не «в которых язык может быть записан». Для японского
+   * это кана и иероглифы, а не латиница: транслитерацию ASR не возвращает,
+   * и если пришла чистая латиница — говорили не по-японски. У сербского
+   * обе письменности настоящие, поэтому там их две.
+   */
+  scripts: Script[];
+}
+
+type Script =
+  | "latin"
+  | "cyrillic"
+  | "greek"
+  | "arabic"
+  | "hebrew"
+  | "armenian"
+  | "georgian"
+  | "devanagari"
+  | "bengali"
+  | "gurmukhi"
+  | "gujarati"
+  | "tamil"
+  | "telugu"
+  | "kannada"
+  | "malayalam"
+  | "sinhala"
+  | "thai"
+  | "lao"
+  | "khmer"
+  | "myanmar"
+  | "ethiopic"
+  | "han"
+  | "kana"
+  | "hangul";
+
+/**
+ * Диапазоны Unicode по письменностям. Проверяются только БУКВЫ: цифры,
+ * знаки препинания и пробелы одинаковы почти везде и о языке не говорят
+ * ничего.
+ */
+const SCRIPT_PATTERNS: [Script, RegExp][] = [
+  // Латиница с расширениями: диакритика европейских языков (À-ɏ) и
+  // вьетнамская (Latin Extended Additional).
+  ["latin", /[A-Za-zÀ-ɏḀ-ỿ]/],
+  ["cyrillic", /[Ѐ-ԯ]/],
+  ["greek", /[Ͱ-Ͽἀ-῿]/],
+  ["arabic", /[؀-ۿݐ-ݿﭐ-﷿ﹰ-﻿]/],
+  ["hebrew", /[֐-׿]/],
+  ["armenian", /[԰-֏]/],
+  ["georgian", /[Ⴀ-ჿᲐ-Ჿ]/],
+  ["devanagari", /[ऀ-ॿ]/],
+  ["bengali", /[ঀ-৿]/],
+  ["gurmukhi", /[਀-੿]/],
+  ["gujarati", /[઀-૿]/],
+  ["tamil", /[஀-௿]/],
+  ["telugu", /[ఀ-౿]/],
+  ["kannada", /[ಀ-೿]/],
+  ["malayalam", /[ഀ-ൿ]/],
+  ["sinhala", /[඀-෿]/],
+  ["thai", /[฀-๿]/],
+  ["lao", /[຀-໿]/],
+  ["khmer", /[ក-៿]/],
+  ["myanmar", /[က-႟]/],
+  ["ethiopic", /[ሀ-፿]/],
+  // Кана отдельно от иероглифов: текст с каной — точно японский, а текст
+  // из одних иероглифов японским быть может, а может и не быть.
+  ["kana", /[぀-ヿ]/],
+  ["hangul", /[가-힯ᄀ-ᇿ㄰-㆏]/],
+  ["han", /[㐀-䶿一-鿿豈-﫿]/],
+];
+
+const LANGUAGES: Record<string, LanguageInfo> = {
+  // --- латиница ---
+  en: { bcp47: "en-US", scripts: ["latin"] },
+  es: { bcp47: "es-ES", scripts: ["latin"] },
+  fr: { bcp47: "fr-FR", scripts: ["latin"] },
+  de: { bcp47: "de-DE", scripts: ["latin"] },
+  it: { bcp47: "it-IT", scripts: ["latin"] },
+  pt: { bcp47: "pt-PT", scripts: ["latin"] },
+  nl: { bcp47: "nl-NL", scripts: ["latin"] },
+  sv: { bcp47: "sv-SE", scripts: ["latin"] },
+  no: { bcp47: "nb-NO", scripts: ["latin"] },
+  da: { bcp47: "da-DK", scripts: ["latin"] },
+  fi: { bcp47: "fi-FI", scripts: ["latin"] },
+  is: { bcp47: "is-IS", scripts: ["latin"] },
+  pl: { bcp47: "pl-PL", scripts: ["latin"] },
+  cs: { bcp47: "cs-CZ", scripts: ["latin"] },
+  sk: { bcp47: "sk-SK", scripts: ["latin"] },
+  sl: { bcp47: "sl-SI", scripts: ["latin"] },
+  hr: { bcp47: "hr-HR", scripts: ["latin"] },
+  ro: { bcp47: "ro-RO", scripts: ["latin"] },
+  hu: { bcp47: "hu-HU", scripts: ["latin"] },
+  tr: { bcp47: "tr-TR", scripts: ["latin"] },
+  et: { bcp47: "et-EE", scripts: ["latin"] },
+  lv: { bcp47: "lv-LV", scripts: ["latin"] },
+  lt: { bcp47: "lt-LT", scripts: ["latin"] },
+  vi: { bcp47: "vi-VN", scripts: ["latin"] },
+  id: { bcp47: "id-ID", scripts: ["latin"] },
+  ms: { bcp47: "ms-MY", scripts: ["latin"] },
+  tl: { bcp47: "tl-PH", scripts: ["latin"] },
+  sw: { bcp47: "sw-KE", scripts: ["latin"] },
+  af: { bcp47: "af-ZA", scripts: ["latin"] },
+  ca: { bcp47: "ca-ES", scripts: ["latin"] },
+  eu: { bcp47: "eu-ES", scripts: ["latin"] },
+  gl: { bcp47: "gl-ES", scripts: ["latin"] },
+  cy: { bcp47: "cy-GB", scripts: ["latin"] },
+  sq: { bcp47: "sq-AL", scripts: ["latin"] },
+  az: { bcp47: "az-AZ", scripts: ["latin"] },
+  // --- кириллица ---
+  ru: { bcp47: "ru-RU", scripts: ["cyrillic"] },
+  uk: { bcp47: "uk-UA", scripts: ["cyrillic"] },
+  bg: { bcp47: "bg-BG", scripts: ["cyrillic"] },
+  mk: { bcp47: "mk-MK", scripts: ["cyrillic"] },
+  be: { bcp47: "be-BY", scripts: ["cyrillic"] },
+  kk: { bcp47: "kk-KZ", scripts: ["cyrillic"] },
+  mn: { bcp47: "mn-MN", scripts: ["cyrillic"] },
+  // Сербский официально пишется обеими письменностями — это не поблажка,
+  // а факт языка.
+  sr: { bcp47: "sr-RS", scripts: ["cyrillic", "latin"] },
+  // --- остальные системы письма ---
+  el: { bcp47: "el-GR", scripts: ["greek"] },
+  ar: { bcp47: "ar-SA", scripts: ["arabic"] },
+  fa: { bcp47: "fa-IR", scripts: ["arabic"] },
+  ur: { bcp47: "ur-PK", scripts: ["arabic"] },
+  he: { bcp47: "he-IL", scripts: ["hebrew"] },
+  hy: { bcp47: "hy-AM", scripts: ["armenian"] },
+  ka: { bcp47: "ka-GE", scripts: ["georgian"] },
+  hi: { bcp47: "hi-IN", scripts: ["devanagari"] },
+  mr: { bcp47: "mr-IN", scripts: ["devanagari"] },
+  ne: { bcp47: "ne-NP", scripts: ["devanagari"] },
+  bn: { bcp47: "bn-IN", scripts: ["bengali"] },
+  pa: { bcp47: "pa-IN", scripts: ["gurmukhi"] },
+  gu: { bcp47: "gu-IN", scripts: ["gujarati"] },
+  ta: { bcp47: "ta-IN", scripts: ["tamil"] },
+  te: { bcp47: "te-IN", scripts: ["telugu"] },
+  kn: { bcp47: "kn-IN", scripts: ["kannada"] },
+  ml: { bcp47: "ml-IN", scripts: ["malayalam"] },
+  si: { bcp47: "si-LK", scripts: ["sinhala"] },
+  th: { bcp47: "th-TH", scripts: ["thai"] },
+  lo: { bcp47: "lo-LA", scripts: ["lao"] },
+  km: { bcp47: "km-KH", scripts: ["khmer"] },
+  my: { bcp47: "my-MM", scripts: ["myanmar"] },
+  am: { bcp47: "am-ET", scripts: ["ethiopic"] },
+  ja: { bcp47: "ja-JP", scripts: ["kana", "han"] },
+  zh: { bcp47: "zh-CN", scripts: ["han"] },
+  ko: { bcp47: "ko-KR", scripts: ["hangul"] },
 };
 
 export function bcp47For(languageCode: string): string {
-  return BCP47_BY_LANGUAGE[languageCode] ?? "en-US";
+  return LANGUAGES[languageCode]?.bcp47 ?? "en-US";
 }
 
-/** Обратно: 'en-US' (или просто 'en') -> 'en'. Регистр Google не гарантирует. */
-export function languageFromBcp47(tag: string | null | undefined): string | null {
+/** Обратно: 'en-US' (или просто 'EN') -> 'en'. Регистр провайдеры не гарантируют. */
+export function languageFromTag(tag: string | null | undefined): string | null {
   if (typeof tag !== "string" || tag.length === 0) return null;
-  const base = tag.split("-")[0].toLowerCase();
-  return base in BCP47_BY_LANGUAGE ? base : null;
+  const base = tag.split(/[-_]/)[0].toLowerCase();
+  return base in LANGUAGES ? base : null;
 }
 
-/**
- * Письменность языка. Нужна ровно для одного вопроса — «это точно НЕ тот
- * язык?» — и ни для чего больше.
- */
-const SCRIPT_BY_LANGUAGE: Record<string, "cyrillic" | "latin"> = {
-  en: "latin",
-  es: "latin",
-  ru: "cyrillic",
-};
-
-const CYRILLIC = /[\u0400-\u04FF]/;
-const LATIN = /[A-Za-z\u00C0-\u024F]/;
+/** Какие письменности встретились в тексте. */
+function scriptsIn(text: string): Script[] {
+  return SCRIPT_PATTERNS.filter(([, re]) => re.test(text)).map(([script]) => script);
+}
 
 /**
  * Точно ли этот текст НЕ на языке [target].
  *
- * Отвечает только «нет» и «не знаю» — определять, что за язык на самом
- * деле, здесь никто не пытается: это работа распознавателя, и он её уже
- * сделал (см. detectedLanguage). Функция — страховка на случай, когда
- * провайдер язык не сообщил.
+ * Отвечает только «нет» и «не знаю»: определять, что за язык на самом деле,
+ * здесь никто не пытается — это работа распознавателя, и он её уже сделал
+ * (см. detectedLanguage). Функция нужна на случай, когда провайдер язык не
+ * назвал.
  *
- * Проверка одна и стоит микросекунды: письменность. Кириллица там, где
- * ждали английский, — это ответ на другом языке, и другого объяснения у
- * этого быть не может. Обратное тоже верно. Английский от испанского так
- * не отличить (обе латиница) — и не надо: в этом случае функция честно
- * говорит "не знаю", а не выдумывает ответ.
+ * Правило одно и работает для любой письменности, а не только для пары
+ * «кириллица/латиница»: если НИ ОДНА из встретившихся в тексте
+ * письменностей не используется в целевом языке — говорили не на нём.
+ * Кириллица там, где ждали английский, — не догадка. Иероглифы там, где
+ * ждали арабский, — тоже.
+ *
+ * Формулировка «ни одна» выбрана намеренно вместо «преобладает»: ответ с
+ * вкраплением латиницы («Я говорю OK») остаётся неопределённым, и функция
+ * честно молчит вместо того, чтобы обвинить игрока. Языки одной
+ * письменности (английский и испанский, хинди и маратхи) она не различает
+ * — и не должна: это работа провайдера.
  */
 export function definitelyNotLanguage(text: string, target: string): boolean {
-  const expected = SCRIPT_BY_LANGUAGE[target];
-  if (!expected) return false;
-  const hasCyrillic = CYRILLIC.test(text);
-  const hasLatin = LATIN.test(text);
-  if (expected === "latin") return hasCyrillic && !hasLatin;
-  return hasLatin && !hasCyrillic;
+  const allowed = LANGUAGES[target]?.scripts;
+  if (!allowed || allowed.length === 0) return false;
+  const present = scriptsIn(text);
+  if (present.length === 0) return false;
+  return !present.some((script) => allowed.includes(script));
 }
 
 /**
@@ -262,7 +419,7 @@ async function transcribeGoogle(
   // (definitelyNotLanguage).
   const detectionEnabled = (Deno.env.get("ASR_DETECT_LANGUAGE") ?? "1") !== "0";
   const alternatives = !detectionEnabled ? [] : alternativeLanguages
-    .filter((code) => code !== languageCode && code in BCP47_BY_LANGUAGE)
+    .filter((code) => code !== languageCode && languageFromTag(code) !== null)
     .slice(0, 3)
     .map(bcp47For);
 
@@ -356,7 +513,7 @@ async function transcribeGoogle(
   for (const result of results) {
     // Язык, который распознаватель выбрал для ЭТОГО куска. Пишется только
     // когда в запросе были альтернативы; берём первый непустой.
-    const resultLanguage = languageFromBcp47(result?.languageCode);
+    const resultLanguage = languageFromTag(result?.languageCode);
     if (resultLanguage) detected.push(resultLanguage);
     const alternative = result?.alternatives?.[0];
     if (!alternative) continue;
