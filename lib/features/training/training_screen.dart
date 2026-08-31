@@ -7,9 +7,9 @@ import '../../core/debug_flags.dart';
 import '../../core/game_access.dart';
 import '../../core/languages.dart';
 import '../../core/supabase_client.dart';
-import '../../core/word_packs.dart';
 import '../../core/theme.dart';
 import '../../data/phrase_bank.dart';
+import '../../data/player_rating.dart';
 import '../../data/voice_submission.dart';
 import '../../widgets/chrolingo_widgets.dart';
 import '../../widgets/ai_avatar.dart';
@@ -46,7 +46,7 @@ enum _Stage {
 /// Клиентская оценка недопустима ни в одном режиме.
 ///
 /// Раунд: фраза от ИИ → попытка №1 → разбор ошибок → попытка №2 →
-/// финальный балл 1-10 (ELO не меняется).
+/// финальный балл 1-10 (рейтинг не меняется).
 class TrainingScreen extends StatefulWidget {
   const TrainingScreen({super.key});
 
@@ -126,15 +126,16 @@ class _TrainingScreenState extends State<TrainingScreen> {
     try {
       final learning = await supabase
           .from('user_languages')
-          .select('language_code, elo')
+          .select('language_code, ${PlayerRating.columns}')
           .eq('user_id', _myId)
           .eq('role', 'learning')
           .eq('is_active', true)
           .limit(1)
           .maybeSingle();
       _targetLanguage = (learning?['language_code'] as String?) ?? 'en';
-      // Сложность фраз — по лиге игрока в изучаемом языке.
-      final level = leagueIndexForElo((learning?['elo'] as num?)?.toInt() ?? 1000);
+      // Сложность фраз — по лиге игрока в изучаемом языке, то есть по
+      // консервативной оценке Glicko-2, а не по сырому рейтингу.
+      final level = PlayerRating.fromRow(learning).levelIndex;
       await PhraseBank.loadLevel(level);
       _phraseOrder = [
         for (var i = 0; i < PhraseBank.perLevel; i++) level * PhraseBank.perLevel + i,

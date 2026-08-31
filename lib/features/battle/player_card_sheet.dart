@@ -1,9 +1,9 @@
 import 'package:flutter/material.dart';
 
 import '../../core/languages.dart';
-import '../../core/leagues.dart';
 import '../../core/supabase_client.dart';
 import '../../core/theme.dart';
+import '../../data/player_rating.dart';
 import '../../widgets/chrolingo_widgets.dart';
 
 /// Публичная карточка игрока — открывается тапом по аватарке в шапке боя.
@@ -42,7 +42,7 @@ class _PlayerCard extends StatefulWidget {
 class _PlayerCardState extends State<_PlayerCard> {
   bool _loading = true;
   String? _error;
-  int _elo = 1000;
+  PlayerRating _rating = PlayerRating.newcomer;
   String _learning = '';
   String _native = '';
 
@@ -65,7 +65,7 @@ class _PlayerCardState extends State<_PlayerCard> {
           .maybeSingle();
       final learning = await supabase
           .from('user_languages')
-          .select('language_code, elo')
+          .select('language_code, ${PlayerRating.columns}')
           .eq('user_id', widget.userId)
           .eq('role', 'learning')
           .eq('is_active', true)
@@ -89,7 +89,7 @@ class _PlayerCardState extends State<_PlayerCard> {
       setState(() {
         _native = (user?['native_language'] as String?) ?? '';
         _learning = (learning?['language_code'] as String?) ?? '';
-        _elo = (learning?['elo'] as int?) ?? 1000;
+        _rating = PlayerRating.fromRow(learning);
         _friendshipExists = exists;
         _loading = false;
       });
@@ -132,7 +132,7 @@ class _PlayerCardState extends State<_PlayerCard> {
 
   @override
   Widget build(BuildContext context) {
-    final league = leagueFor(_elo);
+    final league = _rating.league;
     return SafeArea(
       child: Padding(
         padding: const EdgeInsets.fromLTRB(20, 14, 20, 20),
@@ -167,7 +167,12 @@ class _PlayerCardState extends State<_PlayerCard> {
                   children: [
                     _row('Лига', league.name, league.color),
                     const Divider(height: 18, color: AppColors.line),
-                    _row('Рейтинг', '$_elo', AppColors.cream),
+                    // «± RD» — насколько система уверена в этой оценке.
+                    // Без него рейтинг новичка и рейтинг наигранного
+                    // игрока выглядят одинаково весомо, хотя это не так.
+                    _row('Рейтинг',
+                        '${_rating.display} ± ${_rating.deviation.round()}',
+                        AppColors.cream),
                     const Divider(height: 18, color: AppColors.line),
                     _row(
                       'Языковая пара',

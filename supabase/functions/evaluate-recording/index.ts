@@ -30,17 +30,22 @@ import {
 import { transcribeAudio } from "../_shared/transcribeAudio.ts";
 
 /**
- * Лига говорящего приравнена к уровню CEFR (см. supabase/migrations/0010 —
- * те же границы ELO, что и league_index_for_elo/cefr_level_for_elo там,
+ * Лига говорящего приравнена к уровню CEFR (см. supabase/migrations/0023 —
+ * те же границы, что и league_index_for_rating/cefr_level_for_elo там,
  * продублировано здесь, потому что Edge Function не может импортировать
  * SQL). Если меняете пороги — меняйте в обоих местах.
+ *
+ * На вход идёт league_rating — консервативная оценка Glicko-2
+ * (rating - 2*RD), а НЕ сырой рейтинг. Пока система в игроке не уверена,
+ * судья объясняет проще: лучше недооценить уровень новичка, чем завалить
+ * его разбором на C1.
  */
-function cefrLevelForElo(elo: number): CefrLevel {
-  if (elo < 1200) return "A1";
-  if (elo < 1500) return "A2";
-  if (elo < 1800) return "B1";
-  if (elo < 2100) return "B2";
-  if (elo < 2400) return "C1";
+function cefrLevelForRating(leagueRating: number): CefrLevel {
+  if (leagueRating < 1200) return "A1";
+  if (leagueRating < 1500) return "A2";
+  if (leagueRating < 1800) return "B1";
+  if (leagueRating < 2100) return "B2";
+  if (leagueRating < 2400) return "C1";
   return "C2";
 }
 
@@ -233,16 +238,16 @@ async function processJob(job_id: string): Promise<void> {
     } else {
       // Лига говорящего на этом языке -> уровень CEFR (скрытая механика:
       // приравнивание лиг к A1-C2) — ограничивает только сложность текста
-      // объяснений LLM, не саму оценку. Нет строки/ELO — считаем новичком
-      // (1000 ELO по умолчанию, как и везде в проекте).
+      // объяснений LLM, не саму оценку. Нет строки — считаем новичком
+      // (league_rating 1000 = A1, как и везде в проекте).
       const { data: speakerLanguage } = await supabase
         .from("user_languages")
-        .select("elo")
+        .select("league_rating")
         .eq("user_id", recording.user_id)
         .eq("language_code", targetLanguage)
         .eq("role", "learning")
         .maybeSingle();
-      const level = cefrLevelForElo(speakerLanguage?.elo ?? 1000);
+      const level = cefrLevelForRating(speakerLanguage?.league_rating ?? 1000);
 
       const { data: speaker } = await supabase
         .from("users")

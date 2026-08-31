@@ -2,9 +2,9 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 
-import '../../core/leagues.dart';
 import '../../core/supabase_client.dart';
 import '../../core/theme.dart';
+import '../../data/player_rating.dart';
 import '../../widgets/chrolingo_widgets.dart';
 
 /// Флаг по коду языка. Отдельного поля "страна" в схеме нет (раздел 4),
@@ -12,37 +12,38 @@ import '../../widgets/chrolingo_widgets.dart';
 /// данные, а не выдуманные.
 const languageFlags = {'en': '🇬🇧', 'es': '🇪🇸', 'ru': '🇷🇺'};
 
-/// Карточка игрока: имя, флаг, ELO — одинаково во всех трёх вкладках
+/// Карточка игрока: имя, флаг, рейтинг — одинаково во всех трёх вкладках
 /// (раздел 5.1, п.8).
 class PlayerRef {
   final String id;
   final String username;
   final String? nativeLanguage;
-  final int elo;
+  final PlayerRating rating;
 
   const PlayerRef({
     required this.id,
     required this.username,
     required this.nativeLanguage,
-    required this.elo,
+    required this.rating,
   });
 
   String get flag => languageFlags[nativeLanguage] ?? '🏳';
 }
 
-/// Подтягивает имя/флаг/ELO для набора id одним заходом.
+/// Подтягивает имя/флаг/рейтинг для набора id одним заходом.
 Future<Map<String, PlayerRef>> loadPlayers(Iterable<String> ids) async {
   final list = ids.toSet().toList();
   if (list.isEmpty) return {};
   final users = await supabase.from('users').select('id, username, native_language').inFilter('id', list);
   final langs = await supabase
       .from('user_languages')
-      .select('user_id, elo')
+      .select('user_id, ${PlayerRating.columns}')
       .inFilter('user_id', list)
       .eq('role', 'learning')
       .eq('is_active', true);
-  final eloById = <String, int>{
-    for (final row in langs) row['user_id'] as String: (row['elo'] as int?) ?? 1000,
+  final ratingById = <String, PlayerRating>{
+    for (final row in langs)
+      row['user_id'] as String: PlayerRating.fromRow(Map<String, dynamic>.from(row)),
   };
   return {
     for (final row in users)
@@ -50,7 +51,7 @@ Future<Map<String, PlayerRef>> loadPlayers(Iterable<String> ids) async {
         id: row['id'] as String,
         username: (row['username'] as String?) ?? 'Игрок',
         nativeLanguage: row['native_language'] as String?,
-        elo: eloById[row['id'] as String] ?? 1000,
+        rating: ratingById[row['id'] as String] ?? PlayerRating.newcomer,
       ),
   };
 }
@@ -172,7 +173,11 @@ class _FriendsListTabState extends State<_FriendsListTab> {
 
       if (!mounted) return;
       setState(() {
-        _friends = friendPlayers.values.toList()..sort((a, b) => b.elo.compareTo(a.elo));
+        // Сортировка по консервативной оценке, а не по сырому рейтингу:
+        // иначе новичок с двумя удачными матчами и RD 250 оказался бы
+        // выше того, кто эти очки действительно наиграл.
+        _friends = friendPlayers.values.toList()
+          ..sort((a, b) => b.rating.leagueRating.compareTo(a.rating.leagueRating));
         _party = partyMembers;
         _invites = List<Map<String, dynamic>>.from(invites);
         _inviters = inviterPlayers;
@@ -402,7 +407,7 @@ class _InviteCard extends StatelessWidget {
   }
 }
 
-/// Единый вид строки игрока: имя, флаг, ELO.
+/// Единый вид строки игрока: имя, флаг, рейтинг.
 class PlayerRow extends StatelessWidget {
   final PlayerRef player;
   final Widget? leading;
@@ -447,8 +452,16 @@ class PlayerRow extends StatelessWidget {
             ),
           ),
           Text(
-            '${player.elo}',
+            '${player.rating.display}',
             style: AppFonts.mono(fontSize: 10, weight: FontWeight.w700, color: color),
+          ),
+          // Рядом с рейтингом — его отклонение. Оно объясняет порядок в
+          // списке: список отсортирован по консервативной оценке, поэтому
+          // «1700 ± 300» стоит ниже, чем «1600 ± 60».
+          const SizedBox(width: 4),
+          Text(
+            '±${player.rating.deviation.round()}',
+            style: AppFonts.mono(fontSize: 8, color: AppColors.muted),
           ),
           ?trailing,
         ],
@@ -482,10 +495,13 @@ class _LeaderboardTabState extends State<_LeaderboardTab> {
     try {
       final rows = await supabase
           .from('user_languages')
-          .select('elo, users(id, username, native_language)')
+          .select('${PlayerRating.columns}, users(id, username, native_language)')
           .eq('role', 'learning')
           .eq('is_active', true)
-          .order('elo', ascending: false)
+          // Таблица лидеров идёт по league_rating (rating - 2*RD) — так
+          // рекомендует сам Гликман: место в таблице должно отражать то,
+          // что система про игрока уже знает, а не аванс новичку.
+          .order('league_rating', ascending: false)
           .limit(50);
       final players = <PlayerRef>[];
       for (final row in rows) {
@@ -495,7 +511,7 @@ class _LeaderboardTabState extends State<_LeaderboardTab> {
           id: user['id'] as String,
           username: (user['username'] as String?) ?? 'Игрок',
           nativeLanguage: user['native_language'] as String?,
-          elo: (row['elo'] as int?) ?? 1000,
+          rating: PlayerRating.fromRow(Map<String, dynamic>.from(row)),
         ));
       }
       if (!mounted) return;
@@ -523,7 +539,7 @@ class _LeaderboardTabState extends State<_LeaderboardTab> {
         itemBuilder: (context, i) {
           final player = _rows[i];
           final isMe = player.id == myId;
-          final league = leagueFor(player.elo);
+          final league = player.rating.league;
           return PlayerRow(
             player: player,
             accent: league.color,

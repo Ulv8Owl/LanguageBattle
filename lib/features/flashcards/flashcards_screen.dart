@@ -8,6 +8,7 @@ import '../../core/supabase_client.dart';
 import '../../core/theme.dart';
 import '../../core/word_packs.dart';
 import '../../data/flashcard_bank.dart';
+import '../../data/player_rating.dart';
 import '../../data/training_session.dart';
 import '../../widgets/chrolingo_widgets.dart';
 
@@ -83,7 +84,7 @@ class _FlashcardsScreenState extends State<FlashcardsScreen> {
           .maybeSingle();
       final learning = await supabase
           .from('user_languages')
-          .select('language_code, elo')
+          .select('language_code, ${PlayerRating.columns}')
           .eq('user_id', uid)
           .eq('role', 'learning')
           .eq('is_active', true)
@@ -99,10 +100,9 @@ class _FlashcardsScreenState extends State<FlashcardsScreen> {
         return;
       }
 
-      final elo = (learning?['elo'] as num?)?.toInt() ?? 1000;
       final requested = trainingLevelRequest.value;
       trainingLevelRequest.value = -1; // разово — дальше снова по лиге
-      final defaultLevel = leagueIndexForElo(elo);
+      final defaultLevel = PlayerRating.fromRow(learning).levelIndex;
       var level = (requested >= 0 && requested <= 5) ? requested : defaultLevel;
 
       final catalog = await WordPackCatalog.fetch();

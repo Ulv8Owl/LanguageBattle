@@ -6,6 +6,7 @@ import 'package:go_router/go_router.dart';
 import '../../core/game_access.dart';
 import '../../core/supabase_client.dart';
 import '../../core/theme.dart';
+import '../../data/player_rating.dart';
 import '../battle/battle_models.dart';
 import '../../widgets/chrolingo_widgets.dart';
 
@@ -39,7 +40,7 @@ class _MatchmakingScreenState extends State<MatchmakingScreen> {
   String? _ticketId;
   String? _matchId;
   String _opponentName = 'Соперник';
-  int _opponentElo = 1000;
+  PlayerRating _opponentRating = PlayerRating.newcomer;
   String? _error;
   bool _accepting = false;
   bool _accepted = false;
@@ -153,8 +154,13 @@ class _MatchmakingScreenState extends State<MatchmakingScreen> {
     }
   }
 
-  /// Окно допустимой разницы ELO расширяется по ходу поиска (раздел 2.3),
-  /// чтобы не искать вечно точное совпадение.
+  /// Окно допустимой разницы рейтингов расширяется по ходу поиска
+  /// (раздел 2.3), чтобы не искать вечно точное совпадение.
+  ///
+  /// Подбор идёт по САМОМУ рейтингу, а не по консервативной оценке: соперник
+  /// нужен равный по силе, и осторожность системы к этому отношения не
+  /// имеет. Шкала Glicko-2 совпадает со шкалой эло (те же ~400 очков на
+  /// десятикратную разницу шансов), поэтому пороги окна остались прежними.
   int _eloWindowFor(int elapsedSeconds) {
     if (elapsedSeconds < 10) return 100;
     if (elapsedSeconds < 20) return 250;
@@ -208,20 +214,20 @@ class _MatchmakingScreenState extends State<MatchmakingScreen> {
             .eq('id', opponentId)
             .maybeSingle();
         _opponentName = (opp?['username'] as String?) ?? 'Соперник';
-        // ELO соперника ИМЕННО для языка этого матча — у игрока может быть
+        // Рейтинг соперника ИМЕННО для языка этого матча — у игрока может быть
         // до 4 языковых пар с разным рейтингом, а нас интересует не то,
         // что у него сейчас "активно", а тот конкретный язык, на котором
         // будет идти бой.
         final targetLanguage = match.languageForSlot(opponentId, 'target');
         final oppLang = await supabase
             .from('user_languages')
-            .select('elo')
+            .select(PlayerRating.columns)
             .eq('user_id', opponentId)
             .eq('role', 'learning')
             .eq('language_code', targetLanguage)
             .limit(1)
             .maybeSingle();
-        _opponentElo = (oppLang?['elo'] as int?) ?? 1000;
+        _opponentRating = PlayerRating.fromRow(oppLang);
       }
     } catch (e) {
       debugPrint('failed to load opponent card: $e');
@@ -362,7 +368,7 @@ class _MatchmakingScreenState extends State<MatchmakingScreen> {
         Text('Ищем соперника', style: AppFonts.ui(fontSize: 17, weight: FontWeight.w800)),
         const SizedBox(height: 8),
         Text(
-          'Окно рейтинга расширяется: ±${_eloWindowFor(_elapsed)} ELO',
+          'Окно рейтинга расширяется: ±${_eloWindowFor(_elapsed)}',
           style: const TextStyle(color: AppColors.muted, fontSize: 12),
         ),
         const SizedBox(height: 32),
@@ -397,7 +403,8 @@ class _MatchmakingScreenState extends State<MatchmakingScreen> {
                   children: [
                     Text(_opponentName, style: AppFonts.ui(fontSize: 15, weight: FontWeight.w800)),
                     const SizedBox(height: 4),
-                    Text('$_opponentElo ELO',
+                    Text(
+                        '${_opponentRating.display} ± ${_opponentRating.deviation.round()}',
                         style: AppFonts.mono(fontSize: 11, weight: FontWeight.w700, color: AppColors.gold)),
                   ],
                 ),

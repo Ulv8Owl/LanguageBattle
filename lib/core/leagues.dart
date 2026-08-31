@@ -12,7 +12,13 @@ import 'theme.dart';
 /// Одна таблица порогов на всё приложение: Арена рисует по ней лестницу
 /// лиг, «Рейтинг» подсвечивает ей рамку аватара, банк фраз и слов берёт по
 /// ней уровень сложности. Порядок и число ДОЛЖНЫ совпадать с
-/// wordLevelSlugs в word_packs.dart и с league_index_for_elo в SQL.
+/// wordLevelSlugs в word_packs.dart и с league_index_for_rating в SQL.
+///
+/// Границы применяются к КОНСЕРВАТИВНОЙ оценке Glicko-2 (league_rating =
+/// rating - 2*RD), а не к самому рейтингу — см. PlayerRating в
+/// lib/data/player_rating.dart. Сами числа при переходе с эло на Glicko-2
+/// не менялись: перенос подобран так, что у существующих игроков
+/// league_rating совпал с их прежним эло и лига ни у кого не поехала.
 class League {
   final String name;
   final String shortName;
@@ -43,7 +49,7 @@ class League {
 
 /// Названия здесь — то, что видит игрок. В базе лига по-прежнему хранится
 /// английским слагом (bronze/silver/gold/platinum/diamond/master, см.
-/// league_for_elo в миграции 0010), и переименование его не касается:
+/// league_slug_for_elo в миграции 0010), и переименование его не касается:
 /// столбец служебный, логика везде считается от рейтинга. Поэтому первая
 /// лига называется «Олово», а в базе у неё слаг bronze — это не рассинхрон.
 const leagueBands = <League>[
@@ -55,9 +61,11 @@ const leagueBands = <League>[
   League(name: 'Алмаз', shortName: 'Алмаз', cefr: 'C2', min: 2400, max: 999999, color: Color(0xFF4C82E4)),
 ];
 
-League leagueFor(int elo) {
+/// [leagueRating] — консервативная оценка rating - 2*RD (колонка
+/// user_languages.league_rating), а не сам рейтинг Glicko-2.
+League leagueFor(int leagueRating) {
   for (final b in leagueBands) {
-    if (elo >= b.min && elo < b.max) return b;
+    if (leagueRating >= b.min && leagueRating < b.max) return b;
   }
   return leagueBands.last;
 }

@@ -8,6 +8,7 @@ import '../../core/debug_flags.dart';
 import '../../core/languages.dart';
 import '../../core/leagues.dart';
 import '../../core/supabase_client.dart';
+import '../../data/player_rating.dart';
 import '../../data/training_session.dart';
 import '../../core/theme.dart';
 import '../../widgets/chrolingo_widgets.dart';
@@ -42,8 +43,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
   /// Рейтинг по изучаемому языку. Здесь его можно задать вручную — это
   /// отладочная возможность: дождаться перехода в следующую лигу честной
   /// игрой это десятки матчей, а проверять надо все шесть.
-  int? _elo;
-  bool _savingElo = false;
+  PlayerRating? _rating;
+  bool _savingRating = false;
 
   @override
   void initState() {
@@ -61,7 +62,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
       if (!mounted) return;
       final learning = await supabase
           .from('user_languages')
-          .select('elo')
+          .select(PlayerRating.columns)
           .eq('user_id', currentUserId)
           .eq('role', 'learning')
           .eq('is_active', true)
@@ -72,7 +73,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
         _nativeLanguage = row?['native_language'] as String?;
         final size = (row?['training_deck_size'] as num?)?.toInt();
         if (size != null && trainingDeckSizes.contains(size)) _deckSize = size;
-        _elo = (learning?['elo'] as num?)?.toInt();
+        _rating = learning == null ? null : PlayerRating.fromRow(learning);
       });
     } catch (_) {
       // Не удалось — покажем прочерк, менять язык это не мешает.
@@ -224,9 +225,19 @@ class _SettingsScreenState extends State<SettingsScreen> {
     }
   }
 
-  Future<void> _editElo() async {
-    final controller = TextEditingController(text: '${_elo ?? 1000}');
-    final entered = await showDialog<int>(
+  /// Правим не сам рейтинг, а ту величину, по которой считается лига
+  /// (league_rating = rating - 2*RD), плюс отдельно RD. Иначе отладка
+  /// врала бы: выставив «рейтинг 2400», разработчик увидел бы у себя не
+  /// Алмаз, а лигу на 700 очков ниже — потому что league_rating меньше
+  /// рейтинга ровно на два отклонения. RD вынесен отдельным полем, чтобы
+  /// можно было проверить и вид новичка (350), и вид наигранного (50).
+  Future<void> _editRating() async {
+    final current = _rating ?? PlayerRating.newcomer;
+    final leagueController =
+        TextEditingController(text: '${current.leagueRating}');
+    final rdController =
+        TextEditingController(text: '${current.deviation.round()}');
+    final entered = await showDialog<List<int>>(
       context: context,
       builder: (ctx) => AlertDialog(
         backgroundColor: AppColors.navy2,
@@ -236,15 +247,27 @@ class _SettingsScreenState extends State<SettingsScreen> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             const Text(
-              'Отладочная настройка: лига и сложность фраз считаются по рейтингу.',
+              'Отладочная настройка. Лига и сложность фраз считаются по '
+              'консервативной оценке Glicko-2: рейтинг минус два отклонения. '
+              'Первое поле — именно она, пороги лиг ниже даны в ней же. '
+              'Сам рейтинг будет выставлен так, чтобы сойтись с этими двумя '
+              'числами.',
               style: TextStyle(color: AppColors.muted, fontSize: 12, height: 1.4),
             ),
             const SizedBox(height: 12),
             TextField(
-              controller: controller,
+              controller: leagueController,
               autofocus: true,
               keyboardType: TextInputType.number,
-              decoration: const InputDecoration(labelText: 'Число'),
+              decoration: const InputDecoration(labelText: 'Рейтинг в зачёт лиги'),
+            ),
+            const SizedBox(height: 8),
+            TextField(
+              controller: rdController,
+              keyboardType: TextInputType.number,
+              decoration: const InputDecoration(
+                labelText: 'RD: 350 — новичок, 50 — наигранный',
+              ),
             ),
             const SizedBox(height: 10),
             for (final band in leagueBands)
@@ -259,8 +282,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
           TextButton(onPressed: () => Navigator.of(ctx).pop(), child: const Text('Отмена')),
           TextButton(
             onPressed: () {
-              final value = int.tryParse(controller.text.trim());
-              Navigator.of(ctx).pop(value);
+              final league = int.tryParse(leagueController.text.trim());
+              final rd = int.tryParse(rdController.text.trim());
+              Navigator.of(ctx).pop(
+                league == null || rd == null ? null : [league, rd],
+              );
             },
             child: const Text('Применить'),
           ),
@@ -268,29 +294,46 @@ class _SettingsScreenState extends State<SettingsScreen> {
       ),
     );
     if (entered == null || !mounted) return;
-    final value = entered.clamp(0, 99999);
+    final leagueValue = entered[0].clamp(0, 99999);
+    // Нижняя граница RD — 30: ниже система в реальной игре не опускается
+    // (glicko2_update держит её сверху 350, снизу её держит сама формула).
+    final rd = entered[1].clamp(30, 350);
+    final rating = (leagueValue + 2 * rd).toDouble();
 
-    setState(() => _savingElo = true);
+    setState(() => _savingRating = true);
     try {
+      // elo, league_rating, league и cefr_level пересчитает триггер
+      // trg_sync_rating_mirrors — их отсюда трогать нельзя.
       await supabase
           .from('user_languages')
-          .update({'elo': value})
+          .update({
+            'rating': rating,
+            'rating_deviation': rd.toDouble(),
+            'rating_updated_at': DateTime.now().toUtc().toIso8601String(),
+          })
           .eq('user_id', currentUserId)
           .eq('role', 'learning')
           .eq('is_active', true);
       if (!mounted) return;
       setState(() {
-        _elo = value;
-        _savingElo = false;
+        _rating = PlayerRating(
+          rating: rating,
+          deviation: rd.toDouble(),
+          leagueRating: leagueValue,
+        );
+        _savingRating = false;
       });
       // Арена держит рейтинг в своём состоянии и сама его не перечитывает.
       notifyProfileChanged();
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Рейтинг $value · ${leagueFor(value).titleWithLevel}')),
+        SnackBar(
+          content: Text('Рейтинг ${rating.round()} ± $rd · в зачёт лиги '
+              '$leagueValue · ${leagueFor(leagueValue).titleWithLevel}'),
+        ),
       );
     } catch (e) {
       if (!mounted) return;
-      setState(() => _savingElo = false);
+      setState(() => _savingRating = false);
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Не удалось изменить рейтинг: $e')),
       );
@@ -358,13 +401,16 @@ class _SettingsScreenState extends State<SettingsScreen> {
               child: _Row(
                 icon: Icons.emoji_events_outlined,
                 title: 'Рейтинг и лига',
-                trailing: _savingElo
+                trailing: _savingRating
                     ? const SizedBox(height: 14, width: 14, child: CircularProgressIndicator(strokeWidth: 2))
                     : Text(
-                        _elo == null ? '—' : '$_elo · ${leagueFor(_elo!).cefr}',
+                        _rating == null
+                            ? '—'
+                            : '${_rating!.display} ± ${_rating!.deviation.round()}'
+                                ' · ${_rating!.league.cefr}',
                         style: AppFonts.mono(fontSize: 11, color: AppColors.muted),
                       ),
-                onTap: _savingElo ? null : _editElo,
+                onTap: _savingRating ? null : _editRating,
               ),
             ),
             const SizedBox(height: 18),

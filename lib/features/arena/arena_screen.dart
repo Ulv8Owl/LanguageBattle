@@ -8,7 +8,7 @@ import '../../widgets/league_trophy.dart';
 import '../../core/nav_state.dart';
 import '../../core/supabase_client.dart';
 import '../../core/theme.dart';
-import '../../core/word_packs.dart';
+import '../../data/player_rating.dart';
 import '../../widgets/chrolingo_widgets.dart';
 
 class ArenaScreen extends StatefulWidget {
@@ -27,7 +27,7 @@ enum _ModeKey { training, solo, sparring, duel }
 class _ArenaScreenState extends State<ArenaScreen> {
   Map<String, dynamic>? _profile;
   WalletState _wallet = WalletState.empty;
-  int _elo = 1000;
+  PlayerRating _rating = PlayerRating.newcomer;
   bool _loading = true;
 
   /// null — ничего не подсвечено. Задаётся на время, пока открыта плашка
@@ -40,7 +40,7 @@ class _ArenaScreenState extends State<ArenaScreen> {
     _load();
     profileRevision.addListener(_load);
     // Смена языковой пары в Профиле должна сразу отразиться на Арене
-    // (ELO, доступность режимов) — Арена не пересоздаётся при
+    // (рейтинг, доступность режимов) — Арена не пересоздаётся при
     // переключении вкладок (IndexedStack), поэтому слушаем нотификатор.
     languagePairVersion.addListener(_load);
   }
@@ -62,7 +62,7 @@ class _ArenaScreenState extends State<ArenaScreen> {
       final wallet = await GameAccess.sync();
       final learning = await supabase
           .from('user_languages')
-          .select('elo')
+          .select(PlayerRating.columns)
           .eq('user_id', uid)
           .eq('role', 'learning')
           .eq('is_active', true)
@@ -72,7 +72,7 @@ class _ArenaScreenState extends State<ArenaScreen> {
       setState(() {
         _profile = profile;
         _wallet = wallet;
-        _elo = (learning?['elo'] as int?) ?? 1000;
+        _rating = PlayerRating.fromRow(learning);
         _loading = false;
       });
     } catch (_) {
@@ -190,7 +190,7 @@ class _ArenaScreenState extends State<ArenaScreen> {
     // По умолчанию — 1000 слов текущей лиги игрока; ниже своей лиги можно
     // потренировать более простой набор, выше — нельзя (там ещё нечего
     // покупать, см. word_pack_price/league_locked).
-    final maxLevel = leagueIndexForElo(_elo);
+    final maxLevel = _rating.levelIndex;
     var selectedLevel = maxLevel;
 
     return StatefulBuilder(
@@ -245,7 +245,7 @@ class _ArenaScreenState extends State<ArenaScreen> {
           'после первой — подробный разбор ошибок, вторая идёт в зачёт.',
       stats: const [
         _Stat(value: '5', label: 'раундов', color: AppColors.gold),
-        _Stat(value: '—', label: 'ELO', color: AppColors.cyan),
+        _Stat(value: '—', label: 'рейтинг', color: AppColors.cyan),
         _Stat(value: '1', label: 'энергии', color: AppColors.cyan),
       ],
       primaryLabel: 'Начать',
@@ -262,10 +262,12 @@ class _ArenaScreenState extends State<ArenaScreen> {
       title: 'Состязание',
       description: 'PvP против любого игрока с тем же изучаемым языком. '
           '10 раундов, одно голосовое за раунд.',
-      stats: const [
-        _Stat(value: '10', label: 'раундов', color: AppColors.gold),
-        _Stat(value: '±20', label: 'ELO', color: AppColors.cyan),
-        _Stat(value: '+100', label: 'монет', color: AppColors.gold),
+      stats: [
+        const _Stat(value: '10', label: 'раундов', color: AppColors.gold),
+        // Не константа: в Glicko-2 ход рейтинга зависит от того, насколько
+        // система уверена в игроке (см. PlayerRating.estimatedSwing).
+        _Stat(value: '±${_rating.estimatedSwing}', label: 'рейтинга', color: AppColors.cyan),
+        const _Stat(value: '+100', label: 'монет', color: AppColors.gold),
       ],
       primaryLabel: 'Найти соперника',
       onPrimary: () => context.push('/matchmaking/sparring'),
@@ -284,10 +286,10 @@ class _ArenaScreenState extends State<ArenaScreen> {
       title: 'Дуэль',
       description: 'Бой против настоящего носителя изучаемого языка. '
           '10 раундов, по два голосовых с каждой стороны.',
-      stats: const [
-        _Stat(value: '10', label: 'раундов', color: AppColors.gold),
-        _Stat(value: '±24', label: 'ELO', color: AppColors.cyan),
-        _Stat(value: '+120', label: 'монет', color: AppColors.gold),
+      stats: [
+        const _Stat(value: '10', label: 'раундов', color: AppColors.gold),
+        _Stat(value: '±${_rating.estimatedSwing}', label: 'рейтинга', color: AppColors.cyan),
+        const _Stat(value: '+120', label: 'монет', color: AppColors.gold),
       ],
       primaryLabel: 'Найти соперника',
       onPrimary: () => context.push('/matchmaking/native_duel'),
@@ -325,8 +327,7 @@ class _ArenaScreenState extends State<ArenaScreen> {
     final xp = (_profile?['xp'] as int?) ?? 0;
     final level = 1 + xp ~/ 100;
     final levelProgress = (xp % 100) / 100;
-    final league = leagueFor(_elo);
-    final bandProgress = ((_elo - league.min) / (league.max - league.min)).clamp(0.0, 1.0);
+    final league = _rating.league;
 
     return RefreshIndicator(
       onRefresh: _load,
@@ -427,10 +428,10 @@ class _ArenaScreenState extends State<ArenaScreen> {
                 style: AppFonts.ui(fontSize: 16, weight: FontWeight.w800, color: league.color),
               ),
               const SizedBox(height: 12),
-              // Полоса анимированная: рейтинг меняется на ±16-32 внутри
-              // трёхсотенной полосы, и без движения этот сдвиг на глаз
-              // неотличим от полной неподвижности.
-              _LeagueProgress(league: league, elo: _elo, progress: bandProgress),
+              // Полоса анимированная: сдвиг за матч мал по сравнению с
+              // шириной лиги, и без движения он на глаз неотличим от
+              // полной неподвижности.
+              _LeagueProgress(rating: _rating),
               const SizedBox(height: 14),
               Row(
                 mainAxisAlignment: MainAxisAlignment.center,
@@ -455,16 +456,22 @@ class _ArenaScreenState extends State<ArenaScreen> {
 }
 
 /// Полоса продвижения внутри лиги: слева порог входа, справа порог
-/// следующей, посередине текущий рейтинг.
+/// следующей.
+///
+/// Заполнение считается по league_rating (консервативная оценка Glicko-2),
+/// а рейтинг под полосой показывается настоящий — это разные числа, и
+/// подписаны они поэтому раздельно. Пока RD большое, разрыв между ними
+/// заметен, и внизу появляется строчка, объясняющая, почему.
 class _LeagueProgress extends StatelessWidget {
-  final League league;
-  final int elo;
-  final double progress;
+  final PlayerRating rating;
 
-  const _LeagueProgress({required this.league, required this.elo, required this.progress});
+  const _LeagueProgress({required this.rating});
 
   @override
   Widget build(BuildContext context) {
+    final league = rating.league;
+    final progress = rating.bandProgress;
+    final toNext = rating.toNextLeague;
     return Column(
       children: [
         Row(
@@ -506,11 +513,35 @@ class _LeagueProgress extends StatelessWidget {
         ),
         const SizedBox(height: 6),
         Text(
-          league.max > 90000 ? 'Рейтинг $elo' : 'Рейтинг $elo · до следующей лиги ${league.max - elo}',
+          'Рейтинг ${rating.display} ± ${rating.deviation.round()}',
           style: AppFonts.mono(fontSize: 10, weight: FontWeight.w700, color: AppColors.cream),
         ),
+        const SizedBox(height: 2),
+        Text(
+          toNext == null
+              ? 'В зачёт лиги ${rating.leagueRating} · выше лиг нет'
+              : 'В зачёт лиги ${rating.leagueRating} · до лиги «${_nextLeagueName(league)}» $toNext',
+          style: AppFonts.mono(fontSize: 9, color: AppColors.muted),
+        ),
+        if (rating.isProvisional) ...[
+          const SizedBox(height: 4),
+          Text(
+            'Рейтинг ещё уточняется: пока система в нём не уверена, '
+            'в зачёт лиги идёт осторожная оценка. Сыграй несколько матчей — '
+            'разрыв сократится сам.',
+            textAlign: TextAlign.center,
+            style: AppFonts.ui(fontSize: 10, color: AppColors.muted),
+          ),
+        ],
       ],
     );
+  }
+
+  static String _nextLeagueName(League current) {
+    final i = leagueBands.indexOf(current);
+    return (i >= 0 && i + 1 < leagueBands.length)
+        ? leagueBands[i + 1].name
+        : leagueBands.last.name;
   }
 }
 

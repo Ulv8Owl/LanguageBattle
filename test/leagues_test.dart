@@ -25,7 +25,7 @@ void main() {
       final band = leagueBands[i];
       final inside = band.min + 1;
       expect(leagueFor(inside).cefr, band.cefr);
-      expect(leagueIndexForElo(inside), i,
+      expect(leagueIndexForRating(inside), i,
           reason: 'по этому индексу берутся фразы и слова уровня');
     }
   });

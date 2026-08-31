@@ -6,9 +6,9 @@ import 'package:go_router/go_router.dart';
 import '../../core/languages.dart';
 import '../../core/stream_rows.dart';
 import '../../core/supabase_client.dart';
-import '../../core/word_packs.dart';
 import '../../core/theme.dart';
 import '../../data/phrase_bank.dart';
+import '../../data/player_rating.dart';
 import '../../data/voice_submission.dart';
 import '../../widgets/ai_avatar.dart';
 import '../../widgets/chrolingo_widgets.dart';
@@ -127,13 +127,13 @@ class _BattleScreenState extends State<BattleScreen> {
 
       final learning = await supabase
           .from('user_languages')
-          .select('elo')
+          .select(PlayerRating.columns)
           .eq('user_id', _myId)
           .eq('role', 'learning')
           .eq('is_active', true)
           .limit(1)
           .maybeSingle();
-      _phraseLevel = leagueIndexForElo((learning?['elo'] as num?)?.toInt() ?? 1000);
+      _phraseLevel = PlayerRating.fromRow(learning).levelIndex;
       // В ленте встречаются фразы уже сыгранных раундов, а их уровень мог
       // отличаться (лига игрока меняется прямо по ходу серии матчей) —
       // поэтому грузим все уровни, а не только свой.
@@ -315,7 +315,7 @@ class _BattleScreenState extends State<BattleScreen> {
     final m = _match!;
     try {
       // finalize_match — security definer RPC (победитель по выигранным
-      // раундам, пересчёт ELO, начисление валюты/опыта): клиент не может
+      // раундам, пересчёт рейтинга, начисление валюты/опыта): клиент не может
       // писать напрямую в currency_wallets и users.xp, и сам результат
       // матча пересчитывается на сервере из round_scores.
       final result = await supabase.rpc('finalize_match', params: {'p_match_id': m.id});

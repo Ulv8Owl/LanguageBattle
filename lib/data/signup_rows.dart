@@ -10,6 +10,12 @@
 /// is_active в родной строке (в схеме `not null default false`) ронял
 /// регистрацию каждого нового игрока на самом первом экране, и по коду это
 /// не бросалось в глаза: строки выглядели просто «немного разными».
+///
+/// Рейтинговых столбцов здесь нет намеренно. rating/rating_deviation/
+/// volatility заводит схема (1500 / 350 / 0.06 — стартовые значения
+/// Glicko-2), а elo, league_rating, league и cefr_level считает по ним
+/// триггер trg_sync_rating_mirrors (миграция 0023). Прислать их отсюда
+/// значило бы прислать числа, которые тут же будут перезаписаны.
 List<Map<String, dynamic>> signupLanguageRows({
   required String userId,
   required String nativeLanguage,
@@ -20,9 +26,6 @@ List<Map<String, dynamic>> signupLanguageRows({
         'user_id': userId,
         'language_code': nativeLanguage,
         'role': 'native',
-        'cefr_level': 'C2',
-        'elo': 1000,
-        'league': 'bronze',
         // Активна всегда изучаемая пара, не родной язык.
         'is_active': false,
       },
@@ -30,9 +33,6 @@ List<Map<String, dynamic>> signupLanguageRows({
         'user_id': userId,
         'language_code': targetLanguage,
         'role': 'learning',
-        'cefr_level': 'A1',
-        'elo': 1000,
-        'league': 'bronze',
         'is_active': true,
       },
     ];

@@ -55,7 +55,7 @@ void notifyWordPacksChanged() {
   wordPacksVersion.value++;
 }
 
-/// Языковая пара меняется из Профиля, но её использует и Арена (ELO,
+/// Языковая пара меняется из Профиля, но её использует и Арена (рейтинг,
 /// доступные режимы) — простой счётчик-нотификатор проще, чем
 /// протаскивать колбэк через IndexedStack в ArenaShell.
 final ValueNotifier<int> languagePairVersion = ValueNotifier<int>(0);

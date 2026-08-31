@@ -2,10 +2,10 @@ import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../core/game_access.dart';
-import '../../core/leagues.dart';
 import '../../core/nav_state.dart';
 import '../../core/supabase_client.dart';
 import '../../core/theme.dart';
+import '../../data/player_rating.dart';
 import '../../widgets/chrolingo_widgets.dart';
 import '../../widgets/trial_countdown_banner.dart';
 
@@ -29,7 +29,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
   Map<String, dynamic>? _profile;
 
   /// Все изучаемые языки аккаунта (до kMaxLanguagePairs), каждый со своим
-  /// ELO. Ровно один помечен is_active — он используется везде в
+  /// рейтингом. Ровно один помечен is_active — он используется везде в
   /// приложении (Арена, бой, матчмейкинг, Тренировка).
   List<Map<String, dynamic>> _pairs = [];
   WalletState _wallet = WalletState.empty;
@@ -129,8 +129,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
           (p) => p?['is_active'] == true,
           orElse: () => null,
         );
-    final elo = (activePair?['elo'] as int?) ?? 1000;
-    final league = leagueFor(elo);
+    final rating = PlayerRating.fromRow(activePair);
+    final league = rating.league;
 
     return RefreshIndicator(
       onRefresh: _load,
@@ -152,7 +152,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                         Icon(Icons.emoji_events, size: 14, color: league.color),
                         const SizedBox(width: 5),
                         Text(
-                          '${league.shortName} · $elo ELO',
+                          '${league.shortName} · ${rating.display} рейтинга',
                           style: AppFonts.mono(fontSize: 10, weight: FontWeight.w700, color: league.color),
                         ),
                       ],
