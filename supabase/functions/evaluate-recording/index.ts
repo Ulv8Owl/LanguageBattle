@@ -65,28 +65,41 @@ const WRONG_LANGUAGE_SCORE = 1;
  * Игрок ответил не на том языке, на который просили перевести?
  *
  * Отвечает ТОЛЬКО на этот вопрос — не «что за язык», а «точно ли не
- * целевой». Поэтому проверка стоит доли миллисекунды и не удлиняет ожидание
- * ответа.
+ * целевой». Обе проверки стоят доли миллисекунды и никуда не ходят.
  *
- * Первый и основной источник — сам распознаватель: с тех пор как в запрос
- * уходит родной язык альтернативой, Google возвращает в ответе, что он
- * услышал. Своего определителя языка мы не писали и не будем.
+ * Признаков два, и оба намеренно осторожны — ЛОЖНОЕ обвинение здесь хуже
+ * пропуска. Пропустив, мы отдадим судье плохой ответ и игрок получит
+ * низкий балл; обвинив зря, мы откажемся разбирать правильный ответ и
+ * скажем человеку, что он говорил не на том языке, когда он говорил на
+ * том. Поэтому:
  *
- * Второй — письменность, и он нужен на случай, когда провайдер язык не
- * сообщил (openai-совместимый путь, старый ответ без languageCode). Он
- * тоже ничего не «угадывает»: кириллица там, где ждали английский, — это
- * не догадка.
+ * 1. Распознаватель услышал РОДНОЙ язык игрока. Это и есть тот самый
+ *    случай — человек прочитал задание вслух вместо того, чтобы перевести.
+ *    Проверяется именно родной язык, а не «любой нецелевой»: определение
+ *    языка работает по всему миру языков, и речь неносителя с сильным
+ *    акцентом оно вполне может записать в соседний язык той же группы.
+ *    Обвинять за это нельзя.
+ *
+ * 2. Письменность (definitelyNotLanguage). Кириллица там, где ждали
+ *    английский, — не догадка, а факт, поэтому этот признак проверяется
+ *    ВСЕГДА, даже когда провайдер назвал язык: если он услышал «английский»,
+ *    а в тексте кириллица, прав текст.
  */
 function wrongLanguage(
   transcript: string,
   detectedLanguage: string | null,
   targetLanguage: string,
+  nativeLanguage: string,
 ): { wrong: boolean; source: string } {
-  if (detectedLanguage && detectedLanguage !== targetLanguage) {
-    return { wrong: true, source: `ASR определил язык как ${detectedLanguage}` };
-  }
-  if (!detectedLanguage && definitelyNotLanguage(transcript, targetLanguage)) {
+  if (definitelyNotLanguage(transcript, targetLanguage)) {
     return { wrong: true, source: "письменность транскрипта не та" };
+  }
+  if (
+    detectedLanguage &&
+    detectedLanguage === nativeLanguage &&
+    nativeLanguage !== targetLanguage
+  ) {
+    return { wrong: true, source: `ASR услышал родной язык игрока (${detectedLanguage})` };
   }
   return { wrong: false, source: "" };
 }
@@ -272,7 +285,12 @@ async function processJob(job_id: string): Promise<void> {
 
     // Считается один раз и до ветвления: проверка дешёвая, но вызывать её
     // дважды в условии и в теле — верный способ однажды разойтись.
-    const languageVerdict = wrongLanguage(transcript, detectedLanguage, targetLanguage);
+    const languageVerdict = wrongLanguage(
+      transcript,
+      detectedLanguage,
+      targetLanguage,
+      nativeLanguage,
+    );
 
     if (status === "failed") {
       score = NEUTRAL_SCORE;
