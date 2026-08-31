@@ -1111,6 +1111,23 @@ class _PipelineDebug extends StatelessWidget {
               ]),
               style: AppFonts.mono(fontSize: 9, color: AppColors.muted),
             ),
+            // Разбивка ожидания. Она отвечает на единственный вопрос,
+            // который имеет смысл задавать про скорость: какой из трёх
+            // кусков на самом деле длинный.
+            if (outcome.timingDebug != null)
+              Text(
+                _meta([
+                  if (outcome.timingDebug!['queue_wait_ms'] != null)
+                    'очередь ${outcome.timingDebug!['queue_wait_ms']} мс',
+                  if (outcome.timingDebug!['asr_ms'] != null)
+                    'ASR ${outcome.timingDebug!['asr_ms']} мс',
+                  if (outcome.timingDebug!['judge_ms'] != null)
+                    'судья ${outcome.timingDebug!['judge_ms']} мс',
+                  if (outcome.timingDebug!['worker_ms'] != null)
+                    'воркер всего ${outcome.timingDebug!['worker_ms']} мс',
+                ]),
+                style: AppFonts.mono(fontSize: 9, color: AppColors.gold),
+              ),
             if (outcome.roundDebug != null)
               Text(
                 _meta([

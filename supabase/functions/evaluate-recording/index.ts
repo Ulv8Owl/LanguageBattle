@@ -265,6 +265,31 @@ async function processJob(job_id: string): Promise<void> {
     // Диагностика пайплайна для отладочной панели в игре (миграция 0016).
     const pipelineDebug: Record<string, unknown> = { asr: asrDebug };
 
+    /**
+     * Куда именно уходит ожидание игрока.
+     *
+     * Без этих чисел любой разговор об ускорении — гадание. Ожидание
+     * складывается из трёх кусков, и они разного порядка:
+     *
+     *   queue_wait_ms — от «запись легла в базу» до «воркер взялся за
+     *     дело»: загрузка файла в Storage, триггер через pg_net, старт
+     *     функции. Ровно этот кусок (вместе с asr_ms) убрало бы
+     *     потоковое распознавание прямо во время записи;
+     *   asr_ms — распознавание;
+     *   judge_ms — LLM-судья.
+     *
+     * Считается от created_at строки записи, то есть загрузка файла сюда
+     * уже не входит — она произошла до вставки. Это нижняя оценка, и
+     * честнее так, чем выдавать за замер то, чего мы не мерили.
+     */
+    const recordingCreatedAt = Date.parse(recording.created_at);
+    const timing: Record<string, unknown> = {
+      queue_wait_ms: Number.isFinite(recordingCreatedAt)
+        ? jobStartedAt - recordingCreatedAt
+        : null,
+    };
+    pipelineDebug.timing = timing;
+
     // Номер попытки в соло нужен ДО вызова судьи: на второй попытке
     // текстовые объяснения не показываются, а значит и генерировать их не
     // надо — это основная часть времени ответа.
@@ -385,6 +410,11 @@ async function processJob(job_id: string): Promise<void> {
         });
       }
     }
+
+    timing.asr_ms = (asrDebug as Record<string, unknown>)?.elapsed_ms ?? null;
+    timing.judge_ms =
+      (pipelineDebug.judge as Record<string, unknown> | undefined)?.elapsed_ms ?? null;
+    timing.worker_ms = Date.now() - jobStartedAt;
 
     await supabase
       .from("voice_recordings")
