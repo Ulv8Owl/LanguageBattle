@@ -9,10 +9,11 @@
 # функции, приложение — новые, и полдня ушло на поиск несуществующей ошибки.
 
 set -euo pipefail
-BRANCH="${1:-features}"
 cd "$(dirname "$0")/.."
 # shellcheck source=tools/lib.sh
 source tools/lib.sh
+# Без аргумента — та ветка, что сейчас на диске.
+BRANCH="${1:-$(current_branch)}"
 
 step "Синхронизирую $BRANCH"
 require_clean_tree

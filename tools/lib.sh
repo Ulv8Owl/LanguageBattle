@@ -12,6 +12,24 @@ require_clean_tree() {
   fi
 }
 
+# Ветка, на которой сейчас стоит рабочее дерево. Это и есть умолчание для
+# всех трёх скриптов: без аргумента человек имеет в виду «выложи то, что у
+# меня сейчас на диске», а не какую-то конкретную ветку.
+#
+# Раньше здесь было жёстко зашито "features", и работа на второй ветке
+# упиралась в отказ «дерево не совпадает с origin/features» — сообщение
+# верное, но не про ту ветку, и человек шёл искать несуществующее
+# расхождение.
+current_branch() {
+  local branch
+  branch="$(git rev-parse --abbrev-ref HEAD)"
+  if [ "$branch" = "HEAD" ]; then
+    fail "HEAD отделён от веток (detached HEAD) — непонятно, что выкладывать.
+Перейди на ветку: git checkout <ветка> — или назови её аргументом."
+  fi
+  printf '%s' "$branch"
+}
+
 # Дерево ДОЛЖНО совпадать с origin. Существует потому, что `git fetch` только
 # скачивает историю и НЕ трогает файлы: после него на диске лежит прежний код,
 # а deploy деплоит именно файлы с диска. Один раз это уже стоило целого круга
@@ -19,7 +37,9 @@ require_clean_tree() {
 # функции, и найти это можно было только по датам коммитов.
 require_synced() {
   local branch="$1"
-  git fetch --quiet origin "$branch"
+  git fetch --quiet origin "$branch" \
+    || fail "не удалось получить origin/$branch.
+Если ветки на origin ещё нет — сначала запушь её: git push -u origin $branch"
   local head remote
   head="$(git rev-parse HEAD)"
   remote="$(git rev-parse "origin/$branch")"

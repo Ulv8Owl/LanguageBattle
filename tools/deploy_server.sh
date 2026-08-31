@@ -7,15 +7,16 @@
 # раньше своей миграции, будет писать в столбец, которого ещё нет.
 
 set -euo pipefail
-BRANCH="${1:-features}"
 cd "$(dirname "$0")/.."
 # shellcheck source=tools/lib.sh
 source tools/lib.sh
+# Без аргумента — та ветка, что сейчас на диске.
+BRANCH="${1:-$(current_branch)}"
 
 step "0/2 Проверяю, что на диске лежит актуальный код"
 require_clean_tree
 require_synced "$BRANCH"
-note "Деплою $(git rev-parse --short HEAD)  $(git log -1 --format=%s)"
+note "Деплою ветку $BRANCH: $(git rev-parse --short HEAD)  $(git log -1 --format=%s)"
 
 step "1/2 Применяю миграции"
 npx supabase db push
@@ -25,4 +26,4 @@ step "2/2 Деплою Edge Functions"
 npx supabase functions deploy evaluate-recording
 npx supabase functions deploy config-check
 
-note "Сервер обновлён до $(git rev-parse --short HEAD)."
+note "Сервер обновлён до $BRANCH $(git rev-parse --short HEAD)."

@@ -15,12 +15,13 @@
 
 set -euo pipefail
 
-BRANCH="${1:-features}"
 cd "$(dirname "$0")/.."
 REPO="$(pwd)"
 
 # shellcheck source=tools/lib.sh
 source tools/lib.sh
+# Без аргумента — та ветка, что сейчас на диске.
+BRANCH="${1:-$(current_branch)}"
 
 step "1/8 Проверяю дерево и что оно совпадает с origin"
 require_clean_tree
