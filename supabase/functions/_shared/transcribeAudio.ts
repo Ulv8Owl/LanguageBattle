@@ -13,17 +13,22 @@
 //
 // Как и в evaluateGrammar.ts, смена провайдера — это правка переменных
 // окружения Edge Function, а не кода:
-//   ASR_PROVIDER    google (по умолчанию) | openai
+//   ASR_PROVIDER    deepgram (по умолчанию) | google | openai
 //   ASR_API_KEY     ключ провайдера
 //   ASR_BASE_URL    переопределение эндпоинта (обычно не нужно)
-//   ASR_MODEL       google: latest_long (по умолчанию); openai: whisper-1
-//   ASR_DETECT_LANGUAGE  1 (по умолчанию) — просить Google определить язык
-//                   и ловить ответ не на том языке; 0 — прежнее поведение
+//   ASR_MODEL       deepgram: nova-3 (по умолчанию); google: latest_long;
+//                   openai: whisper-1
+//   ASR_KEYTERMS    1 — подсказывать deepgram фразу раунда (keyterm). По
+//                   умолчанию 0: у nova-3 это только английский и платно
+//   ASR_DETECT_LANGUAGE  1 (по умолчанию) — просить провайдера определить
+//                   язык, чтобы ловить ответ не на том языке; 0 — жёстко
+//                   задавать целевой язык, как было раньше
 //   ASR_TIMEOUT_MS  таймаут запроса, по умолчанию 60000
 //
-// Провайдер openai — это любой эндпоинт с whisper-совместимым
-// /audio/transcriptions (в том числе тот же base_url, что у LLM-судьи),
-// он нужен как запасной путь, если Google Cloud окажется недоступен.
+// Провайдеров три, и все три остаются рабочими: переключение — это одна
+// переменная окружения и никакого деплоя кода. deepgram основной, google
+// проверенный запасной, openai — любой эндпоинт с whisper-совместимым
+// /audio/transcriptions (в том числе тот же base_url, что у LLM-судьи).
 
 export interface TranscribedWord {
   word: string;
@@ -385,6 +390,159 @@ async function fetchWithTimeout(
 }
 
 /**
+ * Deepgram, /v1/listen.
+ *
+ * Провайдер по умолчанию. Почему он, а не Google:
+ *
+ *  * Определение языка у него первого класса. Можно не просто разрешить
+ *    несколько языков, а ОГРАНИЧИТЬ список кандидатов теми двумя, на
+ *    которых игрок вообще может заговорить — целевым и родным
+ *    (`detect_language=en&detect_language=ru`). Провайдер выбирает из двух,
+ *    а не из полусотни, и сообщает выбор в ответе. У Google эта же
+ *    возможность (alternativeLanguageCodes) описана как рассчитанная на
+ *    короткие реплики и на нашем абзаце работает как повезёт.
+ *  * Цена. nova-3 — порядка полцента за минуту записи против нескольких
+ *    центов у Google.
+ *  * Аудио уходит как есть, целым файлом в теле запроса: ни разбора WAV,
+ *    ни base64 (который раздувал каждую отправку на треть).
+ *
+ * Формат ответа: results.channels[0].detected_language и
+ * results.channels[0].alternatives[0] с transcript, confidence и words[]
+ * (у каждого слова своя confidence — из неё собирается список слов, в
+ * которых распознаватель не уверен, для судьи).
+ */
+async function transcribeDeepgram(
+  audio: Uint8Array,
+  languageCode: string,
+  alternativeLanguages: string[],
+  apiKey: string,
+  hintPhrases: string[],
+  timeoutMs: number,
+): Promise<TranscriptionResult> {
+  const baseUrl = Deno.env.get("ASR_BASE_URL") ?? "https://api.deepgram.com/v1";
+  const model = Deno.env.get("ASR_MODEL") ?? "nova-3";
+
+  const params = new URLSearchParams();
+  params.set("model", model);
+  params.set("punctuate", "true");
+
+  // Определение языка ограничено двумя кандидатами: целевым и родным. Это
+  // и есть главная причина перехода — см. комментарий к функции.
+  //
+  // Выключается переменной ASR_DETECT_LANGUAGE=0: тогда язык задаётся
+  // жёстко, как было раньше. Проверка «не тот язык» при этом продолжит
+  // работать по письменности (definitelyNotLanguage).
+  const detectionEnabled = (Deno.env.get("ASR_DETECT_LANGUAGE") ?? "1") !== "0";
+  const candidates = detectionEnabled
+    ? [languageCode, ...alternativeLanguages].filter(
+      (code, i, all) => languageFromTag(code) !== null && all.indexOf(code) === i,
+    )
+    : [];
+
+  if (candidates.length > 1) {
+    // Повторяющийся detect_language — именно так Deepgram ограничивает
+    // список кандидатов. Первым идёт целевой: он ожидаемый.
+    for (const code of candidates) params.append("detect_language", code);
+  } else {
+    params.set("language", languageCode);
+  }
+
+  // Подсказка распознавателю той фразой, которую игрок сейчас переводит.
+  // По умолчанию ВЫКЛЮЧЕНА, и это не осторожность ради осторожности:
+  // keyterm у nova-3 работает только для английского и тарифицируется
+  // отдельно. Включать её глобально в игре, где языков будет несколько
+  // десятков, значит на всех остальных языках получать в лучшем случае
+  // игнорирование параметра.
+  const keytermsEnabled = (Deno.env.get("ASR_KEYTERMS") ?? "0") === "1";
+  if (keytermsEnabled && languageCode === "en") {
+    for (const phrase of hintPhrases.slice(0, 50)) params.append("keyterm", phrase);
+  }
+
+  const meta = {
+    provider: "deepgram",
+    model,
+    language: languageCode,
+    detect_candidates: candidates,
+    keyterms: keytermsEnabled && languageCode === "en" ? hintPhrases.length : 0,
+    audio_bytes: audio.byteLength,
+  };
+  const startedAt = Date.now();
+
+  const res = await fetchWithTimeout(`${baseUrl}/listen?${params.toString()}`, {
+    method: "POST",
+    headers: {
+      Authorization: `Token ${apiKey}`,
+      // Deepgram определяет формат по содержимому файла; WAV-заголовок,
+      // который пишет клиент, он читает сам.
+      "Content-Type": "audio/wav",
+    },
+    body: audio,
+  }, timeoutMs);
+
+  if (!res.ok) {
+    const body = await res.text().catch(() => "");
+    return failed(`Deepgram HTTP ${res.status}: ${body.slice(0, 500)}`, {
+      ...meta,
+      elapsed_ms: Date.now() - startedAt,
+    });
+  }
+
+  const data = await res.json();
+  const base = {
+    ...meta,
+    elapsed_ms: Date.now() - startedAt,
+    audio_seconds: typeof data?.metadata?.duration === "number"
+      ? Math.round(data.metadata.duration * 10) / 10
+      : null,
+  };
+
+  const channel = data?.results?.channels?.[0];
+  const alternative = channel?.alternatives?.[0];
+
+  // Ответа нужной формы нет вовсе — это поломка, а НЕ записанная тишина.
+  // Разница принципиальная: за тишину игрок получает 1, за нашу поломку —
+  // нейтральный балл. Тишину Deepgram возвращает иначе: канал на месте,
+  // а transcript в нём пустая строка (случай ниже).
+  if (typeof alternative?.transcript !== "string") {
+    return failed("Deepgram ответил без results.channels[0].alternatives[0].transcript", base);
+  }
+
+  const transcript = alternative.transcript.trim();
+  // Язык берём у провайдера. Если он его не назвал (язык был задан жёстко
+  // или пара не поддерживает определение), оставляем null — тогда сработает
+  // проверка по письменности, а не наша догадка.
+  const detectedLanguage = languageFromTag(channel?.detected_language);
+
+  if (transcript.length === 0) return empty({ ...base, detected_language: detectedLanguage });
+
+  const words: TranscribedWord[] = [];
+  for (const w of alternative?.words ?? []) {
+    // Deepgram отдаёт и word (как услышал), и punctuated_word (с
+    // пунктуацией и регистром). Для списка неуверенных слов нужен первый:
+    // судье показывают само слово, а не его оформление.
+    const word = typeof w?.word === "string" ? w.word : null;
+    if (word === null) continue;
+    words.push({ word, confidence: typeof w?.confidence === "number" ? w.confidence : 0 });
+  }
+
+  const confidence = typeof alternative?.confidence === "number" ? alternative.confidence : 0;
+  return {
+    transcript,
+    confidence,
+    words,
+    detectedLanguage,
+    degraded: false,
+    debug: {
+      ...base,
+      status: "ok",
+      transcript,
+      confidence: Math.round(confidence * 100) / 100,
+      detected_language: detectedLanguage,
+    },
+  };
+}
+
+/**
  * Google Cloud Speech-to-Text v1, синхронный speech:recognize.
  *
  * ЕДИНСТВЕННОЕ оставшееся ограничение на длину — платформенное: синхронный
@@ -630,7 +788,7 @@ export async function transcribeAudio(
    */
   budgetMs: number = ASR_TIMEOUT_MS,
 ): Promise<TranscriptionResult> {
-  const provider = (Deno.env.get("ASR_PROVIDER") ?? "google").toLowerCase();
+  const provider = (Deno.env.get("ASR_PROVIDER") ?? "deepgram").toLowerCase();
   const apiKey = Deno.env.get("ASR_API_KEY");
   if (!apiKey) return failed("ASR_API_KEY is not configured");
   if (audio.byteLength === 0) return failed("audio file is empty");
@@ -638,6 +796,15 @@ export async function transcribeAudio(
 
   try {
     switch (provider) {
+      case "deepgram":
+        return await transcribeDeepgram(
+          audio,
+          languageCode,
+          alternativeLanguages,
+          apiKey,
+          hintPhrases,
+          timeoutMs,
+        );
       case "google":
         return await transcribeGoogle(
           audio,
@@ -650,7 +817,7 @@ export async function transcribeAudio(
       case "openai":
         return await transcribeOpenAi(audio, languageCode, apiKey, timeoutMs);
       default:
-        return failed(`unknown ASR_PROVIDER "${provider}" (expected "google" or "openai")`);
+        return failed(`unknown ASR_PROVIDER "${provider}" (expected "deepgram", "google" or "openai")`);
     }
   } catch (e) {
     return failed(`provider ${provider} threw: ${e}`);
