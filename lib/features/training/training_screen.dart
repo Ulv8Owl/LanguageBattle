@@ -126,7 +126,7 @@ class _TrainingScreenState extends State<TrainingScreen> {
     try {
       final learning = await supabase
           .from('user_languages')
-          .select('language_code, ${PlayerRating.columns}')
+          .select('language_code, native_for, ${PlayerRating.columns}')
           .eq('user_id', _myId)
           .eq('role', 'learning')
           .eq('is_active', true)
@@ -142,7 +142,9 @@ class _TrainingScreenState extends State<TrainingScreen> {
           .select('username, native_language')
           .eq('id', _myId)
           .maybeSingle();
-      _nativeLanguage = (me?['native_language'] as String?) ?? 'ru';
+      // native_for — родной язык ИМЕННО этой пары (миграция 0025): у
+      // полиглота она может быть anchored не на главном родном из профиля.
+      _nativeLanguage = (learning?['native_for'] as String?) ?? (me?['native_language'] as String?) ?? 'ru';
       _myName = (me?['username'] as String?) ?? 'Ты';
 
       await PhraseBank.loadLevel(level);

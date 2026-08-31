@@ -123,16 +123,21 @@ class _BattleScreenState extends State<BattleScreen> {
           .eq('id', _myId)
           .maybeSingle();
       _myName = (me?['username'] as String?) ?? 'Ты';
-      _myNativeLanguage = (me?['native_language'] as String?) ?? 'ru';
 
       final learning = await supabase
           .from('user_languages')
-          .select(PlayerRating.columns)
+          .select('native_for, ${PlayerRating.columns}')
           .eq('user_id', _myId)
           .eq('role', 'learning')
           .eq('is_active', true)
           .limit(1)
           .maybeSingle();
+      // native_for — родной язык ИМЕННО этой пары (миграция 0025). У
+      // полиглота активная пара может быть anchored не на главном родном
+      // из профиля («японский от китайского») — показывать задание нужно
+      // на языке этой пары, а не на общем профильном.
+      _myNativeLanguage =
+          (learning?['native_for'] as String?) ?? (me?['native_language'] as String?) ?? 'ru';
       _phraseLevel = PlayerRating.fromRow(learning).levelIndex;
       // В ленте встречаются фразы уже сыгранных раундов, а их уровень мог
       // отличаться (лига игрока меняется прямо по ходу серии матчей) —

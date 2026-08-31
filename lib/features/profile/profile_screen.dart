@@ -1,10 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../core/all_languages.dart';
 import '../../core/game_access.dart';
 import '../../core/nav_state.dart';
 import '../../core/supabase_client.dart';
 import '../../core/theme.dart';
+import '../../data/native_languages.dart';
 import '../../data/player_rating.dart';
 import '../../widgets/chrolingo_widgets.dart';
 import '../../widgets/trial_countdown_banner.dart';
@@ -32,6 +34,13 @@ class _ProfileScreenState extends State<ProfileScreen> {
   /// рейтингом. Ровно один помечен is_active — он используется везде в
   /// приложении (Арена, бой, матчмейкинг, Тренировка).
   List<Map<String, dynamic>> _pairs = [];
+
+  /// Все родные языки аккаунта (миграция 0025) — нужны здесь только для
+  /// одного решения: группировать ли пары по тому, с какого родного языка
+  /// они изучаются. Пока родной один (подавляющее большинство), группировка
+  /// не нужна и не показывается — заголовок над единственной группой был
+  /// бы шумом, а не подсказкой.
+  List<NativeLanguage> _natives = [];
   WalletState _wallet = WalletState.empty;
   int _played = 0;
   int _winPct = 0;
@@ -81,11 +90,13 @@ class _ProfileScreenState extends State<ProfileScreen> {
       // плашки пробного периода (задача итерации, п.5: плашка переехала
       // сюда из Арены).
       final wallet = await GameAccess.sync();
+      final natives = await NativeLanguages.fetch(uid);
 
       if (!mounted) return;
       setState(() {
         _profile = profile;
         _pairs = List<Map<String, dynamic>>.from(pairs);
+        _natives = natives;
         _wallet = wallet;
         _played = played;
         _winPct = played == 0 ? 0 : ((wins / played) * 100).round();
@@ -96,6 +107,74 @@ class _ProfileScreenState extends State<ProfileScreen> {
     } catch (_) {
       if (mounted) setState(() => _loading = false);
     }
+  }
+
+  Widget _pairChip(Map<String, dynamic> pair, String defaultNative) {
+    // native_for — с какого родного языка изучается ИМЕННО эта пара
+    // (миграция 0025); у пар, заведённых до неё, значение null, и тогда
+    // честно берём единственный на тот момент родной.
+    final anchor = (pair['native_for'] as String?) ?? defaultNative;
+    return _LanguagePairChip(
+      nativeFlag: _languageFlags[anchor] ?? '🏳',
+      targetFlag: _languageFlags[pair['language_code'] as String?] ?? '🏳',
+      active: pair['is_active'] == true,
+      onTap: pair['is_active'] == true ? null : () => _selectPair(pair['language_code'] as String),
+    );
+  }
+
+  Widget _addPairChip() => _AddPairChip(
+        onTap: () async {
+          await context.push('/language-pair');
+          if (mounted) _load();
+        },
+      );
+
+  /// Пары языков — плоским рядом, пока родной язык один (подавляющее
+  /// большинство игроков), и сгруппированными по родному, как только их
+  /// два и больше: полиглот может учить английский от русского и японский
+  /// от китайского одновременно, и это разные, не связанные друг с другом
+  /// траектории — смешивать их в одном ряду без подписи значило бы
+  /// заставлять его каждый раз вспоминать, какая пара с какой стороны.
+  Widget _buildPairs(String defaultNative) {
+    if (_natives.length <= 1) {
+      return Wrap(
+        spacing: 8,
+        runSpacing: 8,
+        children: [
+          for (final pair in _pairs) _pairChip(pair, defaultNative),
+          if (_pairs.length < kMaxLanguagePairs) _addPairChip(),
+        ],
+      );
+    }
+
+    final byNative = <String, List<Map<String, dynamic>>>{};
+    for (final pair in _pairs) {
+      final anchor = (pair['native_for'] as String?) ?? defaultNative;
+      byNative.putIfAbsent(anchor, () => []).add(pair);
+    }
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        for (final n in _natives)
+          if (byNative[n.code]?.isNotEmpty ?? false) ...[
+            Padding(
+              padding: const EdgeInsets.only(bottom: 6),
+              child: Text(
+                allLanguages[n.code]?.endonym ?? n.code,
+                style: AppFonts.mono(fontSize: 10, weight: FontWeight.w700, color: AppColors.muted),
+              ),
+            ),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [for (final pair in byNative[n.code]!) _pairChip(pair, defaultNative)],
+            ),
+            const SizedBox(height: 10),
+          ],
+        if (_pairs.length < kMaxLanguagePairs) _addPairChip(),
+      ],
+    );
   }
 
   /// Переключает активную пару. Рейтинг НЕ трогается ни у старой, ни у
@@ -199,28 +278,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
             opacity: _switchingPair ? 0.5 : 1,
             child: IgnorePointer(
               ignoring: _switchingPair,
-              child: Wrap(
-                spacing: 8,
-                runSpacing: 8,
-                children: [
-                  for (final pair in _pairs)
-                    _LanguagePairChip(
-                      nativeFlag: _languageFlags[native] ?? '🏳',
-                      targetFlag: _languageFlags[pair['language_code'] as String?] ?? '🏳',
-                      active: pair['is_active'] == true,
-                      onTap: pair['is_active'] == true
-                          ? null
-                          : () => _selectPair(pair['language_code'] as String),
-                    ),
-                  if (_pairs.length < kMaxLanguagePairs)
-                    _AddPairChip(
-                      onTap: () async {
-                        await context.push('/language-pair');
-                        if (mounted) _load();
-                      },
-                    ),
-                ],
-              ),
+              child: _buildPairs(native),
             ),
           ),
           const SizedBox(height: 18),

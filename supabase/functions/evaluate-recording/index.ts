@@ -246,13 +246,32 @@ async function processJob(job_id: string): Promise<void> {
 
     // Родной язык игрока нужен ДО распознавания, а не только судье: он
     // уходит в ASR альтернативой, чтобы распознаватель мог сказать «это
-    // вообще-то русский», а не подбирать английские слова под русскую речь.
-    const { data: speaker } = await supabase
-      .from("users")
-      .select("native_language")
-      .eq("id", recording.user_id)
-      .single();
-    const nativeLanguage = speaker?.native_language ?? "en";
+    // вообще-то русский», а не подбирать целевые слова под родную речь.
+    //
+    // Берём его с КОНКРЕТНОЙ пары (user_languages.native_for, миграция
+    // 0025), а не общий users.native_language: у полиглота с несколькими
+    // родными разные пары могут быть anchored на разные из них
+    // («английский от русского», «японский от китайского»), и подставлять
+    // сюда всегда один и тот же язык значило бы для части пар сравнивать
+    // не с тем языком в проверке «не тот язык» ниже. native_for бывает
+    // null у пар, не тронутых после этой миграции backfill'ом не
+    // затронул, — тогда честно откатываемся на общий родной.
+    const { data: pair } = await supabase
+      .from("user_languages")
+      .select("native_for")
+      .eq("user_id", recording.user_id)
+      .eq("role", "learning")
+      .eq("language_code", targetLanguage)
+      .maybeSingle();
+    let nativeLanguage = pair?.native_for ?? null;
+    if (!nativeLanguage) {
+      const { data: speaker } = await supabase
+        .from("users")
+        .select("native_language")
+        .eq("id", recording.user_id)
+        .single();
+      nativeLanguage = speaker?.native_language ?? "en";
+    }
 
     // Шаг 1 — распознавание речи.
     const { transcript, status, debug: asrDebug, uncertainWords, detectedLanguage } =

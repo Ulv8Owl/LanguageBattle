@@ -86,14 +86,21 @@ class _MatchmakingScreenState extends State<MatchmakingScreen> {
           .maybeSingle();
       final learning = await supabase
           .from('user_languages')
-          .select('language_code, ${PlayerRating.columns}')
+          .select('language_code, native_for, ${PlayerRating.columns}')
           .eq('user_id', currentUserId)
           .eq('role', 'learning')
           .eq('is_active', true)
           .limit(1)
           .maybeSingle();
 
-      final nativeLanguage = profile?['native_language'] as String?;
+      // native_for — родной язык ИМЕННО этой пары (миграция 0025), а не
+      // общий профильный: у полиглота с несколькими родными активная пара
+      // может быть anchored не на главном («японский от китайского», пока
+      // главный родной — русский). Соперника в Дуэли ищем по родному ЭТОЙ
+      // пары — иначе матч подобрал бы носителя не того языка, с которого
+      // игрок на самом деле учит. null у пар, не тронутых после этой
+      // миграции, — тогда откат на общий профильный.
+      final nativeLanguage = (learning?['native_for'] as String?) ?? profile?['native_language'] as String?;
       final targetLanguage = learning?['language_code'] as String?;
       if (nativeLanguage == null || targetLanguage == null) {
         setState(() {

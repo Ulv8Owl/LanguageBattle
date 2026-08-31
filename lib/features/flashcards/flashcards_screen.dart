@@ -84,13 +84,15 @@ class _FlashcardsScreenState extends State<FlashcardsScreen> {
           .maybeSingle();
       final learning = await supabase
           .from('user_languages')
-          .select('language_code, ${PlayerRating.columns}')
+          .select('language_code, native_for, ${PlayerRating.columns}')
           .eq('user_id', uid)
           .eq('role', 'learning')
           .eq('is_active', true)
           .limit(1)
           .maybeSingle();
-      final native = profile?['native_language'] as String?;
+      // native_for — родной язык ИМЕННО этой пары (миграция 0025): у
+      // полиглота она может быть anchored не на главном родном из профиля.
+      final native = (learning?['native_for'] as String?) ?? profile?['native_language'] as String?;
       final target = learning?['language_code'] as String?;
       if (native == null || target == null) {
         setState(() {
