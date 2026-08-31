@@ -17,6 +17,8 @@
 //   ASR_API_KEY     ключ провайдера
 //   ASR_BASE_URL    переопределение эндпоинта (обычно не нужно)
 //   ASR_MODEL       google: latest_long (по умолчанию); openai: whisper-1
+//   ASR_DETECT_LANGUAGE  1 (по умолчанию) — просить Google определить язык
+//                   и ловить ответ не на том языке; 0 — прежнее поведение
 //   ASR_TIMEOUT_MS  таймаут запроса, по умолчанию 60000
 //
 // Провайдер openai — это любой эндпоинт с whisper-совместимым
@@ -34,6 +36,15 @@ export interface TranscriptionResult {
   /** Общая уверенность распознавания 0..1 (0, если провайдер её не сообщил). */
   confidence: number;
   words: TranscribedWord[];
+  /**
+   * На каком языке, по мнению самого распознавателя, говорили. Код языка
+   * приложения ('ru'/'en'/'es') или null, если провайдер не сказал.
+   *
+   * Это не наша догадка, а поле ответа Google (`results[].languageCode`),
+   * которое появляется, когда в запрос переданы alternativeLanguageCodes.
+   * Придумывать собственное определение языка не пришлось.
+   */
+  detectedLanguage: string | null;
   /**
    * true — распознать НЕ УДАЛОСЬ по нашей вине (сбой/таймаут/не настроен
    * ключ). Это принципиально не то же самое, что пустой transcript при
@@ -57,6 +68,49 @@ export function bcp47For(languageCode: string): string {
   return BCP47_BY_LANGUAGE[languageCode] ?? "en-US";
 }
 
+/** Обратно: 'en-US' (или просто 'en') -> 'en'. Регистр Google не гарантирует. */
+export function languageFromBcp47(tag: string | null | undefined): string | null {
+  if (typeof tag !== "string" || tag.length === 0) return null;
+  const base = tag.split("-")[0].toLowerCase();
+  return base in BCP47_BY_LANGUAGE ? base : null;
+}
+
+/**
+ * Письменность языка. Нужна ровно для одного вопроса — «это точно НЕ тот
+ * язык?» — и ни для чего больше.
+ */
+const SCRIPT_BY_LANGUAGE: Record<string, "cyrillic" | "latin"> = {
+  en: "latin",
+  es: "latin",
+  ru: "cyrillic",
+};
+
+const CYRILLIC = /[\u0400-\u04FF]/;
+const LATIN = /[A-Za-z\u00C0-\u024F]/;
+
+/**
+ * Точно ли этот текст НЕ на языке [target].
+ *
+ * Отвечает только «нет» и «не знаю» — определять, что за язык на самом
+ * деле, здесь никто не пытается: это работа распознавателя, и он её уже
+ * сделал (см. detectedLanguage). Функция — страховка на случай, когда
+ * провайдер язык не сообщил.
+ *
+ * Проверка одна и стоит микросекунды: письменность. Кириллица там, где
+ * ждали английский, — это ответ на другом языке, и другого объяснения у
+ * этого быть не может. Обратное тоже верно. Английский от испанского так
+ * не отличить (обе латиница) — и не надо: в этом случае функция честно
+ * говорит "не знаю", а не выдумывает ответ.
+ */
+export function definitelyNotLanguage(text: string, target: string): boolean {
+  const expected = SCRIPT_BY_LANGUAGE[target];
+  if (!expected) return false;
+  const hasCyrillic = CYRILLIC.test(text);
+  const hasLatin = LATIN.test(text);
+  if (expected === "latin") return hasCyrillic && !hasLatin;
+  return hasLatin && !hasCyrillic;
+}
+
 /**
  * Таймаут запроса к ASR. Он НЕ ограничивает длину записи — только не даёт
  * зависшему провайдеру утащить за собой всю задачу: без таймаута функцию
@@ -66,7 +120,14 @@ export function bcp47For(languageCode: string): string {
 const ASR_TIMEOUT_MS = Number(Deno.env.get("ASR_TIMEOUT_MS") ?? 60_000);
 
 function empty(debug: Record<string, unknown>): TranscriptionResult {
-  return { transcript: "", confidence: 0, words: [], degraded: false, debug: { ...debug, status: "empty" } };
+  return {
+    transcript: "",
+    confidence: 0,
+    words: [],
+    detectedLanguage: null,
+    degraded: false,
+    debug: { ...debug, status: "empty" },
+  };
 }
 
 function failed(reason: string, debug: Record<string, unknown> = {}): TranscriptionResult {
@@ -75,6 +136,7 @@ function failed(reason: string, debug: Record<string, unknown> = {}): Transcript
     transcript: "",
     confidence: 0,
     words: [],
+    detectedLanguage: null,
     degraded: true,
     debug: { ...debug, status: "failed", error: reason },
   };
@@ -179,6 +241,7 @@ async function fetchWithTimeout(
 async function transcribeGoogle(
   audio: Uint8Array,
   languageCode: string,
+  alternativeLanguages: string[],
   apiKey: string,
   hintPhrases: string[],
   timeoutMs: number,
@@ -190,7 +253,26 @@ async function transcribeGoogle(
   // середине. Ровно то, что выглядело как «распознаёт не всё, что я сказал».
   const model = Deno.env.get("ASR_MODEL") ?? "latest_long";
 
-  const meta = { provider: "google", model, language: bcp47For(languageCode), audio_bytes: audio.byteLength };
+  // Определение языка можно выключить одной переменной окружения, не
+  // трогая код. Оно нужно на всякий случай: alternativeLanguageCodes у
+  // Google описан как рассчитанный на короткие реплики ("voice command and
+  // voice search"), а фраза раунда — абзац. Если окажется, что на наших
+  // записях он портит обычное распознавание, выключение вернёт прежнее
+  // поведение, а проверка «не тот язык» продолжит работать по письменности
+  // (definitelyNotLanguage).
+  const detectionEnabled = (Deno.env.get("ASR_DETECT_LANGUAGE") ?? "1") !== "0";
+  const alternatives = !detectionEnabled ? [] : alternativeLanguages
+    .filter((code) => code !== languageCode && code in BCP47_BY_LANGUAGE)
+    .slice(0, 3)
+    .map(bcp47For);
+
+  const meta = {
+    provider: "google",
+    model,
+    language: bcp47For(languageCode),
+    alternative_languages: alternatives,
+    audio_bytes: audio.byteLength,
+  };
   const startedAt = Date.now();
 
   const wav = parseWav(audio);
@@ -205,10 +287,27 @@ async function transcribeGoogle(
         sampleRateHertz: wav.sampleRate,
         audioChannelCount: wav.channels,
         languageCode: bcp47For(languageCode),
+        // Распознаватель БОЛЬШЕ НЕ ЗАПЕРТ в одном языке.
+        //
+        // Раньше сюда уходил только целевой язык, и это была не настройка
+        // качества, а жёсткое ограничение: Google обязан выдать текст на
+        // заданном языке и ничего другого выдать не может. Игрок,
+        // прочитавший русскую фразу вслух вместо перевода, получал не
+        // «не тот язык», а набор английских слов, похожих по звучанию на
+        // его русские, — и судья разбирал эту бессмыслицу всерьёз.
+        //
+        // Теперь родной язык игрока идёт альтернативой, и провайдер сам
+        // сообщает в ответе, что он в итоге услышал (results[].languageCode).
+        // Целевой язык остаётся ОСНОВНЫМ: он ожидаемый, а Google прямо
+        // рекомендует держать список альтернатив минимальным — чем их
+        // больше, тем чаще он ошибается с выбором.
+        ...(alternatives.length > 0 ? { alternativeLanguageCodes: alternatives } : {}),
         model,
-        // Улучшенные модели заметно точнее на неносителях с акцентом —
-        // а у нас говорят исключительно неносители.
-        useEnhanced: true,
+        // useEnhanced здесь НЕТ намеренно, не забыли. Улучшенные модели у
+        // Google — это ровно две, phone_call и video; для latest_long
+        // улучшенной версии не существует, и флаг молча откатывается на
+        // стандартную. То есть он ничего не делал, а комментарий рядом с
+        // ним обещал прибавку точности на акценте, которой не было.
         enableAutomaticPunctuation: true,
         enableWordConfidence: true,
         // Учащийся говорит с акцентом и ошибается — распознавание не должно
@@ -250,10 +349,15 @@ async function transcribeGoogle(
 
   const parts: string[] = [];
   const words: TranscribedWord[] = [];
+  const detected: string[] = [];
   let confidenceSum = 0;
   let confidenceCount = 0;
 
   for (const result of results) {
+    // Язык, который распознаватель выбрал для ЭТОГО куска. Пишется только
+    // когда в запросе были альтернативы; берём первый непустой.
+    const resultLanguage = languageFromBcp47(result?.languageCode);
+    if (resultLanguage) detected.push(resultLanguage);
     const alternative = result?.alternatives?.[0];
     if (!alternative) continue;
     if (typeof alternative.transcript === "string") parts.push(alternative.transcript.trim());
@@ -271,12 +375,20 @@ async function transcribeGoogle(
   if (transcript.length === 0) return empty(base);
 
   const confidence = confidenceCount > 0 ? confidenceSum / confidenceCount : 0;
+  const detectedLanguage = detected[0] ?? null;
   return {
     transcript,
     confidence,
     words,
+    detectedLanguage,
     degraded: false,
-    debug: { ...base, status: "ok", transcript, confidence: Math.round(confidence * 100) / 100 },
+    debug: {
+      ...base,
+      status: "ok",
+      transcript,
+      confidence: Math.round(confidence * 100) / 100,
+      detected_language: detectedLanguage,
+    },
   };
 }
 
@@ -323,6 +435,9 @@ async function transcribeOpenAi(
     transcript,
     confidence: 0,
     words: transcript.split(/\s+/).map((word: string) => ({ word, confidence: 0 })),
+    // Whisper язык определяет, но при заданном language его не возвращает;
+    // тут работает только запасная проверка по письменности.
+    detectedLanguage: null,
     degraded: false,
     debug: { ...base, status: "ok", transcript },
   };
@@ -345,6 +460,13 @@ export async function transcribeAudio(
    */
   hintPhrases: string[] = [],
   /**
+   * На каких ещё языках игрок мог заговорить — обычно его родной. Не
+   * «улучшение качества», а способ вообще узнать, что он ответил не на том
+   * языке: без этого списка провайдер обязан выдать текст на целевом языке
+   * и о чужой речи промолчит.
+   */
+  alternativeLanguages: string[] = [],
+  /**
    * Сколько времени осталось у воркера на распознавание. Собственный
    * ASR_TIMEOUT_MS остаётся верхней границей, но пережить бюджет задачи он
    * не может: воркера убивают снаружи, и тогда результат не запишет никто.
@@ -360,7 +482,14 @@ export async function transcribeAudio(
   try {
     switch (provider) {
       case "google":
-        return await transcribeGoogle(audio, languageCode, apiKey, hintPhrases, timeoutMs);
+        return await transcribeGoogle(
+          audio,
+          languageCode,
+          alternativeLanguages,
+          apiKey,
+          hintPhrases,
+          timeoutMs,
+        );
       case "openai":
         return await transcribeOpenAi(audio, languageCode, apiKey, timeoutMs);
       default:

@@ -27,7 +27,7 @@ import {
   type JudgeVerbosity,
   NEUTRAL_SCORE,
 } from "../_shared/evaluateGrammar.ts";
-import { transcribeAudio } from "../_shared/transcribeAudio.ts";
+import { definitelyNotLanguage, transcribeAudio } from "../_shared/transcribeAudio.ts";
 
 /**
  * Лига говорящего приравнена к уровню CEFR (см. supabase/migrations/0023 —
@@ -55,8 +55,41 @@ const EMPTY_TRANSCRIPT_SCORE = 1;
 /** Статусы распознавания — те же значения, что в CHECK у voice_recordings (миграция 0013). */
 type TranscriptStatus = "pending" | "ok" | "empty" | "failed";
 
-/** Статусы работы судьи — CHECK у voice_recordings (миграция 0014). */
-type JudgeStatus = "pending" | "ok" | "degraded" | "skipped";
+/** Статусы работы судьи — CHECK у voice_recordings (миграции 0014, 0024). */
+type JudgeStatus = "pending" | "ok" | "degraded" | "skipped" | "wrong_language";
+
+/** Балл за ответ не на том языке: задание не выполнено. */
+const WRONG_LANGUAGE_SCORE = 1;
+
+/**
+ * Игрок ответил не на том языке, на который просили перевести?
+ *
+ * Отвечает ТОЛЬКО на этот вопрос — не «что за язык», а «точно ли не
+ * целевой». Поэтому проверка стоит доли миллисекунды и не удлиняет ожидание
+ * ответа.
+ *
+ * Первый и основной источник — сам распознаватель: с тех пор как в запрос
+ * уходит родной язык альтернативой, Google возвращает в ответе, что он
+ * услышал. Своего определителя языка мы не писали и не будем.
+ *
+ * Второй — письменность, и он нужен на случай, когда провайдер язык не
+ * сообщил (openai-совместимый путь, старый ответ без languageCode). Он
+ * тоже ничего не «угадывает»: кириллица там, где ждали английский, — это
+ * не догадка.
+ */
+function wrongLanguage(
+  transcript: string,
+  detectedLanguage: string | null,
+  targetLanguage: string,
+): { wrong: boolean; source: string } {
+  if (detectedLanguage && detectedLanguage !== targetLanguage) {
+    return { wrong: true, source: `ASR определил язык как ${detectedLanguage}` };
+  }
+  if (!detectedLanguage && definitelyNotLanguage(transcript, targetLanguage)) {
+    return { wrong: true, source: "письменность транскрипта не та" };
+  }
+  return { wrong: false, source: "" };
+}
 
 /** Поля voice_recordings, которыми пользуется воркер. */
 /**
@@ -196,14 +229,26 @@ async function processJob(job_id: string): Promise<void> {
     // читается один раз здесь.
     const expectedPhrase = await roundPhrase(supabase, recording);
 
+    // Родной язык игрока нужен ДО распознавания, а не только судье: он
+    // уходит в ASR альтернативой, чтобы распознаватель мог сказать «это
+    // вообще-то русский», а не подбирать английские слова под русскую речь.
+    const { data: speaker } = await supabase
+      .from("users")
+      .select("native_language")
+      .eq("id", recording.user_id)
+      .single();
+    const nativeLanguage = speaker?.native_language ?? "en";
+
     // Шаг 1 — распознавание речи.
-    const { transcript, status, debug: asrDebug, uncertainWords } = await resolveTranscript(
-      supabase,
-      recording,
-      targetLanguage,
-      expectedPhrase,
-      budgetLeft(),
-    );
+    const { transcript, status, debug: asrDebug, uncertainWords, detectedLanguage } =
+      await resolveTranscript(
+        supabase,
+        recording,
+        targetLanguage,
+        nativeLanguage,
+        expectedPhrase,
+        budgetLeft(),
+      );
     // Диагностика пайплайна для отладочной панели в игре (миграция 0016).
     const pipelineDebug: Record<string, unknown> = { asr: asrDebug };
 
@@ -225,6 +270,10 @@ async function processJob(job_id: string): Promise<void> {
     let correctedText = "";
     let cleanedText = "";
 
+    // Считается один раз и до ветвления: проверка дешёвая, но вызывать её
+    // дважды в условии и в теле — верный способ однажды разойтись.
+    const languageVerdict = wrongLanguage(transcript, detectedLanguage, targetLanguage);
+
     if (status === "failed") {
       score = NEUTRAL_SCORE;
       feedback = "Не удалось распознать речь — балл выставлен нейтральным.";
@@ -235,6 +284,20 @@ async function processJob(job_id: string): Promise<void> {
       feedback = "Не удалось разобрать речь — попробуй сказать чётче и ближе к микрофону.";
       judgeStatus = "skipped";
       pipelineDebug.judge = { status: "skipped", reason: "записана тишина — судью не звали" };
+    } else if (languageVerdict.wrong) {
+      // Ответ не на том языке. Судью не зовём: разбирать грамматику
+      // русской фразы как английской бессмысленно, а ждать этого разбора
+      // игроку — впустую потраченные десятки секунд. Задание не выполнено,
+      // поэтому балл тот же, что за молчание.
+      score = WRONG_LANGUAGE_SCORE;
+      feedback = "Ответ не на том языке — фразу нужно перевести.";
+      judgeStatus = "wrong_language";
+      pipelineDebug.judge = {
+        status: "skipped",
+        reason: `не тот язык (${languageVerdict.source}) — судью не звали`,
+        detected_language: detectedLanguage,
+        target_language: targetLanguage,
+      };
     } else {
       // Лига говорящего на этом языке -> уровень CEFR (скрытая механика:
       // приравнивание лиг к A1-C2) — ограничивает только сложность текста
@@ -248,13 +311,6 @@ async function processJob(job_id: string): Promise<void> {
         .eq("role", "learning")
         .maybeSingle();
       const level = cefrLevelForRating(speakerLanguage?.league_rating ?? 1000);
-
-      const { data: speaker } = await supabase
-        .from("users")
-        .select("native_language")
-        .eq("id", recording.user_id)
-        .single();
-      const nativeLanguage = speaker?.native_language ?? "en";
 
       // Первая попытка Одиночной Игры просит подробный разбор (раздел 2.2:
       // игрок должен понять, что исправить перед второй попыткой). Вторая
@@ -375,6 +431,8 @@ async function resolveTranscript(
   supabase: SupabaseClient,
   recording: VoiceRecordingRow,
   targetLanguage: string,
+  /** Родной язык игрока — уходит в ASR альтернативой (см. transcribeAudio). */
+  nativeLanguage: string,
   expectedPhrase: string,
   /** Остаток бюджета задачи — распознавание не должно его пережить. */
   budgetMs: number,
@@ -384,6 +442,8 @@ async function resolveTranscript(
   debug: Record<string, unknown>;
   /** Слова, в которых распознавание не уверено, — судье в помощь. */
   uncertainWords: string[];
+  /** Язык, который услышал распознаватель, или null, если он не сказал. */
+  detectedLanguage: string | null;
 }> {
   const existing = (recording.transcript ?? "").trim();
   if (existing.length > 0) {
@@ -395,6 +455,9 @@ async function resolveTranscript(
       status: "ok",
       debug: { status: "ok", transcript: existing, cached: true },
       uncertainWords: [],
+      // Готовый транскрипт языка не помнит — дальше сработает проверка
+      // по письменности.
+      detectedLanguage: null,
     };
   }
   if (recording.transcript_status === "empty" || recording.transcript_status === "failed") {
@@ -404,6 +467,7 @@ async function resolveTranscript(
       status: recording.transcript_status,
       debug: { status: recording.transcript_status, cached: true },
       uncertainWords: [],
+      detectedLanguage: null,
     };
   }
 
@@ -421,6 +485,7 @@ async function resolveTranscript(
       status: "failed",
       debug: { status: "failed", error: `не удалось скачать аудио: ${downloadErr?.message ?? downloadErr}` },
       uncertainWords: [],
+      detectedLanguage: null,
     };
   }
 
@@ -429,7 +494,16 @@ async function resolveTranscript(
   // Отдаём её распознавателю подсказкой: он всё так же слышит настоящую
   // речь со всеми ошибками, но перестаёт угадывать слова из всего языка
   // сразу и заметно реже подставляет непохожие.
-  const asr = await transcribeAudio(audio, targetLanguage, hintPhrases(expectedPhrase), budgetMs);
+  const asr = await transcribeAudio(
+    audio,
+    targetLanguage,
+    hintPhrases(expectedPhrase),
+    // Родной язык альтернативой: только так распознаватель может сообщить,
+    // что игрок ответил не на том языке, вместо того чтобы молча подбирать
+    // слова целевого языка под чужую речь.
+    [nativeLanguage],
+    budgetMs,
+  );
 
   const status: TranscriptStatus = asr.degraded ? "failed" : asr.transcript.length > 0 ? "ok" : "empty";
   await saveTranscript(supabase, recording.id, asr.transcript, asr.words, status);
@@ -443,6 +517,7 @@ async function resolveTranscript(
       .filter((w) => w.confidence > 0 && w.confidence < 0.85)
       .map((w) => w.word)
       .slice(0, 12),
+    detectedLanguage: asr.detectedLanguage,
     };
 }
 

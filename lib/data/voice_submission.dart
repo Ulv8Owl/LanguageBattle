@@ -30,7 +30,7 @@ enum TranscriptStatus {
 }
 
 /// Отработал ли LLM-судья по этой записи. Значения совпадают со столбцом
-/// voice_recordings.judge_status (миграция 0014).
+/// voice_recordings.judge_status (миграции 0014, 0024).
 enum JudgeStatus {
   /// Задача ещё не дошла до судьи.
   pending,
@@ -43,12 +43,18 @@ enum JudgeStatus {
   degraded,
 
   /// Судью не звали: речь не распознана либо это родной слот Дуэли.
-  skipped;
+  skipped,
+
+  /// Игрок говорил не на том языке, на который просили перевести. Судью не
+  /// звали намеренно: разбирать грамматику русской фразы как английской
+  /// нечего, а ждать этого разбора игроку — впустую потраченное время.
+  wrongLanguage;
 
   static JudgeStatus parse(String? value) => switch (value) {
         'ok' => JudgeStatus.ok,
         'degraded' => JudgeStatus.degraded,
         'skipped' => JudgeStatus.skipped,
+        'wrong_language' => JudgeStatus.wrongLanguage,
         _ => JudgeStatus.pending,
       };
 }

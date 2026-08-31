@@ -655,10 +655,15 @@ class _TrainingScreenState extends State<TrainingScreen> {
       // Сыгранный раунд показывается тем же набором блоков, что и текущий:
       // иначе, шагнув «Дальше», игрок терял и свои голосовые, и разбор.
       items.addAll(_voiceBubble(done.firstAudio));
-      items.add(_ErrorReport(errors: done.errors, attempt: done.firstAttempt));
+      items.add(_ErrorReport(
+          errors: done.errors, attempt: done.firstAttempt, targetLanguage: _targetLanguage));
       items.addAll(_debugPanels('Раунд ${done.roundNumber}, попытка 1', done.firstAttempt));
       items.addAll(_voiceBubble(done.secondAudio, score: done.score));
-      items.add(_ErrorReport(errors: const [], attempt: done.secondAttempt, isSecondAttempt: true));
+      items.add(_ErrorReport(
+          errors: const [],
+          attempt: done.secondAttempt,
+          targetLanguage: _targetLanguage,
+          isSecondAttempt: true));
       items.add(_ScoreCard(score: done.score, coins: null, attempt: done.secondAttempt));
       items.addAll(_debugPanels('Раунд ${done.roundNumber}, попытка 2', done.secondAttempt));
     }
@@ -702,22 +707,35 @@ class _TrainingScreenState extends State<TrainingScreen> {
         break;
       case _Stage.awaitingSecond:
         items.addAll(_voiceBubble(_firstAttemptAudio));
-        items.add(_ErrorReport(errors: _firstAttemptErrors, attempt: _firstAttempt));
+        items.add(_ErrorReport(
+            errors: _firstAttemptErrors,
+            attempt: _firstAttempt,
+            targetLanguage: _targetLanguage));
         items.addAll(_debugPanels('Попытка 1', _firstAttempt));
         break;
       case _Stage.gradingSecond:
         items.addAll(_voiceBubble(_firstAttemptAudio));
-        items.add(_ErrorReport(errors: _firstAttemptErrors, attempt: _firstAttempt));
+        items.add(_ErrorReport(
+            errors: _firstAttemptErrors,
+            attempt: _firstAttempt,
+            targetLanguage: _targetLanguage));
         items.addAll(_debugPanels('Попытка 1', _firstAttempt));
         items.addAll(_voiceBubble(_secondAttemptAudio));
         items.add(const _Thinking(label: 'Оцениваю вторую попытку'));
         break;
       case _Stage.roundDone:
         items.addAll(_voiceBubble(_firstAttemptAudio));
-        items.add(_ErrorReport(errors: _firstAttemptErrors, attempt: _firstAttempt));
+        items.add(_ErrorReport(
+            errors: _firstAttemptErrors,
+            attempt: _firstAttempt,
+            targetLanguage: _targetLanguage));
         items.addAll(_debugPanels('Попытка 1', _firstAttempt));
         items.addAll(_voiceBubble(_secondAttemptAudio, score: _finalScore));
-        items.add(_ErrorReport(errors: const [], attempt: _secondAttempt, isSecondAttempt: true));
+        items.add(_ErrorReport(
+            errors: const [],
+            attempt: _secondAttempt,
+            targetLanguage: _targetLanguage,
+            isSecondAttempt: true));
         items.add(_ScoreCard(score: _finalScore ?? 0, coins: _earnedCoins, attempt: _secondAttempt));
         items.addAll(_debugPanels('Попытка 2', _secondAttempt));
         break;
@@ -851,9 +869,15 @@ class _ErrorReport extends StatelessWidget {
   /// marksOnly в evaluateGrammar.ts), чтобы не тратить время ответа.
   final bool isSecondAttempt;
 
+  /// Язык, на который надо было перевести. Нужен ровно для одной реплики —
+  /// «Сообщение выше нужно перевести на английский язык», когда игрок
+  /// ответил не на том языке.
+  final String targetLanguage;
+
   const _ErrorReport({
     required this.errors,
     required this.attempt,
+    required this.targetLanguage,
     this.isSecondAttempt = false,
   });
 
@@ -868,6 +892,9 @@ class _ErrorReport extends StatelessWidget {
     final judge = attempt?.judgeStatus ?? JudgeStatus.ok;
     // Судья не ответил — пустой список ошибок НЕ значит, что ошибок нет.
     final judgeBroken = judge == JudgeStatus.degraded;
+    // Не поломка и не «ошибок нет»: игрок ответил не на том языке, и
+    // судью намеренно не звали.
+    final wrongLanguage = judge == JudgeStatus.wrongLanguage;
     final notRecognised = status == TranscriptStatus.empty || status == TranscriptStatus.failed;
     // Результата не было вовсе: список ошибок тут заведомо пуст, и показывать
     // вместо объяснения пустоту нельзя — нужен текст причины.
@@ -882,6 +909,7 @@ class _ErrorReport extends StatelessWidget {
       _ when clientFailure != null => ('РЕЗУЛЬТАТ НЕ ПРИШЁЛ', AppColors.danger),
       TranscriptStatus.failed => ('РЕЧЬ НЕ РАСПОЗНАНА', AppColors.muted),
       TranscriptStatus.empty => ('НИЧЕГО НЕ УСЛЫШАЛ', AppColors.muted),
+      _ when wrongLanguage => ('НЕ ТОТ ЯЗЫК', AppColors.danger),
       _ when judgeBroken && (attempt?.judgeHitProviderLimit ?? false) =>
         ('ЛИМИТ ПРОВАЙДЕРА ИИ', AppColors.danger),
       _ when judgeBroken => ('РАЗБОР НЕ ПОЛУЧЕН', AppColors.muted),
@@ -897,6 +925,7 @@ class _ErrorReport extends StatelessWidget {
         'Не удалось распознать речь — это сбой на нашей стороне, балл за него не снижается. Попробуй сказать фразу ещё раз.',
       TranscriptStatus.empty =>
         'Похоже, записалась тишина. Говори чётче и ближе к микрофону, удерживая кнопку всё время, пока говоришь.',
+      _ when wrongLanguage => wrongLanguageNote(targetLanguage),
       _ when judgeBroken && (attempt?.judgeHitProviderLimit ?? false) =>
         'У провайдера ИИ закончился дневной лимит — он отказывается отвечать. Разбора поэтому нет, '
             'и это не признак того, что ошибок не было. Балл не снижается. Лимит снимается на стороне провайдера.',
@@ -937,9 +966,9 @@ class _ErrorReport extends StatelessWidget {
             if (transcript.isNotEmpty) const SizedBox(height: 10),
 
             if (isSecondAttempt) ...[
-              if (noResult || notRecognised || judgeBroken || correction.isEmpty)
+              if (noResult || notRecognised || judgeBroken || wrongLanguage || correction.isEmpty)
                 Text(hint, style: const TextStyle(color: AppColors.muted, fontSize: 12, height: 1.4)),
-            ] else if (noResult || errors.isEmpty || notRecognised || judgeBroken)
+            ] else if (noResult || errors.isEmpty || notRecognised || judgeBroken || wrongLanguage)
               Text(hint, style: const TextStyle(color: AppColors.muted, fontSize: 12, height: 1.4))
             else
               ...errors.map((e) => Padding(
@@ -1157,6 +1186,9 @@ class _PipelineDebug extends StatelessWidget {
     if (raw != null && raw.isNotEmpty) return raw;
     return switch (outcome.judgeStatus) {
       JudgeStatus.skipped => '(не вызывался — ${judge?['reason'] ?? 'нечего разбирать'})',
+      JudgeStatus.wrongLanguage =>
+        '(не вызывался — ответ не на том языке: ${judge?['detected_language'] ?? '?'} '
+            'вместо ${judge?['target_language'] ?? '?'})',
       JudgeStatus.degraded => '(ответа нет, см. причину ниже)',
       JudgeStatus.pending => '(ещё не отработал)',
       JudgeStatus.ok => '(ответ разобран, сырьё не сохранено)',

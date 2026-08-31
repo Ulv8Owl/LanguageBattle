@@ -1,3 +1,5 @@
+import '../../data/voice_submission.dart';
+
 class MatchData {
   final String id;
   final String? playerAId;
@@ -109,6 +111,11 @@ class VoiceRecordingData {
   final String transcript;
   final String correctedText;
   final String cleanedText;
+
+  /// Отработал ли судья по этой записи (voice_recordings.judge_status).
+  /// В бою важен один случай — wrongLanguage: тогда вместо разбора надо
+  /// сказать игроку, что он ответил не на том языке.
+  final JudgeStatus judgeStatus;
   final DateTime createdAt;
 
   const VoiceRecordingData({
@@ -121,6 +128,7 @@ class VoiceRecordingData {
     required this.transcript,
     required this.correctedText,
     required this.cleanedText,
+    required this.judgeStatus,
     required this.createdAt,
   });
 
@@ -139,6 +147,7 @@ class VoiceRecordingData {
       transcript: ((row['transcript'] as String?) ?? '').trim(),
       correctedText: ((row['corrected_text'] as String?) ?? '').trim(),
       cleanedText: ((row['cleaned_text'] as String?) ?? '').trim(),
+      judgeStatus: JudgeStatus.parse(row['judge_status'] as String?),
       createdAt: DateTime.parse(row['created_at'] as String),
     );
   }

@@ -10,16 +10,29 @@ const languageNames = {
   'ru': 'Русский',
 };
 
+/// Название языка в винительном падеже: «перевести на английский».
+const languageAccusative = {
+  'en': 'английский',
+  'es': 'испанский',
+  'ru': 'русский',
+};
+
 /// «Переведи на английский:» — подпись к заданию.
 ///
 /// Стоит В НАЧАЛЕ сообщения, а не в конце: это инструкция, что делать с
 /// текстом ниже, и прочитать её нужно ДО текста, а не после.
 String translateToLabel(String languageCode) {
-  const targets = {
-    'en': 'английский',
-    'es': 'испанский',
-    'ru': 'русский',
-  };
-  final target = targets[languageCode];
+  final target = languageAccusative[languageCode];
   return target != null ? 'Переведи на $target:' : 'Переведи на изучаемый язык:';
+}
+
+/// Реплика хамелеона, когда игрок ответил не на том языке.
+///
+/// Говорит про ЦЕЛЕВОЙ язык, а не про тот, который распознали: игроку
+/// важно, что делать дальше, а не как называется то, что он сказал.
+String wrongLanguageNote(String targetLanguage) {
+  final target = languageAccusative[targetLanguage];
+  return target != null
+      ? 'Сообщение выше нужно перевести на $target язык.'
+      : 'Сообщение выше нужно перевести на изучаемый язык.';
 }

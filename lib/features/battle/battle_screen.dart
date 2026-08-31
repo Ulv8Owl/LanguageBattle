@@ -742,6 +742,9 @@ class _AiVerdict extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final score = verdict?.score;
+    // Не тот язык — вместо разбора говорим, что делать. Разбирать тут
+    // нечего: игрок прочитал фразу, а не перевёл её.
+    final wrongLanguage = recording.judgeStatus == JudgeStatus.wrongLanguage;
 
     return Padding(
       padding: const EdgeInsets.only(right: 40, top: feedGap / 2, bottom: feedGap / 2),
@@ -805,14 +808,21 @@ class _AiVerdict extends StatelessWidget {
                           ],
                         ),
                         const SizedBox(height: 8),
-                        // В бою — только разбор, без текстовых пояснений:
-                        // сравнить свою фразу с правильной можно за секунду,
-                        // а читать абзац объяснений посреди матча некогда.
-                        TranscriptReview(
-                          transcript: recording.transcript,
-                          spoken: recording.spokenForDiff,
-                          corrected: recording.correctedText,
-                        ),
+                        if (wrongLanguage)
+                          Text(
+                            wrongLanguageNote(recording.languageCode ?? 'en'),
+                            style: const TextStyle(
+                                color: AppColors.cream, fontSize: 13, height: 1.4),
+                          )
+                        else
+                          // В бою — только разбор, без текстовых пояснений:
+                          // сравнить свою фразу с правильной можно за секунду,
+                          // а читать абзац объяснений посреди матча некогда.
+                          TranscriptReview(
+                            transcript: recording.transcript,
+                            spoken: recording.spokenForDiff,
+                            corrected: recording.correctedText,
+                          ),
                       ],
                     ),
             ),
