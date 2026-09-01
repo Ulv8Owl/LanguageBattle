@@ -62,3 +62,7 @@ supabase/.branches/
 
 # Build output for APK deliveries
 /output/
+
+# Python tooling (tools/*.py)
+__pycache__/
+*.pyc
