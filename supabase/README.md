@@ -167,7 +167,7 @@ Editor. Чтобы проверить сквозной путь «два реа�
 2. Создаёт `evaluation_jobs` (status='pending').
 3. Триггер на этой таблице (см. ниже) дёргает Edge Function
    `evaluate-recording`, которая **сначала распознаёт речь** по
-   загруженному файлу (`_shared/transcribeAudio.ts`, результат пишется
+   загруженному файлу (`_shared/asr/index.ts`, результат пишется
    обратно в `voice_recordings.transcript` + `transcript_status`), а затем
    отдаёт транскрипт LLM-судье. Балл
    берётся **напрямую из ответа модели** (раздел 9.4, MVP-версия — без
@@ -583,7 +583,8 @@ curl -s -X POST https://gdturijctufmcctuztyn.supabase.co/functions/v1/config-che
 
 Теперь клиент пишет WAV (PCM 16 бит, 16 кГц, моно — `lib/core/audio_format.dart`)
 и грузит его в Storage, а речь распознаёт Edge Function через
-провайдер-агностичный адаптер `_shared/transcribeAudio.ts` — по той же
+провайдер-агностичный адаптер `_shared/asr/index.ts` (и его провайдеры
+в той же папке) — по той же
 схеме, что и LLM-судья: смена провайдера это правка переменных окружения,
 а не кода.
 

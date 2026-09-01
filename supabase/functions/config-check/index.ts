@@ -14,7 +14,7 @@
 // символа ключа — этого хватает, чтобы отличить «задан не тот ключ» от
 // «ключ не задан», и недостаточно, чтобы им воспользоваться.
 
-import { bcp47For } from "../_shared/transcribeAudio.ts";
+import { bcp47For } from "../_shared/asr/index.ts";
 import { evaluateGrammar, trivialProbeEnabled } from "../_shared/evaluateGrammar.ts";
 
 /// Заведомо ошибочная фраза: судья ОБЯЗАН найти здесь минимум одну ошибку

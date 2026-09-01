@@ -45,7 +45,7 @@ export interface EvaluateGrammarResult {
  * Нейтральный балл при неустранимом сбое НАШЕЙ стороны (модель не ответила,
  * ASR не смог распознать) — игрока за свою поломку не штрафуем. Экспортирован,
  * потому что тем же баллом заканчивается сбой распознавания речи в
- * evaluate-recording (см. transcribeAudio.ts).
+ * evaluate-recording (см. _shared/asr/index.ts).
  */
 export const NEUTRAL_SCORE = 7;
 
