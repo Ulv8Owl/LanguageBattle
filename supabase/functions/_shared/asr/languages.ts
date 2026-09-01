@@ -1,12 +1,17 @@
-// Языки, которые приложение УМЕЕТ ОПОЗНАТЬ — как родной язык игрока, для
-// проверки «не тот язык» (definitelyNotLanguage) и для тега провайдера
-// (bcp47For). Это НЕ список того, что можно ВЫБРАТЬ изучать — тот короче и
-// живёт в контенте (assets/phrases, assets/vocab): язык учить нельзя, пока
-// для него нет банка фраз, но опознать его как родной нужно уже сейчас.
+// 32 языка, которые поддерживает приложение: тег для провайдера ASR
+// (bcp47For) и письменность для проверки «не тот язык»
+// (definitelyNotLanguage).
 //
-// Порядок и набор кодов ДОЛЖНЫ совпадать с allLanguages в
-// lib/core/all_languages.dart — там та же таблица нужна интерфейсу
-// (выбор родного языка в Настройках). Изменения вносить в обоих местах.
+// Почему именно 32 и именно эти — подробное обоснование в
+// lib/core/all_languages.dart (стоимость контента, ликвидность очередей
+// PvP, поддержка ASR). Здесь важно другое: набор и порядок кодов ОБЯЗАНЫ
+// совпадать с той таблицей, и это проверяется тестом
+// test/languages_test.dart, а не вниманием при правке.
+//
+// Наличие языка здесь НЕ значит, что на нём уже можно играть: для этого
+// нужен ещё банк фраз и слов (assets/phrases, assets/vocab). Готовность
+// контента считается по самому контенту — см. ContentLanguages в
+// lib/data/content_languages.dart.
 
 type Script =
   | "latin"
@@ -14,23 +19,9 @@ type Script =
   | "greek"
   | "arabic"
   | "hebrew"
-  | "armenian"
-  | "georgian"
   | "devanagari"
   | "bengali"
-  | "gurmukhi"
-  | "gujarati"
-  | "tamil"
-  | "telugu"
-  | "kannada"
-  | "malayalam"
-  | "sinhala"
   | "thai"
-  | "lao"
-  | "khmer"
-  | "myanmar"
-  | "tibetan"
-  | "ethiopic"
   | "han"
   | "kana"
   | "hangul";
@@ -47,112 +38,43 @@ interface LanguageInfo {
 }
 
 const LANGUAGES: Record<string, LanguageInfo> = {
+  // --- Эшелон A: топ-12 изучаемых в мире и крупнейшие рынки ---
   en: { bcp47: "en-US", scripts: ["latin"] },
   es: { bcp47: "es-ES", scripts: ["latin"] },
-  ru: { bcp47: "ru-RU", scripts: ["cyrillic"] },
   zh: { bcp47: "zh-CN", scripts: ["han"] },
-  de: { bcp47: "de-DE", scripts: ["latin"] },
-  ko: { bcp47: "ko-KR", scripts: ["hangul"] },
-  fr: { bcp47: "fr-FR", scripts: ["latin"] },
-  ja: { bcp47: "ja-JP", scripts: ["kana", "han"] },
-  pt: { bcp47: "pt-PT", scripts: ["latin"] },
-  tr: { bcp47: "tr-TR", scripts: ["latin"] },
-  pl: { bcp47: "pl-PL", scripts: ["latin"] },
-  ca: { bcp47: "ca-ES", scripts: ["latin"] },
-  nl: { bcp47: "nl-NL", scripts: ["latin"] },
-  ar: { bcp47: "ar-SA", scripts: ["arabic"] },
-  sv: { bcp47: "sv-SE", scripts: ["latin"] },
-  it: { bcp47: "it-IT", scripts: ["latin"] },
-  id: { bcp47: "id-ID", scripts: ["latin"] },
   hi: { bcp47: "hi-IN", scripts: ["devanagari"] },
-  fi: { bcp47: "fi-FI", scripts: ["latin"] },
+  ar: { bcp47: "ar-SA", scripts: ["arabic"] },
+  pt: { bcp47: "pt-PT", scripts: ["latin"] },
+  ru: { bcp47: "ru-RU", scripts: ["cyrillic"] },
+  fr: { bcp47: "fr-FR", scripts: ["latin"] },
+  de: { bcp47: "de-DE", scripts: ["latin"] },
+  ja: { bcp47: "ja-JP", scripts: ["kana", "han"] },
+  ko: { bcp47: "ko-KR", scripts: ["hangul"] },
+  it: { bcp47: "it-IT", scripts: ["latin"] },
+
+  // --- Эшелон B: большие базы носителей и растущие мобильные рынки ---
+  id: { bcp47: "id-ID", scripts: ["latin"] },
+  tr: { bcp47: "tr-TR", scripts: ["latin"] },
   vi: { bcp47: "vi-VN", scripts: ["latin"] },
-  he: { bcp47: "he-IL", scripts: ["hebrew"] },
-  uk: { bcp47: "uk-UA", scripts: ["cyrillic"] },
-  el: { bcp47: "el-GR", scripts: ["greek"] },
-  ms: { bcp47: "ms-MY", scripts: ["latin"] },
-  cs: { bcp47: "cs-CZ", scripts: ["latin"] },
-  ro: { bcp47: "ro-RO", scripts: ["latin"] },
-  da: { bcp47: "da-DK", scripts: ["latin"] },
-  hu: { bcp47: "hu-HU", scripts: ["latin"] },
-  ta: { bcp47: "ta-IN", scripts: ["tamil"] },
-  no: { bcp47: "nb-NO", scripts: ["latin"] },
+  pl: { bcp47: "pl-PL", scripts: ["latin"] },
+  nl: { bcp47: "nl-NL", scripts: ["latin"] },
   th: { bcp47: "th-TH", scripts: ["thai"] },
-  ur: { bcp47: "ur-PK", scripts: ["arabic"] },
-  hr: { bcp47: "hr-HR", scripts: ["latin"] },
-  bg: { bcp47: "bg-BG", scripts: ["cyrillic"] },
-  lt: { bcp47: "lt-LT", scripts: ["latin"] },
-  la: { bcp47: "la", scripts: ["latin"] },
-  mi: { bcp47: "mi-NZ", scripts: ["latin"] },
-  ml: { bcp47: "ml-IN", scripts: ["malayalam"] },
-  cy: { bcp47: "cy-GB", scripts: ["latin"] },
-  sk: { bcp47: "sk-SK", scripts: ["latin"] },
-  te: { bcp47: "te-IN", scripts: ["telugu"] },
+  uk: { bcp47: "uk-UA", scripts: ["cyrillic"] },
   fa: { bcp47: "fa-IR", scripts: ["arabic"] },
-  lv: { bcp47: "lv-LV", scripts: ["latin"] },
-  bn: { bcp47: "bn-IN", scripts: ["bengali"] },
-  sr: { bcp47: "sr-RS", scripts: ["cyrillic", "latin"] },
-  az: { bcp47: "az-AZ", scripts: ["latin"] },
-  sl: { bcp47: "sl-SI", scripts: ["latin"] },
-  kn: { bcp47: "kn-IN", scripts: ["kannada"] },
-  et: { bcp47: "et-EE", scripts: ["latin"] },
-  mk: { bcp47: "mk-MK", scripts: ["cyrillic"] },
-  br: { bcp47: "br-FR", scripts: ["latin"] },
-  eu: { bcp47: "eu-ES", scripts: ["latin"] },
-  is: { bcp47: "is-IS", scripts: ["latin"] },
-  hy: { bcp47: "hy-AM", scripts: ["armenian"] },
-  ne: { bcp47: "ne-NP", scripts: ["devanagari"] },
-  mn: { bcp47: "mn-MN", scripts: ["cyrillic"] },
-  bs: { bcp47: "bs-BA", scripts: ["latin"] },
-  kk: { bcp47: "kk-KZ", scripts: ["cyrillic"] },
-  sq: { bcp47: "sq-AL", scripts: ["latin"] },
-  sw: { bcp47: "sw-KE", scripts: ["latin"] },
-  gl: { bcp47: "gl-ES", scripts: ["latin"] },
-  mr: { bcp47: "mr-IN", scripts: ["devanagari"] },
-  pa: { bcp47: "pa-IN", scripts: ["gurmukhi"] },
-  si: { bcp47: "si-LK", scripts: ["sinhala"] },
-  km: { bcp47: "km-KH", scripts: ["khmer"] },
-  sn: { bcp47: "sn-ZW", scripts: ["latin"] },
-  yo: { bcp47: "yo-NG", scripts: ["latin"] },
-  so: { bcp47: "so-SO", scripts: ["latin"] },
-  af: { bcp47: "af-ZA", scripts: ["latin"] },
-  oc: { bcp47: "oc-FR", scripts: ["latin"] },
-  ka: { bcp47: "ka-GE", scripts: ["georgian"] },
-  be: { bcp47: "be-BY", scripts: ["cyrillic"] },
-  tg: { bcp47: "tg-TJ", scripts: ["cyrillic"] },
-  sd: { bcp47: "sd-PK", scripts: ["arabic"] },
-  gu: { bcp47: "gu-IN", scripts: ["gujarati"] },
-  am: { bcp47: "am-ET", scripts: ["ethiopic"] },
-  yi: { bcp47: "yi", scripts: ["hebrew"] },
-  lo: { bcp47: "lo-LA", scripts: ["lao"] },
-  uz: { bcp47: "uz-UZ", scripts: ["latin"] },
-  fo: { bcp47: "fo-FO", scripts: ["latin"] },
-  ht: { bcp47: "ht-HT", scripts: ["latin"] },
-  ps: { bcp47: "ps-AF", scripts: ["arabic"] },
-  tk: { bcp47: "tk-TM", scripts: ["latin"] },
-  nn: { bcp47: "nn-NO", scripts: ["latin"] },
-  mt: { bcp47: "mt-MT", scripts: ["latin"] },
-  sa: { bcp47: "sa-IN", scripts: ["devanagari"] },
-  lb: { bcp47: "lb-LU", scripts: ["latin"] },
-  my: { bcp47: "my-MM", scripts: ["myanmar"] },
-  bo: { bcp47: "bo-CN", scripts: ["tibetan"] },
+  bn: { bcp47: "bn-BD", scripts: ["bengali"] },
+  ur: { bcp47: "ur-PK", scripts: ["arabic"] },
+
+  // --- Эшелон C: остальная Европа и Филиппины ---
+  sv: { bcp47: "sv-SE", scripts: ["latin"] },
+  no: { bcp47: "nb-NO", scripts: ["latin"] },
+  da: { bcp47: "da-DK", scripts: ["latin"] },
+  fi: { bcp47: "fi-FI", scripts: ["latin"] },
+  cs: { bcp47: "cs-CZ", scripts: ["latin"] },
+  el: { bcp47: "el-GR", scripts: ["greek"] },
+  he: { bcp47: "he-IL", scripts: ["hebrew"] },
+  ro: { bcp47: "ro-RO", scripts: ["latin"] },
+  hu: { bcp47: "hu-HU", scripts: ["latin"] },
   tl: { bcp47: "tl-PH", scripts: ["latin"] },
-  mg: { bcp47: "mg-MG", scripts: ["latin"] },
-  as: { bcp47: "as-IN", scripts: ["bengali"] },
-  tt: { bcp47: "tt-RU", scripts: ["cyrillic"] },
-  haw: { bcp47: "haw-US", scripts: ["latin"] },
-  ln: { bcp47: "ln-CD", scripts: ["latin"] },
-  ha: { bcp47: "ha-NG", scripts: ["latin"] },
-  ba: { bcp47: "ba-RU", scripts: ["cyrillic"] },
-  // ISO 639-1 переименовал яванский из "jw" в "jv" ещё в 2001-м; в задаче
-  // код указан как "jw" — оставляем его кодом приложения (это то, что уже
-  // могло уйти в базу и в контент), а провайдеру шлём современный "jv".
-  jw: { bcp47: "jv-ID", scripts: ["latin"] },
-  su: { bcp47: "su-ID", scripts: ["latin"] },
-  // Кантонский от письменного путунхуа устной речью не отличить по
-  // письменности — тот же han. Разделить их может только сам провайдер по
-  // звучанию, если его модель это умеет; наша проверка — нет.
-  yue: { bcp47: "yue-Hant-HK", scripts: ["han"] },
 };
 
 export function bcp47For(languageCode: string): string {
@@ -182,23 +104,9 @@ const SCRIPT_PATTERNS: [Script, RegExp][] = [
   ["greek", /[Ͱ-Ͽἀ-῿]/],
   ["arabic", /[؀-ۿݐ-ݿﭐ-﷿ﹰ-﻿]/],
   ["hebrew", /[֐-׿]/],
-  ["armenian", /[԰-֏]/],
-  ["georgian", /[Ⴀ-ჿᲐ-Ჿ]/],
   ["devanagari", /[ऀ-ॿ]/],
   ["bengali", /[ঀ-৿]/],
-  ["gurmukhi", /[਀-੿]/],
-  ["gujarati", /[઀-૿]/],
-  ["tamil", /[஀-௿]/],
-  ["telugu", /[ఀ-౿]/],
-  ["kannada", /[ಀ-೿]/],
-  ["malayalam", /[ഀ-ൿ]/],
-  ["sinhala", /[඀-෿]/],
   ["thai", /[฀-๿]/],
-  ["lao", /[຀-໿]/],
-  ["khmer", /[ក-៿]/],
-  ["myanmar", /[က-႟]/],
-  ["tibetan", /[ༀ-࿿]/],
-  ["ethiopic", /[ሀ-፿]/],
   // Кана отдельно от иероглифов: текст с каной — точно японский, а текст
   // из одних иероглифов японским быть может, а может и не быть.
   ["kana", /[぀-ヿ]/],

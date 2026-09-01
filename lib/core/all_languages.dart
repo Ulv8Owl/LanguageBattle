@@ -1,18 +1,49 @@
-/// Полный список языков, которые приложение УМЕЕТ ОПОЗНАТЬ — как родной
-/// язык игрока, для проверки «не тот язык» (см. supabase/functions/_shared
-/// /asr/languages.ts, зеркало этой таблицы на сервере) и как есть в
-/// принципе.
+/// Единственный список языков во всём приложении.
 ///
-/// Это НЕ список того, что можно ВЫБРАТЬ изучать: язык появляется в
-/// [languageNames] (lib/core/languages.dart) только когда у него есть банк
-/// фраз и слов. Разница принципиальна: человек может быть носителем языка,
-/// для которого в игре ещё нет ни одного урока, — и тогда его родной язык
-/// всё равно нужно правильно узнать (чтобы поймать «прочитал задание
-/// вслух вместо перевода»), хотя учить на нём пока нечего.
+/// Раньше их было четыре: languageNames в languages.dart (что можно
+/// учить), _supportedLanguages в онбординге, _supportedLanguages в выборе
+/// языковой пары и две карты флагов в Профиле и Друзьях. Любое добавление
+/// языка требовало вспомнить про все пять мест, и они уже начали
+/// расходиться. Теперь язык описывается здесь один раз — и появляется
+/// везде.
+///
+/// СКОЛЬКО ЯЗЫКОВ И ПОЧЕМУ ИМЕННО ЭТИ. Список ограничен 32 языками
+/// осознанно, а не «пока руки не дошли». Три причины, каждая из которых
+/// растёт линейно с числом языков:
+///
+///   * контент. Один язык — это 100 фраз и 1000 слов ТОЛЬКО на уровень A1,
+///     а полный банк это шесть уровней. Сотня языков означала бы сотню
+///     таких банков, каждый из которых нужно кому-то вычитать;
+///   * ликвидность PvP. Каждая языковая пара дробит очередь матчмейкинга.
+///     Сто языков — это гарантированно пустые очереди в Состязании и
+///     Дуэли, то есть режим, который не работает ни для кого;
+///   * распознавание речи. Провайдер обязан уметь язык, иначе игровой
+///     цикл для него просто не замыкается.
+///
+/// Отбор — по покрытию жалоб, а не по числу строк: сюда входят ВСЕ
+/// двенадцать самых изучаемых языков мира (никто не скажет «моего
+/// изучаемого нет»), крупнейшие рынки по числу носителей и вся Европа,
+/// какую разумно закрыть.
+///
+/// Сознательно НЕ включены (это решение, а не забывчивость):
+///   * малайский — взаимопонятен с индонезийским, который здесь есть;
+///   * тамильский, телугу, маратхи, гуджарати, панджаби, каннада — Индия
+///     закрыта хинди/бенгальским/урду, а региональные языки там учат
+///     через английский;
+///   * кантонский — на письме совпадает с путунхуа, различает их только
+///     провайдер и только на слух;
+///   * яванский, сунданский — их носители практически поголовно владеют
+///     индонезийским;
+///   * суахили, хауса, йоруба — Африка как рынок роста интересна, но
+///     качество ASR и монетизация пока хуже; кандидаты второй волны;
+///   * сербский, хорватский, боснийский, словацкий, словенский,
+///     болгарский, литовский, латышский, эстонский — кандидаты второй
+///     волны, когда контент-конвейер себя окупит.
 ///
 /// Порядок и набор кодов ДОЛЖНЫ совпадать с LANGUAGES в
 /// supabase/functions/_shared/asr/languages.ts — там та же таблица нужна
-/// распознаванию речи. Изменения вносить в обоих местах.
+/// распознаванию речи (тег провайдера и письменность). Совпадение
+/// проверяется тестом test/languages_test.dart, а не только вниманием.
 library;
 
 /// Письменность языка — та, в которой распознаватель речи ВЫДАЁТ текст на
@@ -24,23 +55,9 @@ enum Script {
   greek,
   arabic,
   hebrew,
-  armenian,
-  georgian,
   devanagari,
   bengali,
-  gurmukhi,
-  gujarati,
-  tamil,
-  telugu,
-  kannada,
-  malayalam,
-  sinhala,
   thai,
-  lao,
-  khmer,
-  myanmar,
-  tibetan,
-  ethiopic,
   han,
   kana,
   hangul,
@@ -48,118 +65,80 @@ enum Script {
 
 class LanguageInfo {
   /// Название на самом языке — то, что видит игрок («Deutsch», не
-  /// «German»). Тот же принцип, что уже был в languageNames для en/es/ru.
+  /// «немецкий»): свой язык человек узнаёт в списке быстрее всего именно
+  /// в таком виде.
   final String endonym;
+
+  /// Название в винительном падеже для русских подписей: «Переведи на
+  /// английский», «нужно перевести на хинди». Несклоняемые языки (хинди,
+  /// урду, иврит) подставляются как есть — шаблоны это учитывают и не
+  /// дописывают «язык» после названия.
+  final String accusative;
+
+  /// Флаг для плашек языковых пар и карточек игроков. Привязка языка к
+  /// одной стране всегда условна — у английского, испанского,
+  /// португальского и арабского стран много; берём страну происхождения,
+  /// как уже было заведено в проекте для en/es/ru.
+  final String flag;
+
   final List<Script> scripts;
 
-  const LanguageInfo({required this.endonym, required this.scripts});
+  const LanguageInfo({
+    required this.endonym,
+    required this.accusative,
+    required this.flag,
+    required this.scripts,
+  });
 }
 
-/// Ключ в англоязычной справочной паре из задачи — оставлен нигде не
-/// используемым осознанно: он не нужен коду, endonym решает те же задачи и
-/// показывается игроку. Держать англоязычные имена было бы дублированием,
-/// которое ничего не проверяет и легко разъедется с endonym.
+/// 32 языка: 12 самых изучаемых + крупнейшие рынки носителей + Европа.
 const Map<String, LanguageInfo> allLanguages = {
-  'en': LanguageInfo(endonym: 'English', scripts: [Script.latin]),
-  'es': LanguageInfo(endonym: 'Español', scripts: [Script.latin]),
-  'ru': LanguageInfo(endonym: 'Русский', scripts: [Script.cyrillic]),
-  'zh': LanguageInfo(endonym: '中文', scripts: [Script.han]),
-  'de': LanguageInfo(endonym: 'Deutsch', scripts: [Script.latin]),
-  'ko': LanguageInfo(endonym: '한국어', scripts: [Script.hangul]),
-  'fr': LanguageInfo(endonym: 'Français', scripts: [Script.latin]),
-  'ja': LanguageInfo(endonym: '日本語', scripts: [Script.kana, Script.han]),
-  'pt': LanguageInfo(endonym: 'Português', scripts: [Script.latin]),
-  'tr': LanguageInfo(endonym: 'Türkçe', scripts: [Script.latin]),
-  'pl': LanguageInfo(endonym: 'Polski', scripts: [Script.latin]),
-  'ca': LanguageInfo(endonym: 'Català', scripts: [Script.latin]),
-  'nl': LanguageInfo(endonym: 'Nederlands', scripts: [Script.latin]),
-  'ar': LanguageInfo(endonym: 'العربية', scripts: [Script.arabic]),
-  'sv': LanguageInfo(endonym: 'Svenska', scripts: [Script.latin]),
-  'it': LanguageInfo(endonym: 'Italiano', scripts: [Script.latin]),
-  'id': LanguageInfo(endonym: 'Bahasa Indonesia', scripts: [Script.latin]),
-  'hi': LanguageInfo(endonym: 'हिन्दी', scripts: [Script.devanagari]),
-  'fi': LanguageInfo(endonym: 'Suomi', scripts: [Script.latin]),
-  'vi': LanguageInfo(endonym: 'Tiếng Việt', scripts: [Script.latin]),
-  'he': LanguageInfo(endonym: 'עברית', scripts: [Script.hebrew]),
-  'uk': LanguageInfo(endonym: 'Українська', scripts: [Script.cyrillic]),
-  'el': LanguageInfo(endonym: 'Ελληνικά', scripts: [Script.greek]),
-  'ms': LanguageInfo(endonym: 'Bahasa Melayu', scripts: [Script.latin]),
-  'cs': LanguageInfo(endonym: 'Čeština', scripts: [Script.latin]),
-  'ro': LanguageInfo(endonym: 'Română', scripts: [Script.latin]),
-  'da': LanguageInfo(endonym: 'Dansk', scripts: [Script.latin]),
-  'hu': LanguageInfo(endonym: 'Magyar', scripts: [Script.latin]),
-  'ta': LanguageInfo(endonym: 'தமிழ்', scripts: [Script.tamil]),
-  'no': LanguageInfo(endonym: 'Norsk', scripts: [Script.latin]),
-  'th': LanguageInfo(endonym: 'ไทย', scripts: [Script.thai]),
-  'ur': LanguageInfo(endonym: 'اردو', scripts: [Script.arabic]),
-  'hr': LanguageInfo(endonym: 'Hrvatski', scripts: [Script.latin]),
-  'bg': LanguageInfo(endonym: 'Български', scripts: [Script.cyrillic]),
-  'lt': LanguageInfo(endonym: 'Lietuvių', scripts: [Script.latin]),
-  'la': LanguageInfo(endonym: 'Latina', scripts: [Script.latin]),
-  'mi': LanguageInfo(endonym: 'Māori', scripts: [Script.latin]),
-  'ml': LanguageInfo(endonym: 'മലയാളം', scripts: [Script.malayalam]),
-  'cy': LanguageInfo(endonym: 'Cymraeg', scripts: [Script.latin]),
-  'sk': LanguageInfo(endonym: 'Slovenčina', scripts: [Script.latin]),
-  'te': LanguageInfo(endonym: 'తెలుగు', scripts: [Script.telugu]),
-  'fa': LanguageInfo(endonym: 'فارسی', scripts: [Script.arabic]),
-  'lv': LanguageInfo(endonym: 'Latviešu', scripts: [Script.latin]),
-  'bn': LanguageInfo(endonym: 'বাংলা', scripts: [Script.bengali]),
-  'sr': LanguageInfo(endonym: 'Српски', scripts: [Script.cyrillic, Script.latin]),
-  'az': LanguageInfo(endonym: 'Azərbaycan', scripts: [Script.latin]),
-  'sl': LanguageInfo(endonym: 'Slovenščina', scripts: [Script.latin]),
-  'kn': LanguageInfo(endonym: 'ಕನ್ನಡ', scripts: [Script.kannada]),
-  'et': LanguageInfo(endonym: 'Eesti', scripts: [Script.latin]),
-  'mk': LanguageInfo(endonym: 'Македонски', scripts: [Script.cyrillic]),
-  'br': LanguageInfo(endonym: 'Brezhoneg', scripts: [Script.latin]),
-  'eu': LanguageInfo(endonym: 'Euskara', scripts: [Script.latin]),
-  'is': LanguageInfo(endonym: 'Íslenska', scripts: [Script.latin]),
-  'hy': LanguageInfo(endonym: 'Հայերեն', scripts: [Script.armenian]),
-  'ne': LanguageInfo(endonym: 'नेपाली', scripts: [Script.devanagari]),
-  'mn': LanguageInfo(endonym: 'Монгол', scripts: [Script.cyrillic]),
-  'bs': LanguageInfo(endonym: 'Bosanski', scripts: [Script.latin]),
-  'kk': LanguageInfo(endonym: 'Қазақша', scripts: [Script.cyrillic]),
-  'sq': LanguageInfo(endonym: 'Shqip', scripts: [Script.latin]),
-  'sw': LanguageInfo(endonym: 'Kiswahili', scripts: [Script.latin]),
-  'gl': LanguageInfo(endonym: 'Galego', scripts: [Script.latin]),
-  'mr': LanguageInfo(endonym: 'मराठी', scripts: [Script.devanagari]),
-  'pa': LanguageInfo(endonym: 'ਪੰਜਾਬੀ', scripts: [Script.gurmukhi]),
-  'si': LanguageInfo(endonym: 'සිංහල', scripts: [Script.sinhala]),
-  'km': LanguageInfo(endonym: 'ខ្មែរ', scripts: [Script.khmer]),
-  'sn': LanguageInfo(endonym: 'ChiShona', scripts: [Script.latin]),
-  'yo': LanguageInfo(endonym: 'Yorùbá', scripts: [Script.latin]),
-  'so': LanguageInfo(endonym: 'Soomaali', scripts: [Script.latin]),
-  'af': LanguageInfo(endonym: 'Afrikaans', scripts: [Script.latin]),
-  'oc': LanguageInfo(endonym: 'Occitan', scripts: [Script.latin]),
-  'ka': LanguageInfo(endonym: 'ქართული', scripts: [Script.georgian]),
-  'be': LanguageInfo(endonym: 'Беларуская', scripts: [Script.cyrillic]),
-  'tg': LanguageInfo(endonym: 'Тоҷикӣ', scripts: [Script.cyrillic]),
-  'sd': LanguageInfo(endonym: 'سنڌي', scripts: [Script.arabic]),
-  'gu': LanguageInfo(endonym: 'ગુજરાતી', scripts: [Script.gujarati]),
-  'am': LanguageInfo(endonym: 'አማርኛ', scripts: [Script.ethiopic]),
-  'yi': LanguageInfo(endonym: 'ייִדיש', scripts: [Script.hebrew]),
-  'lo': LanguageInfo(endonym: 'ລາວ', scripts: [Script.lao]),
-  'uz': LanguageInfo(endonym: "O'zbek", scripts: [Script.latin]),
-  'fo': LanguageInfo(endonym: 'Føroyskt', scripts: [Script.latin]),
-  'ht': LanguageInfo(endonym: 'Kreyòl Ayisyen', scripts: [Script.latin]),
-  'ps': LanguageInfo(endonym: 'پښتو', scripts: [Script.arabic]),
-  'tk': LanguageInfo(endonym: 'Türkmen', scripts: [Script.latin]),
-  'nn': LanguageInfo(endonym: 'Nynorsk', scripts: [Script.latin]),
-  'mt': LanguageInfo(endonym: 'Malti', scripts: [Script.latin]),
-  'sa': LanguageInfo(endonym: 'संस्कृतम्', scripts: [Script.devanagari]),
-  'lb': LanguageInfo(endonym: 'Lëtzebuergesch', scripts: [Script.latin]),
-  'my': LanguageInfo(endonym: 'မြန်မာ', scripts: [Script.myanmar]),
-  'bo': LanguageInfo(endonym: 'བོད་སྐད་', scripts: [Script.tibetan]),
-  'tl': LanguageInfo(endonym: 'Tagalog', scripts: [Script.latin]),
-  'mg': LanguageInfo(endonym: 'Malagasy', scripts: [Script.latin]),
-  'as': LanguageInfo(endonym: 'অসমীয়া', scripts: [Script.bengali]),
-  'tt': LanguageInfo(endonym: 'Татар', scripts: [Script.cyrillic]),
-  'haw': LanguageInfo(endonym: 'ʻŌlelo Hawaiʻi', scripts: [Script.latin]),
-  'ln': LanguageInfo(endonym: 'Lingála', scripts: [Script.latin]),
-  'ha': LanguageInfo(endonym: 'Hausa', scripts: [Script.latin]),
-  'ba': LanguageInfo(endonym: 'Башҡорт', scripts: [Script.cyrillic]),
-  'jw': LanguageInfo(endonym: 'Basa Jawa', scripts: [Script.latin]),
-  'su': LanguageInfo(endonym: 'Basa Sunda', scripts: [Script.latin]),
-  // Кантонский речью не отличить от письменного путунхуа (тот же han),
-  // ASR по письменности их не разделит — только сам провайдер по звучанию.
-  'yue': LanguageInfo(endonym: '粵語', scripts: [Script.han]),
+  // --- Эшелон A: топ-12 изучаемых в мире и крупнейшие рынки ---
+  'en': LanguageInfo(endonym: 'English', accusative: 'английский', flag: '🇬🇧', scripts: [Script.latin]),
+  'es': LanguageInfo(endonym: 'Español', accusative: 'испанский', flag: '🇪🇸', scripts: [Script.latin]),
+  'zh': LanguageInfo(endonym: '中文', accusative: 'китайский', flag: '🇨🇳', scripts: [Script.han]),
+  'hi': LanguageInfo(endonym: 'हिन्दी', accusative: 'хинди', flag: '🇮🇳', scripts: [Script.devanagari]),
+  'ar': LanguageInfo(endonym: 'العربية', accusative: 'арабский', flag: '🇸🇦', scripts: [Script.arabic]),
+  'pt': LanguageInfo(endonym: 'Português', accusative: 'португальский', flag: '🇵🇹', scripts: [Script.latin]),
+  'ru': LanguageInfo(endonym: 'Русский', accusative: 'русский', flag: '🇷🇺', scripts: [Script.cyrillic]),
+  'fr': LanguageInfo(endonym: 'Français', accusative: 'французский', flag: '🇫🇷', scripts: [Script.latin]),
+  'de': LanguageInfo(endonym: 'Deutsch', accusative: 'немецкий', flag: '🇩🇪', scripts: [Script.latin]),
+  'ja': LanguageInfo(endonym: '日本語', accusative: 'японский', flag: '🇯🇵', scripts: [Script.kana, Script.han]),
+  'ko': LanguageInfo(endonym: '한국어', accusative: 'корейский', flag: '🇰🇷', scripts: [Script.hangul]),
+  'it': LanguageInfo(endonym: 'Italiano', accusative: 'итальянский', flag: '🇮🇹', scripts: [Script.latin]),
+
+  // --- Эшелон B: большие базы носителей и растущие мобильные рынки ---
+  'id': LanguageInfo(endonym: 'Bahasa Indonesia', accusative: 'индонезийский', flag: '🇮🇩', scripts: [Script.latin]),
+  'tr': LanguageInfo(endonym: 'Türkçe', accusative: 'турецкий', flag: '🇹🇷', scripts: [Script.latin]),
+  'vi': LanguageInfo(endonym: 'Tiếng Việt', accusative: 'вьетнамский', flag: '🇻🇳', scripts: [Script.latin]),
+  'pl': LanguageInfo(endonym: 'Polski', accusative: 'польский', flag: '🇵🇱', scripts: [Script.latin]),
+  'nl': LanguageInfo(endonym: 'Nederlands', accusative: 'нидерландский', flag: '🇳🇱', scripts: [Script.latin]),
+  'th': LanguageInfo(endonym: 'ไทย', accusative: 'тайский', flag: '🇹🇭', scripts: [Script.thai]),
+  'uk': LanguageInfo(endonym: 'Українська', accusative: 'украинский', flag: '🇺🇦', scripts: [Script.cyrillic]),
+  'fa': LanguageInfo(endonym: 'فارسی', accusative: 'персидский', flag: '🇮🇷', scripts: [Script.arabic]),
+  'bn': LanguageInfo(endonym: 'বাংলা', accusative: 'бенгальский', flag: '🇧🇩', scripts: [Script.bengali]),
+  'ur': LanguageInfo(endonym: 'اردو', accusative: 'урду', flag: '🇵🇰', scripts: [Script.arabic]),
+
+  // --- Эшелон C: остальная Европа и Филиппины ---
+  'sv': LanguageInfo(endonym: 'Svenska', accusative: 'шведский', flag: '🇸🇪', scripts: [Script.latin]),
+  'no': LanguageInfo(endonym: 'Norsk', accusative: 'норвежский', flag: '🇳🇴', scripts: [Script.latin]),
+  'da': LanguageInfo(endonym: 'Dansk', accusative: 'датский', flag: '🇩🇰', scripts: [Script.latin]),
+  'fi': LanguageInfo(endonym: 'Suomi', accusative: 'финский', flag: '🇫🇮', scripts: [Script.latin]),
+  'cs': LanguageInfo(endonym: 'Čeština', accusative: 'чешский', flag: '🇨🇿', scripts: [Script.latin]),
+  'el': LanguageInfo(endonym: 'Ελληνικά', accusative: 'греческий', flag: '🇬🇷', scripts: [Script.greek]),
+  'he': LanguageInfo(endonym: 'עברית', accusative: 'иврит', flag: '🇮🇱', scripts: [Script.hebrew]),
+  'ro': LanguageInfo(endonym: 'Română', accusative: 'румынский', flag: '🇷🇴', scripts: [Script.latin]),
+  'hu': LanguageInfo(endonym: 'Magyar', accusative: 'венгерский', flag: '🇭🇺', scripts: [Script.latin]),
+  'tl': LanguageInfo(endonym: 'Tagalog', accusative: 'тагальский', flag: '🇵🇭', scripts: [Script.latin]),
 };
+
+/// Название языка для интерфейса, с честным запасным вариантом: код языка
+/// лучше пустоты, если в базе оказался код вне списка (например, остался
+/// от старой сборки).
+String languageName(String? code) =>
+    code == null ? '—' : allLanguages[code]?.endonym ?? code;
+
+/// Флаг языка. 🏳 — не «ошибка», а «языка нет в списке»: то же правило,
+/// что и у languageName.
+String languageFlag(String? code) =>
+    code == null ? '🏳' : allLanguages[code]?.flag ?? '🏳';

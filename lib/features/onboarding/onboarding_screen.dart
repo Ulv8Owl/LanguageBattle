@@ -1,18 +1,23 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../core/all_languages.dart';
 import '../../core/supabase_client.dart';
+import '../../data/content_languages.dart';
 import '../../data/signup_rows.dart';
-
-const _supportedLanguages = {
-  'en': 'English',
-  'es': 'Español',
-  'ru': 'Русский',
-};
+import '../../widgets/language_picker.dart';
 
 /// Онбординг (раздел 2.1): выбор родного/изучаемого языка, никнейм,
-/// стартовый рейтинг. Тест уровня (CEFR) — не в этой фазе, elo/CEFR
-/// стартуют с дефолтных значений (1000 / A1) и уточняются позже.
+/// стартовый рейтинг. Тест уровня (CEFR) — не в этой фазе, рейтинг/CEFR
+/// стартуют со значений новичка Glicko-2 (1500 ± 350, лига A1) и
+/// уточняются игрой.
+///
+/// Языки выбираются из общего реестра (all_languages.dart) тем же
+/// пикером, что и везде: доступны те, для которых уже есть банк фраз и
+/// слов, остальные показаны с пометкой «скоро». Выпадающие списки
+/// заменены на пикер именно поэтому — тридцать с лишним языков в
+/// DropdownButton выглядели бы как простыня без поиска и без объяснения,
+/// почему половина недоступна.
 class OnboardingScreen extends StatefulWidget {
   const OnboardingScreen({super.key});
 
@@ -27,6 +32,49 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
   String _targetLanguage = 'es';
   bool _loading = false;
   String? _error;
+
+  /// Языки с готовым контентом. Пустое множество до первой загрузки —
+  /// пикер в этот момент ещё не открыть, кнопки ведут в него же.
+  Set<String> _ready = {};
+
+  @override
+  void initState() {
+    super.initState();
+    _loadReady();
+  }
+
+  Future<void> _loadReady() async {
+    final ready = await ContentLanguages.ready();
+    if (!mounted) return;
+    setState(() {
+      _ready = ready;
+      // Значения по умолчанию обязаны быть из готовых языков: иначе игрок,
+      // не открывший пикер вовсе, зарегистрируется с парой, в которой
+      // нечего показывать.
+      if (!ready.contains(_nativeLanguage)) _nativeLanguage = ready.first;
+      if (!ready.contains(_targetLanguage) || _targetLanguage == _nativeLanguage) {
+        _targetLanguage = ready.firstWhere((l) => l != _nativeLanguage, orElse: () => _nativeLanguage);
+      }
+    });
+  }
+
+  Future<void> _pick({required bool isNative}) async {
+    final picked = await showLanguagePicker(
+      context,
+      title: isNative ? 'Родной язык' : 'Изучаемый язык',
+      ready: _ready,
+      taken: {isNative ? _targetLanguage : _nativeLanguage},
+      takenNote: isNative ? 'это изучаемый язык' : 'это твой родной язык',
+    );
+    if (picked == null || !mounted) return;
+    setState(() {
+      if (isNative) {
+        _nativeLanguage = picked;
+      } else {
+        _targetLanguage = picked;
+      }
+    });
+  }
 
   @override
   void dispose() {
@@ -91,22 +139,16 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                     const SizedBox(height: 20),
                     const Text('Родной язык', style: TextStyle(fontWeight: FontWeight.w700)),
                     const SizedBox(height: 8),
-                    DropdownButtonFormField<String>(
-                      initialValue: _nativeLanguage,
-                      items: _supportedLanguages.entries
-                          .map((e) => DropdownMenuItem(value: e.key, child: Text(e.value)))
-                          .toList(),
-                      onChanged: (v) => setState(() => _nativeLanguage = v!),
+                    _LanguageField(
+                      code: _nativeLanguage,
+                      onTap: _ready.isEmpty ? null : () => _pick(isNative: true),
                     ),
                     const SizedBox(height: 20),
                     const Text('Изучаемый язык', style: TextStyle(fontWeight: FontWeight.w700)),
                     const SizedBox(height: 8),
-                    DropdownButtonFormField<String>(
-                      initialValue: _targetLanguage,
-                      items: _supportedLanguages.entries
-                          .map((e) => DropdownMenuItem(value: e.key, child: Text(e.value)))
-                          .toList(),
-                      onChanged: (v) => setState(() => _targetLanguage = v!),
+                    _LanguageField(
+                      code: _targetLanguage,
+                      onTap: _ready.isEmpty ? null : () => _pick(isNative: false),
                     ),
                     if (_error != null) ...[
                       const SizedBox(height: 12),
@@ -128,6 +170,35 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
               ),
             ),
           ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Поле выбора языка: флаг, название и стрелка — открывает общий пикер.
+/// Пока список готовых языков ещё грузится, поле неактивно: дать нажать и
+/// показать пустой список хуже, чем подождать долю секунды.
+class _LanguageField extends StatelessWidget {
+  final String code;
+  final VoidCallback? onTap;
+
+  const _LanguageField({required this.code, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(8),
+      child: InputDecorator(
+        decoration: const InputDecoration(),
+        child: Row(
+          children: [
+            Text(languageFlag(code), style: const TextStyle(fontSize: 18)),
+            const SizedBox(width: 10),
+            Expanded(child: Text(languageName(code))),
+            const Icon(Icons.expand_more, size: 20),
+          ],
         ),
       ),
     );

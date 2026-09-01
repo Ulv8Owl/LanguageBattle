@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 
-import '../../core/languages.dart';
+import '../../core/all_languages.dart';
 import '../../core/supabase_client.dart';
 import '../../core/theme.dart';
 import '../../data/player_rating.dart';
@@ -178,8 +178,7 @@ class _PlayerCardState extends State<_PlayerCard> {
                       'Языковая пара',
                       _learning.isEmpty
                           ? '—'
-                          : '${languageNames[_native] ?? _native} → '
-                              '${languageNames[_learning] ?? _learning}',
+                          : '${languageName(_native)} → ${languageName(_learning)}',
                       AppColors.cream,
                     ),
                   ],

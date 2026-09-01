@@ -11,13 +11,13 @@ import '../../data/player_rating.dart';
 import '../../widgets/chrolingo_widgets.dart';
 import '../../widgets/trial_countdown_banner.dart';
 
-const _languageFlags = {'en': '🇬🇧', 'es': '🇪🇸', 'ru': '🇷🇺'};
-
-/// Максимум языковых пар на аккаунт (задача итерации). С сегодняшними
-/// тремя поддерживаемыми языками (en/es/ru) реально достижимо не больше
-/// 2 пар одновременно — родной язык занимает один слот, а третий язык
-/// пока просто не существует. Ограничение честно фиксируется здесь и
+/// Максимум языковых пар на аккаунт. Ограничение фиксируется здесь и
 /// проверяется на сервере (`add_language_pair`), а не только в UI.
+///
+/// Практический потолок сегодня ниже: пару можно завести только на язык с
+/// готовым банком фраз и слов (см. ContentLanguages), а таких пока три —
+/// значит, реально достижимо две пары, а не четыре. Число 4 — потолок
+/// МЕХАНИЗМА, готовый к росту контента без переделок.
 const kMaxLanguagePairs = 4;
 
 class ProfileScreen extends StatefulWidget {
@@ -115,8 +115,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
     // честно берём единственный на тот момент родной.
     final anchor = (pair['native_for'] as String?) ?? defaultNative;
     return _LanguagePairChip(
-      nativeFlag: _languageFlags[anchor] ?? '🏳',
-      targetFlag: _languageFlags[pair['language_code'] as String?] ?? '🏳',
+      nativeFlag: languageFlag(anchor),
+      targetFlag: languageFlag(pair['language_code'] as String?),
       active: pair['is_active'] == true,
       onTap: pair['is_active'] == true ? null : () => _selectPair(pair['language_code'] as String),
     );
@@ -161,7 +161,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
             Padding(
               padding: const EdgeInsets.only(bottom: 6),
               child: Text(
-                allLanguages[n.code]?.endonym ?? n.code,
+                languageName(n.code),
                 style: AppFonts.mono(fontSize: 10, weight: FontWeight.w700, color: AppColors.muted),
               ),
             ),

@@ -8,11 +8,13 @@ import '../../core/app_events.dart';
 import '../../core/debug_flags.dart';
 import '../../core/leagues.dart';
 import '../../core/supabase_client.dart';
+import '../../data/content_languages.dart';
 import '../../data/native_languages.dart';
 import '../../data/player_rating.dart';
 import '../../data/training_session.dart';
 import '../../core/theme.dart';
 import '../../widgets/chrolingo_widgets.dart';
+import '../../widgets/language_picker.dart';
 
 /// Настройки (раздел 5.1, п.7 и 5.3). Вход только через Профиль — отдельного
 /// пункта в нижней навигации для настроек нет.
@@ -131,7 +133,15 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
           Future<void> addNew() async {
             final existing = _natives.map((n) => n.code).toSet();
-            final picked = await _pickFromAllLanguages(exclude: existing);
+            final ready = await ContentLanguages.ready();
+            if (!mounted) return;
+            final picked = await showLanguagePicker(
+              context,
+              title: 'Добавить родной язык',
+              ready: ready,
+              taken: existing,
+              takenNote: 'уже в списке',
+            );
             if (picked == null) return;
             try {
               await NativeLanguages.add(picked);
@@ -183,66 +193,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       onTap: addNew,
                     ),
                   const SizedBox(height: 4),
-                ],
-              ),
-            ),
-          );
-        },
-      ),
-    );
-  }
-
-  /// Поиск по всем ~100 языкам реестра (lib/core/all_languages.dart) — их
-  /// слишком много для плоского списка без фильтра, в отличие от трёх
-  /// языков в старом picker'е родного языка.
-  Future<String?> _pickFromAllLanguages({required Set<String> exclude}) async {
-    var query = '';
-    return showModalBottomSheet<String>(
-      context: context,
-      backgroundColor: AppColors.navy2,
-      isScrollControlled: true,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-      ),
-      builder: (ctx) => StatefulBuilder(
-        builder: (ctx, setSheetState) {
-          final entries = allLanguages.entries
-              .where((e) => !exclude.contains(e.key))
-              .where((e) =>
-                  query.isEmpty || e.value.endonym.toLowerCase().contains(query.toLowerCase()) || e.key == query)
-              .toList()
-            ..sort((a, b) => a.value.endonym.compareTo(b.value.endonym));
-          return SafeArea(
-            child: Padding(
-              padding: EdgeInsets.only(bottom: MediaQuery.of(ctx).viewInsets.bottom),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  const SizedBox(height: 16),
-                  Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 16),
-                    child: TextField(
-                      autofocus: true,
-                      style: const TextStyle(color: AppColors.cream),
-                      decoration: const InputDecoration(hintText: 'Поиск языка…'),
-                      onChanged: (v) => setSheetState(() => query = v),
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                  ConstrainedBox(
-                    constraints: BoxConstraints(maxHeight: MediaQuery.of(ctx).size.height * 0.5),
-                    child: ListView(
-                      shrinkWrap: true,
-                      children: [
-                        for (final e in entries)
-                          ListTile(
-                            title: Text(e.value.endonym),
-                            onTap: () => Navigator.of(ctx).pop(e.key),
-                          ),
-                      ],
-                    ),
-                  ),
-                  const SizedBox(height: 8),
                 ],
               ),
             ),

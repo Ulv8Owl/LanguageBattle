@@ -4,13 +4,8 @@ import 'package:go_router/go_router.dart';
 import '../../core/all_languages.dart';
 import '../../core/nav_state.dart';
 import '../../core/supabase_client.dart';
+import '../../data/content_languages.dart';
 import '../../data/native_languages.dart';
-
-const _supportedLanguages = {
-  'en': 'English',
-  'es': 'Español',
-  'ru': 'Русский',
-};
 
 /// Добавление ещё одной языковой пары (до 4 на аккаунт).
 ///
@@ -36,6 +31,10 @@ class _LanguagePairScreenState extends State<LanguagePairScreen> {
   bool _saving = false;
   String? _error;
   List<NativeLanguage> _natives = [];
+
+  /// Языки с готовым банком фраз и слов — только их можно взять целевыми.
+  /// Реестр знает 32 языка, но учить можно лишь то, что переведено.
+  Set<String> _ready = {};
   Set<String> _usedTargets = {};
   String? _selectedTarget;
   String? _selectedNative;
@@ -50,6 +49,7 @@ class _LanguagePairScreenState extends State<LanguagePairScreen> {
     try {
       final uid = currentUserId;
       final natives = await NativeLanguages.fetch(uid);
+      final ready = await ContentLanguages.ready();
       final pairs = await supabase
           .from('user_languages')
           .select('language_code')
@@ -60,10 +60,15 @@ class _LanguagePairScreenState extends State<LanguagePairScreen> {
         orElse: () => natives.isEmpty ? const NativeLanguage(code: 'ru', isPrimary: true) : natives.first,
       );
       final used = pairs.map((r) => r['language_code'] as String).toSet();
-      final available = _supportedLanguages.keys.where((l) => l != primary.code && !used.contains(l));
+      // Сортировка обязательна: ready — множество, и «первый» элемент без
+      // неё зависит от порядка обхода, то есть предложенный по умолчанию
+      // язык менялся бы от запуска к запуску.
+      final available = (ready.where((l) => l != primary.code && !used.contains(l)).toList())
+        ..sort((a, b) => languageName(a).compareTo(languageName(b)));
       if (!mounted) return;
       setState(() {
         _natives = natives;
+        _ready = ready;
         _selectedNative = primary.code;
         _usedTargets = used;
         _selectedTarget = available.isEmpty ? null : available.first;
@@ -117,7 +122,8 @@ class _LanguagePairScreenState extends State<LanguagePairScreen> {
   }
 
   List<String> get _availableTargets =>
-      _supportedLanguages.keys.where((l) => l != _selectedNative && !_usedTargets.contains(l)).toList();
+      (_ready.where((l) => l != _selectedNative && !_usedTargets.contains(l)).toList())
+        ..sort((a, b) => languageName(a).compareTo(languageName(b)));
 
   Widget _buildBody() {
     final available = _availableTargets;
@@ -129,7 +135,8 @@ class _LanguagePairScreenState extends State<LanguagePairScreen> {
           const Icon(Icons.language, size: 48, color: Colors.white38),
           const SizedBox(height: 16),
           const Text(
-            'Все поддерживаемые языки уже добавлены как пары.',
+            'Языки, для которых уже готов банк фраз и слов, добавлены как пары. '
+            'Остальные из списка появятся, когда для них будет готов контент.',
             textAlign: TextAlign.center,
             style: TextStyle(color: Colors.white70),
           ),
@@ -150,7 +157,7 @@ class _LanguagePairScreenState extends State<LanguagePairScreen> {
             items: _natives
                 .map((n) => DropdownMenuItem(
                       value: n.code,
-                      child: Text(allLanguages[n.code]?.endonym ?? n.code),
+                      child: Text('${languageFlag(n.code)}  ${languageName(n.code)}'),
                     ))
                 .toList(),
             onChanged: (v) => setState(() {
@@ -168,7 +175,7 @@ class _LanguagePairScreenState extends State<LanguagePairScreen> {
           const SizedBox(height: 20),
         ] else
           Text(
-            'Родной язык: ${allLanguages[_selectedNative]?.endonym ?? _supportedLanguages[_selectedNative] ?? '—'}',
+            'Родной язык: ${languageName(_selectedNative)}',
             style: const TextStyle(color: Colors.white54, fontSize: 13),
           ),
         const SizedBox(height: 20),
@@ -177,7 +184,12 @@ class _LanguagePairScreenState extends State<LanguagePairScreen> {
         DropdownButtonFormField<String>(
           initialValue: _selectedTarget,
           items:
-              available.map((l) => DropdownMenuItem(value: l, child: Text(_supportedLanguages[l]!))).toList(),
+              available
+                  .map((l) => DropdownMenuItem(
+                        value: l,
+                        child: Text('${languageFlag(l)}  ${languageName(l)}'),
+                      ))
+                  .toList(),
           onChanged: (v) => setState(() => _selectedTarget = v),
         ),
         if (_error != null) ...[

@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 
 import '../../core/supabase_client.dart';
+import '../../core/all_languages.dart';
 import '../../core/theme.dart';
 import '../../data/player_rating.dart';
 import '../../widgets/chrolingo_widgets.dart';
@@ -10,8 +11,6 @@ import '../../widgets/chrolingo_widgets.dart';
 /// Флаг по коду языка. Отдельного поля "страна" в схеме нет (раздел 4),
 /// поэтому флаг берётся по родному языку игрока — это ближайшие реальные
 /// данные, а не выдуманные.
-const languageFlags = {'en': '🇬🇧', 'es': '🇪🇸', 'ru': '🇷🇺'};
-
 /// Карточка игрока: имя, флаг, рейтинг — одинаково во всех трёх вкладках
 /// (раздел 5.1, п.8).
 class PlayerRef {
@@ -27,7 +26,7 @@ class PlayerRef {
     required this.rating,
   });
 
-  String get flag => languageFlags[nativeLanguage] ?? '🏳';
+  String get flag => languageFlag(nativeLanguage);
 }
 
 /// Подтягивает имя/флаг/рейтинг для набора id одним заходом.
