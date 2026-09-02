@@ -82,6 +82,14 @@ def truncate(text: str, width: int = 60) -> str:
     return text if len(text) <= width else text[: width - 1] + "…"
 
 
+ANSI = {"зелёный": "\033[32m", "жёлтый": "\033[33m", "красный": "\033[31m"}
+RESET = "\033[0m"
+
+
+def colorize(text: str, z: str, enabled: bool) -> str:
+    return f"{ANSI[z]}{text}{RESET}" if enabled else text
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
@@ -110,7 +118,13 @@ def main() -> int:
         default=None,
         help="сохранить только жёлтые/красные строки (номер + обе фразы) в отдельный файл для разбора",
     )
+    parser.add_argument(
+        "--no-color",
+        action="store_true",
+        help="не подсвечивать зоны цветом (по умолчанию цвет включён в терминале и выключен при перенаправлении в файл)",
+    )
     args = parser.parse_args()
+    color = sys.stdout.isatty() and not args.no_color
 
     if not args.original.exists():
         print(f"нет файла {args.original}", file=sys.stderr)
@@ -149,15 +163,20 @@ def main() -> int:
             flagged.append(f"{i}\t{score:.3f}\t{orig}\t{bt}")
         if args.only_flagged and z == "зелёный":
             continue
-        print(f"[{i:>4}] {score:.3f} {z:<7} ориг: {truncate(orig)}")
+        line = f"[{i:>4}] {score:.3f} {z:<7} ориг: {truncate(orig)}"
+        print(colorize(line, z, color))
         if z != "зелёный":
-            print(f"           обратно: {truncate(bt)}")
+            print(colorize(f"           обратно: {truncate(bt)}", z, color))
 
     total = len(originals)
-    print(
-        f"\nИтого: зелёных {counts['зелёный']}/{total}, "
-        f"жёлтых {counts['жёлтый']}/{total}, красных {counts['красный']}/{total}"
+    summary = (
+        colorize(f"зелёных {counts['зелёный']}/{total}", "зелёный", color)
+        + ", "
+        + colorize(f"жёлтых {counts['жёлтый']}/{total}", "жёлтый", color)
+        + ", "
+        + colorize(f"красных {counts['красный']}/{total}", "красный", color)
     )
+    print(f"\nИтого: {summary}")
 
     if args.export_flagged and flagged:
         args.export_flagged.write_text(
