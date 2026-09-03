@@ -78,10 +78,6 @@ def zone(score: float, yellow: float, green: float) -> str:
     return "красный"
 
 
-def truncate(text: str, width: int = 60) -> str:
-    return text if len(text) <= width else text[: width - 1] + "…"
-
-
 ANSI = {"зелёный": "\033[32m", "жёлтый": "\033[33m", "красный": "\033[31m"}
 RESET = "\033[0m"
 
@@ -163,10 +159,9 @@ def main() -> int:
             flagged.append(f"{i}\t{score:.3f}\t{orig}\t{bt}")
         if args.only_flagged and z == "зелёный":
             continue
-        line = f"[{i:>4}] {score:.3f} {z:<7} ориг: {truncate(orig)}"
+        line = f"[{i:>4}] {score:.3f} {z:<7} ориг: {orig}"
         print(colorize(line, z, color))
-        if z != "зелёный":
-            print(colorize(f"           обратно: {truncate(bt)}", z, color))
+        print(colorize(f"           обратно: {bt}", z, color))
 
     total = len(originals)
     summary = (
