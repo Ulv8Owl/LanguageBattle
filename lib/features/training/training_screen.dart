@@ -25,6 +25,13 @@ import '../subscription/paywall_screen.dart';
 /// на одну единицу энергии.
 const _roundsPerSession = 5;
 
+/// Сколько раундов в проверке уровня при регистрации. Один: проверка стоит
+/// на пути в игру, и пять раундов до первого самостоятельного шага — это
+/// уже не проверка, а полноценная сессия, которую человек проходит, ещё
+/// ничего в игре не увидев. Одного раунда хватает: порог в 60% правильного
+/// он проверяет ровно так же (балл судьи 1..10 за раунд).
+const _roundsPerPlacement = 1;
+
 enum _Stage {
   starting,
   /// Ждём первую попытку игрока.
@@ -114,6 +121,11 @@ class _TrainingScreenState extends State<TrainingScreen> {
 
   /// История пройденных раундов сессии — рисуется той же лентой.
   final List<_CompletedRound> _history = [];
+
+  /// Сколько раундов в этой конкретной сессии: проверка уровня короче
+  /// обычной Одиночной Игры.
+  int get _totalRounds =>
+      widget.isPlacement ? _roundsPerPlacement : _roundsPerSession;
 
   /// Порядок фраз на всю сессию, перемешанный один раз при старте — раунды
   /// соло идут строго локально (одна сессия = один клиент), поэтому, в
@@ -554,7 +566,7 @@ class _TrainingScreenState extends State<TrainingScreen> {
       firstAudio: _firstAttemptAudio,
       secondAudio: _secondAttemptAudio,
     ));
-    if (_roundNumber >= _roundsPerSession) {
+    if (_roundNumber >= _totalRounds) {
       setState(() => _stage = _Stage.sessionDone);
       return;
     }
@@ -586,7 +598,7 @@ class _TrainingScreenState extends State<TrainingScreen> {
               padding: const EdgeInsets.only(right: 14),
               child: Center(
                 child: Text(
-                  '$_roundNumber / $_roundsPerSession',
+                  '$_roundNumber / $_totalRounds',
                   style: AppFonts.mono(fontSize: 11, weight: FontWeight.w700, color: AppColors.gold),
                 ),
               ),
@@ -685,7 +697,7 @@ class _TrainingScreenState extends State<TrainingScreen> {
                 width: double.infinity,
                 child: ElevatedButton(
                   onPressed: _next,
-                  child: Text(_roundNumber >= _roundsPerSession ? 'Итоги' : 'Следующий раунд'),
+                  child: Text(_roundNumber >= _totalRounds ? 'Итоги' : 'Следующий раунд'),
                 ),
               ),
             ),
@@ -720,7 +732,7 @@ class _TrainingScreenState extends State<TrainingScreen> {
     for (final done in _history) {
       items.add(_AiSay(
         roundNumber: done.roundNumber,
-        total: _roundsPerSession,
+        total: _totalRounds,
         text: done.phrase,
         targetLanguage: _targetLanguage,
       ));
@@ -767,7 +779,7 @@ class _TrainingScreenState extends State<TrainingScreen> {
 
     items.add(_AiSay(
       roundNumber: _roundNumber,
-      total: _roundsPerSession,
+      total: _totalRounds,
       text: _phrase,
       targetLanguage: _targetLanguage,
     ));

@@ -57,6 +57,15 @@ class AppStrings {
   final String levelSelectTitle;
   final String levelSelectIntro;
   final String levelSelectAction;
+
+  /// Надпись на кнопке для уровня, который не требует подтверждения (A0).
+  final String levelSelectStartWithoutCheck;
+
+  /// Пояснение под кнопкой, почему для A0 проверки не будет.
+  final String levelSelectNoCheckNote;
+
+  /// Подпись кнопки выхода из онбординга (в меню входа).
+  final String levelSelectBack;
   final String Function(Object error) levelSelectFailed;
 
   /// Название уровня: A0 — «Начинающий с нуля» / «Beginner».
@@ -109,6 +118,9 @@ class AppStrings {
     required this.levelSelectTitle,
     required this.levelSelectIntro,
     required this.levelSelectAction,
+    required this.levelSelectStartWithoutCheck,
+    required this.levelSelectNoCheckNote,
+    required this.levelSelectBack,
     required this.levelSelectFailed,
     required this.levelName,
     required this.levelCheckTitle,
@@ -163,6 +175,10 @@ class AppStrings {
         'рейтинга ты начнёшь. Дальше будет короткая проверка: если уровень '
         'подтвердится, он и останется.',
     levelSelectAction: 'Пройти проверку',
+    levelSelectStartWithoutCheck: 'Начать игру',
+    levelSelectNoCheckNote:
+        'Этот уровень подтверждать не нужно — начинаем с самого начала.',
+    levelSelectBack: 'Назад',
     levelSelectFailed: _ruLevelSelectFailed,
     levelName: _ruLevelName,
     levelCheckTitle: 'Проверка уровня',
@@ -217,6 +233,10 @@ class AppStrings {
         'you start from. Next comes a short check: if the level holds up, '
         'it stays.',
     levelSelectAction: 'Take the check',
+    levelSelectStartWithoutCheck: 'Start playing',
+    levelSelectNoCheckNote:
+        'This level needs no confirmation — we start from the very beginning.',
+    levelSelectBack: 'Back',
     levelSelectFailed: _enLevelSelectFailed,
     levelName: _enLevelName,
     levelCheckTitle: 'Level check',

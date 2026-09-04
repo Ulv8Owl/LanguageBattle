@@ -28,23 +28,48 @@ class AppColors {
 /// Шрифты макета: Bungee (лого), Baloo 2 (UI/кнопки/заголовки),
 /// Manrope (обычный текст — используется как textTheme по умолчанию),
 /// Space Mono (цифры/лейблы).
+/// Шрифты приложения.
+///
+/// ГЛАВНОЕ ТРЕБОВАНИЕ К ЛЮБОМУ ШРИФТУ ЗДЕСЬ: он обязан содержать И ЛАТИНИЦУ,
+/// И КИРИЛЛИЦУ. Иначе получается то, с чего этот класс переписан: Baloo 2
+/// (ui) и Space Mono (mono) кириллицы не содержат вовсе, и Flutter молча
+/// подставлял для русского текста системный шрифт. В итоге один и тот же
+/// экран выглядел по-разному на русском и английском — английские надписи
+/// рисовались фигурным Baloo 2, русские системным Roboto, — а внутри
+/// русского интерфейса расходились даже соседние элементы: цифры рейтинга
+/// шли моноширинным Space Mono, а подпись рядом с ними — системным.
+///
+/// Ни одной ошибки при этом не возникало: подстановка недостающего глифа —
+/// штатное поведение, и заметить её можно только глазами. Поэтому проверять
+/// новый шрифт надо ДО того, как он попал сюда: у семейства на fonts.google.
+/// com в наборах (subsets) должен быть Cyrillic.
 class AppFonts {
+  /// Крупный акцентный шрифт для вывесок. Сейчас в приложении не
+  /// используется ни разу; оставлен на будущее — но уже на семействе с
+  /// кириллицей, чтобы не вернуть ту же проблему, когда он понадобится.
   static TextStyle brand({double fontSize = 32, Color color = AppColors.gold}) =>
-      GoogleFonts.bungee(fontSize: fontSize, color: color, letterSpacing: 0.2);
+      GoogleFonts.russoOne(fontSize: fontSize, color: color, letterSpacing: 0.2);
 
+  /// Основной текст интерфейса. Manrope — то же семейство, что и в
+  /// textTheme ниже: так надписи в виджетах и системный текст Material
+  /// (диалоги, подсказки полей) выглядят одинаково.
   static TextStyle ui({
     double fontSize = 14,
     FontWeight weight = FontWeight.w700,
     Color color = AppColors.cream,
   }) =>
-      GoogleFonts.baloo2(fontSize: fontSize, fontWeight: weight, color: color);
+      GoogleFonts.manrope(fontSize: fontSize, fontWeight: weight, color: color);
 
+  /// Моноширинный: рейтинг, счётчики, коды уровней. JetBrains Mono вместо
+  /// Space Mono по единственной причине — в нём есть кириллица, а
+  /// моноширинным здесь набираются и русские подписи («ОТЛАДКА», названия
+  /// лиг), а не только цифры.
   static TextStyle mono({
     double fontSize = 11,
     FontWeight weight = FontWeight.w400,
     Color color = AppColors.muted,
   }) =>
-      GoogleFonts.spaceMono(fontSize: fontSize, fontWeight: weight, color: color);
+      GoogleFonts.jetBrainsMono(fontSize: fontSize, fontWeight: weight, color: color);
 }
 
 ThemeData buildAppTheme() {

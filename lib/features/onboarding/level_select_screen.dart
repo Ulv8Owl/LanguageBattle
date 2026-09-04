@@ -17,6 +17,12 @@ import '../../widgets/chrolingo_widgets.dart';
 /// Одиночной Игрой на фразах заявленного уровня (>= 60% правильного), и
 /// только после неё вызывается set_placement_rating.
 ///
+/// A0 — единственный уровень БЕЗ проверки. Проверять нечего: игрок и так
+/// заявил, что языка не знает, и это самый низ шкалы — занизить себя ещё
+/// сильнее он не может, а прогонять человека, который не знает ни слова,
+/// через раунд с переводом фразы вслух значит встретить его заведомо
+/// проваленным заданием.
+///
 /// ЛИГ И КУБКОВ ЗДЕСЬ НЕТ намеренно. «Олово», «Бронза» и тем более рейтинг
 /// в очках — игровые понятия, которые новичку в этот момент ещё ничего не
 /// говорят и только мешают ответить на простой вопрос «насколько хорошо ты
@@ -39,6 +45,10 @@ class _LevelSelectScreenState extends State<LevelSelectScreen> {
 
   /// Изучаемый язык активной пары — его и просим подтвердить.
   String? _targetLanguage;
+
+  /// Нужно ли подтверждать выбранный уровень. Не нужно только для самого
+  /// нижнего (A0) — см. док-комментарий экрана.
+  bool get _needsCheck => _selected != 'a0';
 
   @override
   void initState() {
@@ -64,10 +74,29 @@ class _LevelSelectScreenState extends State<LevelSelectScreen> {
     }
   }
 
-  /// Запустить проверку и разобрать её результат.
-  Future<void> _runCheck() async {
+  /// Выход из онбординга назад, в меню входа.
+  ///
+  /// Обязателен именно выход из сессии, а не просто переход на /login:
+  /// аккаунт уже создан, и без signOut SplashGate при следующем запуске
+  /// снова привёл бы игрока сюда же. Аккаунт при этом никуда не девается —
+  /// войдя заново, игрок вернётся к выбору уровня.
+  Future<void> _backToLogin() async {
+    await supabase.auth.signOut();
+    if (mounted) context.go('/login');
+  }
+
+  /// Действие главной кнопки: для всех уровней, кроме A0, — прогнать
+  /// проверку и разобрать её результат; для A0 — сразу поставить рейтинг.
+  Future<void> _start() async {
     final language = _targetLanguage;
     if (language == null) return;
+
+    // A0 проверять нечем и незачем — сразу ставим рейтинг. Процент здесь
+    // не показывается: проверки не было, и «100%» было бы неправдой.
+    if (!_needsCheck) {
+      await _applyLevel(language, null);
+      return;
+    }
 
     // Экран проверки возвращает долю правильных ответов (0..1) — см.
     // TrainingScreen._finishSession. null означает «игрок ушёл с проверки
@@ -83,7 +112,9 @@ class _LevelSelectScreenState extends State<LevelSelectScreen> {
     }
   }
 
-  Future<void> _applyLevel(String language, int percent) async {
+  /// [percent] — доля правильных ответов на проверке; null означает, что
+  /// проверки не было (уровень A0).
+  Future<void> _applyLevel(String language, int? percent) async {
     final t = AppLocale.strings;
     setState(() {
       _busy = true;
@@ -95,24 +126,27 @@ class _LevelSelectScreenState extends State<LevelSelectScreen> {
         'p_level': _selected,
       });
       if (!mounted) return;
-      await showDialog<void>(
-        context: context,
-        builder: (ctx) => AlertDialog(
-          backgroundColor: AppColors.navy2,
-          title: Text(t.levelCheckPassedTitle),
-          content: Text(
-            t.levelCheckPassedBody(percent),
-            style: const TextStyle(color: AppColors.muted, fontSize: 13, height: 1.4),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(ctx).pop(),
-              child: Text(t.levelCheckToArena),
+      // Без проверки поздравлять не с чем — игрок просто идёт играть.
+      if (percent != null) {
+        await showDialog<void>(
+          context: context,
+          builder: (ctx) => AlertDialog(
+            backgroundColor: AppColors.navy2,
+            title: Text(t.levelCheckPassedTitle),
+            content: Text(
+              t.levelCheckPassedBody(percent),
+              style: const TextStyle(color: AppColors.muted, fontSize: 13, height: 1.4),
             ),
-          ],
-        ),
-      );
-      if (!mounted) return;
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(ctx).pop(),
+                child: Text(t.levelCheckToArena),
+              ),
+            ],
+          ),
+        );
+        if (!mounted) return;
+      }
       context.go('/arena');
     } catch (e) {
       if (!mounted) return;
@@ -150,14 +184,29 @@ class _LevelSelectScreenState extends State<LevelSelectScreen> {
         ],
       ),
     );
-    if (again == true && mounted) await _runCheck();
+    if (again == true && mounted) await _start();
   }
 
   @override
   Widget build(BuildContext context) {
     final t = AppLocale.strings;
     return Scaffold(
-      appBar: AppBar(title: Text(t.levelSelectTitle)),
+      appBar: AppBar(
+        title: Text(t.levelSelectTitle),
+        // Кнопка выхода стоит СПРАВА, а не слева: слева у Material живёт
+        // системная стрелка «назад по стеку», а этот экран открыт через go()
+        // и в стеке под ним ничего нет — стрелки там не появится, и место
+        // выглядело бы пустым. Здесь же это не «шаг назад», а выход из
+        // регистрации в меню входа, и отдельная кнопка это честно
+        // показывает.
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.arrow_back),
+            tooltip: t.levelSelectBack,
+            onPressed: _busy ? null : _backToLogin,
+          ),
+        ],
+      ),
       body: SafeArea(
         child: Column(
           children: [
@@ -179,6 +228,13 @@ class _LevelSelectScreenState extends State<LevelSelectScreen> {
                     ),
                     const SizedBox(height: 8),
                   ],
+                  if (!_needsCheck) ...[
+                    const SizedBox(height: 4),
+                    Text(
+                      t.levelSelectNoCheckNote,
+                      style: const TextStyle(color: AppColors.muted, fontSize: 12, height: 1.4),
+                    ),
+                  ],
                   if (_error != null) ...[
                     const SizedBox(height: 8),
                     Text(_error!, style: const TextStyle(color: AppColors.danger, fontSize: 12)),
@@ -192,14 +248,16 @@ class _LevelSelectScreenState extends State<LevelSelectScreen> {
                 width: double.infinity,
                 child: ElevatedButton(
                   // Пока не знаем изучаемый язык — идти на проверку некуда.
-                  onPressed: (_busy || _targetLanguage == null) ? null : _runCheck,
+                  onPressed: (_busy || _targetLanguage == null) ? null : _start,
                   child: _busy
                       ? const SizedBox(
                           height: 20,
                           width: 20,
                           child: CircularProgressIndicator(strokeWidth: 2),
                         )
-                      : Text(t.levelSelectAction),
+                      : Text(_needsCheck
+                          ? t.levelSelectAction
+                          : t.levelSelectStartWithoutCheck),
                 ),
               ),
             ),
