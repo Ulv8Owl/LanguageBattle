@@ -180,10 +180,10 @@ class _MatchmakingScreenState extends State<MatchmakingScreen> {
   /// Окно допустимой разницы рейтингов расширяется по ходу поиска
   /// (раздел 2.3), чтобы не искать вечно точное совпадение.
   ///
-  /// Подбор идёт по САМОМУ рейтингу, а не по консервативной оценке: соперник
-  /// нужен равный по силе, и осторожность системы к этому отношения не
-  /// имеет. Шкала Glicko-2 совпадает со шкалой эло (те же ~400 очков на
-  /// десятикратную разницу шансов), поэтому пороги окна остались прежними.
+  /// Пороги окна — в очках Эло: 400 очков разницы это примерно
+  /// десятикратная разница шансов, поэтому окно в 100 очков означает
+  /// «примерно равный», а 600 — «уже сильно неравный, но лучше, чем
+  /// продолжать ждать».
   int _eloWindowFor(int elapsedSeconds) {
     if (elapsedSeconds < 10) return 100;
     if (elapsedSeconds < 20) return 250;
@@ -426,8 +426,7 @@ class _MatchmakingScreenState extends State<MatchmakingScreen> {
                   children: [
                     Text(_opponentName, style: AppFonts.ui(fontSize: 15, weight: FontWeight.w800)),
                     const SizedBox(height: 4),
-                    Text(
-                        '${_opponentRating.display} ± ${_opponentRating.deviation.round()}',
+                    Text('${_opponentRating.display}',
                         style: AppFonts.mono(fontSize: 11, weight: FontWeight.w700, color: AppColors.gold)),
                   ],
                 ),

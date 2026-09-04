@@ -264,8 +264,8 @@ class _ArenaScreenState extends State<ArenaScreen> {
           '10 раундов, одно голосовое за раунд.',
       stats: [
         const _Stat(value: '10', label: 'раундов', color: AppColors.gold),
-        // Не константа: в Glicko-2 ход рейтинга зависит от того, насколько
-        // система уверена в игроке (см. PlayerRating.estimatedSwing).
+        // Не константа: цена матча (K) выше первые десять матчей и ниже
+        // в Алмазе — см. PlayerRating.estimatedSwing.
         _Stat(value: '±${_rating.estimatedSwing}', label: 'рейтинга', color: AppColors.cyan),
         const _Stat(value: '+100', label: 'монет', color: AppColors.gold),
       ],
@@ -458,10 +458,10 @@ class _ArenaScreenState extends State<ArenaScreen> {
 /// Полоса продвижения внутри лиги: слева порог входа, справа порог
 /// следующей.
 ///
-/// Заполнение считается по league_rating (консервативная оценка Glicko-2),
-/// а рейтинг под полосой показывается настоящий — это разные числа, и
-/// подписаны они поэтому раздельно. Пока RD большое, разрыв между ними
-/// заметен, и внизу появляется строчка, объясняющая, почему.
+/// На Эло рейтинг игрока и рейтинг, по которому считается лига, — одно и
+/// то же число, поэтому подпись под полосой одна. На Glicko-2 их было два
+/// (показанный рейтинг и консервативная оценка rating - 2*RD), и полосе
+/// приходилось объяснять игроку, почему они разошлись.
 class _LeagueProgress extends StatelessWidget {
   final PlayerRating rating;
 
@@ -513,22 +513,21 @@ class _LeagueProgress extends StatelessWidget {
         ),
         const SizedBox(height: 6),
         Text(
-          'Рейтинг ${rating.display} ± ${rating.deviation.round()}',
+          'Рейтинг ${rating.display}',
           style: AppFonts.mono(fontSize: 10, weight: FontWeight.w700, color: AppColors.cream),
         ),
         const SizedBox(height: 2),
         Text(
           toNext == null
-              ? 'В зачёт лиги ${rating.leagueRating} · выше лиг нет'
-              : 'В зачёт лиги ${rating.leagueRating} · до лиги «${_nextLeagueName(league)}» $toNext',
+              ? 'Выше лиг нет'
+              : 'До лиги «${_nextLeagueName(league)}» $toNext',
           style: AppFonts.mono(fontSize: 9, color: AppColors.muted),
         ),
         if (rating.isProvisional) ...[
           const SizedBox(height: 4),
           Text(
-            'Рейтинг ещё уточняется: пока система в нём не уверена, '
-            'в зачёт лиги идёт осторожная оценка. Сыграй несколько матчей — '
-            'разрыв сократится сам.',
+            'Первые ${PlayerRating.calibrationMatches} матчей рейтинг ходит '
+            'вдвое быстрее обычного — так он быстрее придёт к твоему уровню.',
             textAlign: TextAlign.center,
             style: AppFonts.ui(fontSize: 10, color: AppColors.muted),
           ),

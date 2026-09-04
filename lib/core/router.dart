@@ -8,6 +8,7 @@ import '../features/battle/battle_results_screen.dart';
 import '../features/battle/battle_screen.dart';
 import '../features/flashcards/flashcards_screen.dart';
 import '../features/matchmaking/matchmaking_screen.dart';
+import '../features/onboarding/level_select_screen.dart';
 import '../features/onboarding/onboarding_screen.dart';
 import '../features/profile/avatar_editor_screen.dart';
 import '../features/profile/language_pair_screen.dart';
@@ -23,6 +24,19 @@ final GoRouter appRouter = GoRouter(
     GoRoute(
       path: '/onboarding',
       builder: (context, state) => const OnboardingScreen(),
+    ),
+    GoRoute(
+      path: '/level-select',
+      builder: (context, state) => const LevelSelectScreen(),
+    ),
+    // Проверка уровня — тот же экран Одиночной Игры, но на фразах
+    // заявленного уровня и без списания энергии. Возвращает долю
+    // правильных ответов вызвавшему экрану (см. TrainingScreen).
+    GoRoute(
+      path: '/placement/:level',
+      builder: (context, state) => TrainingScreen(
+        placementLevel: state.pathParameters['level'],
+      ),
     ),
     GoRoute(
       path: '/arena',

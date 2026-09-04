@@ -1,10 +1,16 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../core/app_locale.dart';
 import '../../core/supabase_client.dart';
 
-/// Decides where to land on cold start: logged out -> /login; logged in but
-/// no language pair set yet -> /onboarding; otherwise -> /arena.
+/// Куда попасть при холодном старте: не вошёл -> /login; вошёл, но пары
+/// языков нет -> /onboarding; пара есть, но уровень ещё не определён ->
+/// /level-select; иначе -> /arena.
+///
+/// Шаг с уровнем нельзя пропустить, закрыв приложение на нём: до
+/// placement_done = true игрок будет возвращаться сюда же, потому что
+/// иначе он играл бы с рейтингом по умолчанию, так и не выбрав уровень.
 class SplashGate extends StatefulWidget {
   const SplashGate({super.key});
 
@@ -29,12 +35,19 @@ class _SplashGateState extends State<SplashGate> {
     try {
       final languages = await supabase
           .from('user_languages')
-          .select('id')
+          .select('id, placement_done')
           .eq('user_id', session.user.id)
+          .eq('role', 'learning')
           .limit(1);
+      // Язык интерфейса читается из профиля здесь, а не только на старте
+      // main(): при первом входе на новом устройстве сессии в момент
+      // main() ещё нет, и серверное значение прочитать было неоткуда.
+      await AppLocale.refreshFromServer();
       if (!mounted) return;
       if (languages.isEmpty) {
         context.go('/onboarding');
+      } else if (languages.first['placement_done'] == false) {
+        context.go('/level-select');
       } else {
         context.go('/arena');
       }

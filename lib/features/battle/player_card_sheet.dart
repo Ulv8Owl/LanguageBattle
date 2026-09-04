@@ -167,12 +167,7 @@ class _PlayerCardState extends State<_PlayerCard> {
                   children: [
                     _row('Лига', league.name, league.color),
                     const Divider(height: 18, color: AppColors.line),
-                    // «± RD» — насколько система уверена в этой оценке.
-                    // Без него рейтинг новичка и рейтинг наигранного
-                    // игрока выглядят одинаково весомо, хотя это не так.
-                    _row('Рейтинг',
-                        '${_rating.display} ± ${_rating.deviation.round()}',
-                        AppColors.cream),
+                    _row('Рейтинг', '${_rating.display}', AppColors.cream),
                     const Divider(height: 18, color: AppColors.line),
                     _row(
                       'Языковая пара',

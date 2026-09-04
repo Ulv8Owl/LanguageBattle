@@ -14,11 +14,15 @@ import 'theme.dart';
 /// ней уровень сложности. Порядок и число ДОЛЖНЫ совпадать с
 /// wordLevelSlugs в word_packs.dart и с league_index_for_rating в SQL.
 ///
-/// Границы применяются к КОНСЕРВАТИВНОЙ оценке Glicko-2 (league_rating =
-/// rating - 2*RD), а не к самому рейтингу — см. PlayerRating в
-/// lib/data/player_rating.dart. Сами числа при переходе с эло на Glicko-2
-/// не менялись: перенос подобран так, что у существующих игроков
-/// league_rating совпал с их прежним эло и лига ни у кого не поехала.
+/// Границы применяются к рейтингу Эло — то есть ровно к тому числу,
+/// которое показано игроку (league_rating в базе, см. PlayerRating в
+/// lib/data/player_rating.dart). Пороги не менялись ни при переходе на
+/// Glicko-2, ни при возврате к Эло: перенос в миграции 0026 подобран так,
+/// что лига ни у кого не поехала.
+///
+/// Эти же пороги — начальные рейтинги уровней CEFR при регистрации
+/// (lib/core/cefr_levels.dart): заявивший B1 начинает ровно с 1500, то
+/// есть с порога Серебра.
 class League {
   final String name;
   final String shortName;
@@ -61,8 +65,8 @@ const leagueBands = <League>[
   League(name: 'Алмаз', shortName: 'Алмаз', cefr: 'C2', min: 2400, max: 999999, color: Color(0xFF4C82E4)),
 ];
 
-/// [leagueRating] — консервативная оценка rating - 2*RD (колонка
-/// user_languages.league_rating), а не сам рейтинг Glicko-2.
+/// [leagueRating] — целочисленный рейтинг игрока (колонка
+/// user_languages.league_rating), он же показанный ему рейтинг Эло.
 League leagueFor(int leagueRating) {
   for (final b in leagueBands) {
     if (leagueRating >= b.min && leagueRating < b.max) return b;

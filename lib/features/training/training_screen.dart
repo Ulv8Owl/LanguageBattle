@@ -3,6 +3,8 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../core/app_locale.dart';
+import '../../core/cefr_levels.dart';
 import '../../core/debug_flags.dart';
 import '../../core/game_access.dart';
 import '../../core/languages.dart';
@@ -47,8 +49,26 @@ enum _Stage {
 ///
 /// Раунд: фраза от ИИ → попытка №1 → разбор ошибок → попытка №2 →
 /// финальный балл 1-10 (рейтинг не меняется).
+///
+/// ПРОВЕРКА УРОВНЯ. Тот же экран работает проверкой при регистрации, если
+/// передан [placementLevel] (миграция 0028). Отличий три, и все они
+/// сознательно НЕ вынесены в отдельный экран: механика раунда, запись
+/// голоса, серверная оценка и лента — те же самые, а копия этого экрана
+/// разошлась бы с оригиналом на первой же правке.
+///  * фразы берутся с уровня, который игрок заявил, а не с его лиги
+///    (лиги у него ещё нет — рейтинг проверка и назначает);
+///  * сессия заводится с p_is_placement, то есть не тратит энергию;
+///  * в конце экран не «завершается», а ВОЗВРАЩАЕТ долю правильных
+///    ответов вызвавшему экрану — решение о том, сдана проверка или нет,
+///    принимает он.
 class TrainingScreen extends StatefulWidget {
-  const TrainingScreen({super.key});
+  /// Код уровня CEFR (a0..c2), если экран открыт как проверка уровня.
+  /// null — обычная Одиночная Игра.
+  final String? placementLevel;
+
+  const TrainingScreen({super.key, this.placementLevel});
+
+  bool get isPlacement => placementLevel != null;
 
   @override
   State<TrainingScreen> createState() => _TrainingScreenState();
@@ -133,9 +153,13 @@ class _TrainingScreenState extends State<TrainingScreen> {
           .limit(1)
           .maybeSingle();
       _targetLanguage = (learning?['language_code'] as String?) ?? 'en';
-      // Сложность фраз — по лиге игрока в изучаемом языке, то есть по
-      // консервативной оценке Glicko-2, а не по сырому рейтингу.
-      final level = PlayerRating.fromRow(learning).levelIndex;
+      // На проверке уровня сложность задаёт САМ игрок — его лига здесь ещё
+      // ничего не значит (рейтинг ставится по итогам этой проверки).
+      final placement = widget.placementLevel == null
+          ? null
+          : cefrLevelByCode(widget.placementLevel!);
+      final level = placement?.contentLevelIndex ??
+          PlayerRating.fromRow(learning).levelIndex;
 
       final me = await supabase
           .from('users')
@@ -165,9 +189,12 @@ class _TrainingScreenState extends State<TrainingScreen> {
       ]..shuffle();
 
       // start_training_session проверяет подписку и списывает энергию на
-      // сервере — клиент не решает ни то, ни другое.
+      // сервере — клиент не решает ни то, ни другое. На проверке уровня
+      // (p_is_placement) энергия не списывается, и решает это тоже сервер:
+      // он же проверяет, что уровень на паре ещё не определён.
       final result = await supabase.rpc('start_training_session', params: {
         'p_target_language': _targetLanguage,
+        'p_is_placement': widget.isPlacement,
       });
       final map = result is Map ? Map<String, dynamic>.from(result) : <String, dynamic>{};
       _sessionId = map['session_id'] as String?;
@@ -490,6 +517,32 @@ class _TrainingScreenState extends State<TrainingScreen> {
     }
   }
 
+  /// Уход с экрана по кнопке в конце сессии.
+  ///
+  /// На проверке уровня возвращаем ДОЛЮ правильных ответов (0..1), а
+  /// решение «сдал / не сдал» принимает вызвавший экран: там же живут и
+  /// кнопки «ещё раз» / «выбрать другой уровень», и знать про них раунду
+  /// незачем.
+  ///
+  /// Доля считается по среднему баллу судьи (1..10 за раунд): 6 из 10 —
+  /// это и есть 60% правильного, и отдельной метрики «правильно/неправильно»
+  /// в пайплайне нет.
+  void _finishSession() {
+    if (widget.isPlacement) {
+      final ratio = _history.isEmpty
+          ? 0.0
+          : _history.map((r) => r.score).reduce((a, b) => a + b) /
+              (_history.length * 10);
+      if (context.canPop()) {
+        context.pop(ratio);
+      } else {
+        context.go('/arena');
+      }
+      return;
+    }
+    context.canPop() ? context.pop() : context.go('/arena');
+  }
+
   Future<void> _next() async {
     _history.add(_CompletedRound(
       roundNumber: _roundNumber,
@@ -524,7 +577,9 @@ class _TrainingScreenState extends State<TrainingScreen> {
       appBar: AppBar(
         // Версия сборки живёт в Настройках, а не в шапке игрового экрана:
         // во время раунда она только мешает.
-        title: const Text('Одиночная Игра'),
+        title: Text(widget.isPlacement
+            ? AppLocale.strings.levelCheckTitle
+            : 'Одиночная Игра'),
         actions: [
           if (_stage != _Stage.starting && _stage != _Stage.failed)
             Padding(
@@ -616,8 +671,10 @@ class _TrainingScreenState extends State<TrainingScreen> {
               child: SizedBox(
                 width: double.infinity,
                 child: ElevatedButton(
-                  onPressed: () => context.canPop() ? context.pop() : context.go('/arena'),
-                  child: const Text('Завершить'),
+                  onPressed: _finishSession,
+                  child: Text(widget.isPlacement
+                      ? AppLocale.strings.continueAction
+                      : 'Завершить'),
                 ),
               ),
             )

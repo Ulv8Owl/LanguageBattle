@@ -454,14 +454,6 @@ class PlayerRow extends StatelessWidget {
             '${player.rating.display}',
             style: AppFonts.mono(fontSize: 10, weight: FontWeight.w700, color: color),
           ),
-          // Рядом с рейтингом — его отклонение. Оно объясняет порядок в
-          // списке: список отсортирован по консервативной оценке, поэтому
-          // «1700 ± 300» стоит ниже, чем «1600 ± 60».
-          const SizedBox(width: 4),
-          Text(
-            '±${player.rating.deviation.round()}',
-            style: AppFonts.mono(fontSize: 8, color: AppColors.muted),
-          ),
           ?trailing,
         ],
       ),

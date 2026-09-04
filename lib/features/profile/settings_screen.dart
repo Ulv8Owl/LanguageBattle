@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 
 import '../../core/all_languages.dart';
 import '../../core/app_events.dart';
+import '../../core/app_locale.dart';
 import '../../core/debug_flags.dart';
 import '../../core/leagues.dart';
 import '../../core/supabase_client.dart';
@@ -50,6 +51,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
   /// игрой это десятки матчей, а проверять надо все шесть.
   PlayerRating? _rating;
   bool _savingRating = false;
+
+  /// Пока идёт удаление, кнопку нельзя нажать второй раз: повторный вызов
+  /// delete_account после успешного первого упрётся в «not authenticated».
+  bool _deletingAccount = false;
 
   @override
   void initState() {
@@ -207,6 +212,95 @@ class _SettingsScreenState extends State<SettingsScreen> {
     if (mounted) context.go('/login');
   }
 
+  /// Выбор языка интерфейса. Языки подписаны на самих себе (Русский /
+  /// English), а не переведены на текущий язык: игрок, случайно
+  /// переключившийся на незнакомый язык, должен суметь найти свой обратно.
+  Future<void> _pickInterfaceLanguage() async {
+    final t = AppLocale.strings;
+    final picked = await showModalBottomSheet<String>(
+      context: context,
+      backgroundColor: AppColors.navy2,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const SizedBox(height: 12),
+            Text(t.interfaceLanguage,
+                style: AppFonts.ui(fontSize: 15, weight: FontWeight.w800)),
+            const SizedBox(height: 8),
+            for (final code in AppLocale.supported)
+              ListTile(
+                title: Text(AppLocale.endonyms[code] ?? code),
+                trailing: code == AppLocale.code.value
+                    ? const Icon(Icons.check, color: AppColors.gold, size: 20)
+                    : null,
+                onTap: () => Navigator.of(ctx).pop(code),
+              ),
+            const SizedBox(height: 8),
+          ],
+        ),
+      ),
+    );
+    if (picked == null) return;
+    await AppLocale.set(picked);
+    // Приложение перерисуется целиком по ValueNotifier в LanguageBattleApp;
+    // setState нужен, чтобы обновился и этот экран, если он уже построен.
+    if (mounted) setState(() {});
+  }
+
+  /// Удаление аккаунта. Пока «для тестирования», но сделано по-настоящему:
+  /// RPC delete_account (миграция 0027) сносит строку auth.users, и всё
+  /// остальное уходит каскадом. Мягкого удаления и корзины нет — если они
+  /// понадобятся, это отдельное решение, а не молчаливая заглушка здесь.
+  Future<void> _deleteAccount() async {
+    final t = AppLocale.strings;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: AppColors.navy2,
+        title: Text(t.deleteAccountConfirmTitle),
+        content: Text(
+          t.deleteAccountConfirmBody,
+          style: const TextStyle(color: AppColors.muted, fontSize: 13, height: 1.4),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: Text(t.cancel),
+          ),
+          TextButton(
+            style: TextButton.styleFrom(foregroundColor: AppColors.danger),
+            onPressed: () => Navigator.of(ctx).pop(true),
+            child: Text(t.deleteAccountConfirmAction),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+
+    setState(() => _deletingAccount = true);
+    try {
+      await supabase.rpc('delete_account');
+      // Сессия указывает на удалённого пользователя — выходим из неё, иначе
+      // следующий запрос упрётся в чужой (уже несуществующий) uid.
+      await supabase.auth.signOut();
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(t.deleteAccountDone)),
+      );
+      context.go('/login');
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _deletingAccount = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(t.deleteAccountFailed(e))),
+      );
+    }
+  }
+
   void _notReadyYet(String what) {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(content: Text('$what появится в следующей итерации')),
@@ -267,18 +361,20 @@ class _SettingsScreenState extends State<SettingsScreen> {
     }
   }
 
-  /// Правим не сам рейтинг, а ту величину, по которой считается лига
-  /// (league_rating = rating - 2*RD), плюс отдельно RD. Иначе отладка
-  /// врала бы: выставив «рейтинг 2400», разработчик увидел бы у себя не
-  /// Алмаз, а лигу на 700 очков ниже — потому что league_rating меньше
-  /// рейтинга ровно на два отклонения. RD вынесен отдельным полем, чтобы
-  /// можно было проверить и вид новичка (350), и вид наигранного (50).
+  /// На Эло правится одно число: рейтинг, он же лига, он же сложность
+  /// фраз. На Glicko-2 здесь было два поля (рейтинг в зачёт лиги и
+  /// отклонение), потому что выставить «рейтинг 2400» и увидеть у себя
+  /// Алмаз было нельзя — лига считалась на два отклонения ниже.
+  ///
+  /// Второе поле — сыгранные матчи: от них зависит цена матча K и пометка
+  /// «рейтинг ещё уточняется», и проверить оба состояния (новичок / уже
+  /// откалиброван) иначе нечем.
   Future<void> _editRating() async {
     final current = _rating ?? PlayerRating.newcomer;
-    final leagueController =
-        TextEditingController(text: '${current.leagueRating}');
-    final rdController =
-        TextEditingController(text: '${current.deviation.round()}');
+    final ratingController =
+        TextEditingController(text: '${current.display}');
+    final matchesController =
+        TextEditingController(text: '${current.matchesPlayed}');
     final entered = await showDialog<List<int>>(
       context: context,
       builder: (ctx) => AlertDialog(
@@ -289,26 +385,24 @@ class _SettingsScreenState extends State<SettingsScreen> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             const Text(
-              'Отладочная настройка. Лига и сложность фраз считаются по '
-              'консервативной оценке Glicko-2: рейтинг минус два отклонения. '
-              'Первое поле — именно она, пороги лиг ниже даны в ней же. '
-              'Сам рейтинг будет выставлен так, чтобы сойтись с этими двумя '
-              'числами.',
+              'Отладочная настройка. Рейтинг Эло — он же лига, он же '
+              'сложность фраз и доступные наборы слов: одно число, пороги '
+              'лиг ниже даны в нём же.',
               style: TextStyle(color: AppColors.muted, fontSize: 12, height: 1.4),
             ),
             const SizedBox(height: 12),
             TextField(
-              controller: leagueController,
+              controller: ratingController,
               autofocus: true,
               keyboardType: TextInputType.number,
-              decoration: const InputDecoration(labelText: 'Рейтинг в зачёт лиги'),
+              decoration: const InputDecoration(labelText: 'Рейтинг'),
             ),
             const SizedBox(height: 8),
             TextField(
-              controller: rdController,
+              controller: matchesController,
               keyboardType: TextInputType.number,
               decoration: const InputDecoration(
-                labelText: 'RD: 350 — новичок, 50 — наигранный',
+                labelText: 'Сыграно матчей: <10 — рейтинг предварительный',
               ),
             ),
             const SizedBox(height: 10),
@@ -324,10 +418,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
           TextButton(onPressed: () => Navigator.of(ctx).pop(), child: const Text('Отмена')),
           TextButton(
             onPressed: () {
-              final league = int.tryParse(leagueController.text.trim());
-              final rd = int.tryParse(rdController.text.trim());
+              final value = int.tryParse(ratingController.text.trim());
+              final matches = int.tryParse(matchesController.text.trim());
               Navigator.of(ctx).pop(
-                league == null || rd == null ? null : [league, rd],
+                value == null || matches == null ? null : [value, matches],
               );
             },
             child: const Text('Применить'),
@@ -336,11 +430,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
       ),
     );
     if (entered == null || !mounted) return;
-    final leagueValue = entered[0].clamp(0, 99999);
-    // Нижняя граница RD — 30: ниже система в реальной игре не опускается
-    // (glicko2_update держит её сверху 350, снизу её держит сама формула).
-    final rd = entered[1].clamp(30, 350);
-    final rating = (leagueValue + 2 * rd).toDouble();
+    // Нижняя граница 0 — та же, что в базе: sync_rating_mirrors не даёт
+    // рейтингу уйти в минус, и отладка не должна показывать то, чего
+    // в игре быть не может.
+    final value = entered[0].clamp(0, 99999);
+    final matches = entered[1].clamp(0, 9999);
 
     setState(() => _savingRating = true);
     try {
@@ -349,8 +443,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
       await supabase
           .from('user_languages')
           .update({
-            'rating': rating,
-            'rating_deviation': rd.toDouble(),
+            'rating': value.toDouble(),
+            'matches_played': matches,
             'rating_updated_at': DateTime.now().toUtc().toIso8601String(),
           })
           .eq('user_id', currentUserId)
@@ -359,9 +453,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
       if (!mounted) return;
       setState(() {
         _rating = PlayerRating(
-          rating: rating,
-          deviation: rd.toDouble(),
-          leagueRating: leagueValue,
+          rating: value.toDouble(),
+          leagueRating: value,
+          matchesPlayed: matches,
         );
         _savingRating = false;
       });
@@ -369,8 +463,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
       notifyProfileChanged();
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('Рейтинг ${rating.round()} ± $rd · в зачёт лиги '
-              '$leagueValue · ${leagueFor(leagueValue).titleWithLevel}'),
+          content: Text('Рейтинг $value · ${leagueFor(value).titleWithLevel} '
+              '· матчей $matches'),
         ),
       );
     } catch (e) {
@@ -384,13 +478,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final t = AppLocale.strings;
     return Scaffold(
-      appBar: AppBar(title: const Text('Настройки')),
+      appBar: AppBar(title: Text(t.settingsTitle)),
       body: SafeArea(
         child: ListView(
           padding: const EdgeInsets.all(16),
           children: [
-            Text('ИНТЕРФЕЙС', style: AppFonts.mono(fontSize: 9, weight: FontWeight.w700, color: AppColors.gold)),
+            Text(t.sectionInterface, style: AppFonts.mono(fontSize: 9, weight: FontWeight.w700, color: AppColors.gold)),
             const SizedBox(height: 8),
             ChPanel(
               padding: EdgeInsets.zero,
@@ -398,9 +493,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 children: [
                   _Row(
                     icon: Icons.language,
-                    title: 'Язык интерфейса',
-                    trailing: Text('Русский', style: AppFonts.mono(fontSize: 11, color: AppColors.muted)),
-                    onTap: () => _notReadyYet('Переключение языка интерфейса'),
+                    title: t.interfaceLanguage,
+                    trailing: Text(
+                      AppLocale.endonyms[AppLocale.code.value] ?? AppLocale.code.value,
+                      style: AppFonts.mono(fontSize: 11, color: AppColors.muted),
+                    ),
+                    onTap: _pickInterfaceLanguage,
                   ),
                   const Divider(height: 1, color: AppColors.line),
                   _Row(
@@ -408,7 +506,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     // Множественное число намеренно: полиглот может
                     // назвать родными до шести языков (миграция 0025), а
                     // не только один, как было раньше.
-                    title: 'Родные языки',
+                    title: t.nativeLanguages,
                     trailing: Text(
                       _natives.isEmpty
                           ? '—'
@@ -426,13 +524,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
               ),
             ),
             const SizedBox(height: 18),
-            Text('ТРЕНИРОВКА', style: AppFonts.mono(fontSize: 9, weight: FontWeight.w700, color: AppColors.gold)),
+            Text(t.sectionTraining, style: AppFonts.mono(fontSize: 9, weight: FontWeight.w700, color: AppColors.gold)),
             const SizedBox(height: 8),
             ChPanel(
               padding: EdgeInsets.zero,
               child: _Row(
                 icon: Icons.style,
-                title: 'Карточек за тренировку',
+                title: t.cardsPerTraining,
                 trailing: _savingDeckSize
                     ? const SizedBox(height: 14, width: 14, child: CircularProgressIndicator(strokeWidth: 2))
                     : Text('$_deckSize', style: AppFonts.mono(fontSize: 11, color: AppColors.muted)),
@@ -440,33 +538,32 @@ class _SettingsScreenState extends State<SettingsScreen> {
               ),
             ),
             const SizedBox(height: 18),
-            Text('ОТЛАДКА', style: AppFonts.mono(fontSize: 9, weight: FontWeight.w700, color: AppColors.danger)),
+            Text(t.sectionDebug, style: AppFonts.mono(fontSize: 9, weight: FontWeight.w700, color: AppColors.danger)),
             const SizedBox(height: 8),
             ChPanel(
               padding: EdgeInsets.zero,
               child: _Row(
                 icon: Icons.emoji_events_outlined,
-                title: 'Рейтинг и лига',
+                title: t.ratingAndLeague,
                 trailing: _savingRating
                     ? const SizedBox(height: 14, width: 14, child: CircularProgressIndicator(strokeWidth: 2))
                     : Text(
                         _rating == null
                             ? '—'
-                            : '${_rating!.display} ± ${_rating!.deviation.round()}'
-                                ' · ${_rating!.league.cefr}',
+                            : '${_rating!.display} · ${_rating!.league.cefr}',
                         style: AppFonts.mono(fontSize: 11, color: AppColors.muted),
                       ),
                 onTap: _savingRating ? null : _editRating,
               ),
             ),
             const SizedBox(height: 18),
-            Text('УВЕДОМЛЕНИЯ', style: AppFonts.mono(fontSize: 9, weight: FontWeight.w700, color: AppColors.gold)),
+            Text(t.sectionNotifications, style: AppFonts.mono(fontSize: 9, weight: FontWeight.w700, color: AppColors.gold)),
             const SizedBox(height: 8),
             ChPanel(
               padding: EdgeInsets.zero,
               child: _Row(
                 icon: Icons.notifications_none,
-                title: 'Уведомления о матчах',
+                title: t.matchNotifications,
                 trailing: Switch(
                   value: _notifications,
                   activeThumbColor: AppColors.gold,
@@ -478,7 +575,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
               ),
             ),
             const SizedBox(height: 18),
-            Text('ПРИВАТНОСТЬ', style: AppFonts.mono(fontSize: 9, weight: FontWeight.w700, color: AppColors.gold)),
+            Text(t.sectionPrivacy, style: AppFonts.mono(fontSize: 9, weight: FontWeight.w700, color: AppColors.gold)),
             const SizedBox(height: 8),
             ChPanel(
               padding: EdgeInsets.zero,
@@ -486,7 +583,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 children: [
                   _Row(
                     icon: Icons.visibility_off_outlined,
-                    title: 'Скрыть меня из рейтинга',
+                    title: t.hideFromLeaderboard,
                     trailing: Switch(
                       value: _hideFromLeaderboard,
                       activeThumbColor: AppColors.gold,
@@ -499,26 +596,26 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   const Divider(height: 1, color: AppColors.line),
                   _Row(
                     icon: Icons.block,
-                    title: 'Заблокированные игроки',
+                    title: t.blockedPlayers,
                     onTap: () => _notReadyYet('Список блокировок'),
                   ),
                   const Divider(height: 1, color: AppColors.line),
                   _Row(
                     icon: Icons.flag_outlined,
-                    title: 'Мои жалобы',
+                    title: t.myReports,
                     onTap: () => _notReadyYet('История жалоб'),
                   ),
                 ],
               ),
             ),
             const SizedBox(height: 18),
-            Text('О ПРИЛОЖЕНИИ', style: AppFonts.mono(fontSize: 9, weight: FontWeight.w700, color: AppColors.gold)),
+            Text(t.sectionAbout, style: AppFonts.mono(fontSize: 9, weight: FontWeight.w700, color: AppColors.gold)),
             const SizedBox(height: 8),
             ChPanel(
               padding: EdgeInsets.zero,
               child: _Row(
                 icon: Icons.info_outline,
-                title: 'Версия сборки',
+                title: t.buildVersion,
                 // Метка коммита, вшитая при сборке (--dart-define=BUILD_ID).
                 // Живёт здесь, а не на игровых экранах: спрашивают её редко,
                 // но когда спрашивают — ответ нужен точный, и «какой у тебя
@@ -531,9 +628,23 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 onTap: () {
                   Clipboard.setData(ClipboardData(text: kBuildParts.join(' · ')));
                   ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('Версия скопирована')),
+                    SnackBar(content: Text(t.versionCopied)),
                   );
                 },
+              ),
+            ),
+            const SizedBox(height: 18),
+            Text(t.sectionAccount, style: AppFonts.mono(fontSize: 9, weight: FontWeight.w700, color: AppColors.danger)),
+            const SizedBox(height: 8),
+            ChPanel(
+              padding: EdgeInsets.zero,
+              child: _Row(
+                icon: Icons.delete_forever_outlined,
+                title: t.deleteAccount,
+                trailing: _deletingAccount
+                    ? const SizedBox(height: 14, width: 14, child: CircularProgressIndicator(strokeWidth: 2))
+                    : const Icon(Icons.chevron_right, color: AppColors.danger, size: 20),
+                onTap: _deletingAccount ? null : _deleteAccount,
               ),
             ),
             const SizedBox(height: 26),
@@ -547,7 +658,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                 ),
                 onPressed: _signOut,
-                child: const Text('Выйти из аккаунта'),
+                child: Text(t.signOut),
               ),
             ),
           ],
