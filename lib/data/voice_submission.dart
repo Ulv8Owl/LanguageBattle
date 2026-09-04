@@ -43,18 +43,16 @@ enum JudgeStatus {
   degraded,
 
   /// Судью не звали: речь не распознана либо это родной слот Дуэли.
-  skipped,
-
-  /// Игрок говорил не на том языке, на который просили перевести. Судью не
-  /// звали намеренно: разбирать грамматику русской фразы как английской
-  /// нечего, а ждать этого разбора игроку — впустую потраченное время.
-  wrongLanguage;
+  skipped;
 
   static JudgeStatus parse(String? value) => switch (value) {
         'ok' => JudgeStatus.ok,
         'degraded' => JudgeStatus.degraded,
         'skipped' => JudgeStatus.skipped,
-        'wrong_language' => JudgeStatus.wrongLanguage,
+        // 'wrong_language' сюда больше не приходит: проверка «ответил не на
+        // том языке» снята вместе с определением языка в ASR. Значение
+        // остаётся разрешённым в схеме (миграция 0024) ради старых записей,
+        // и они читаются как pending — разбора у них всё равно нет.
         _ => JudgeStatus.pending,
       };
 }

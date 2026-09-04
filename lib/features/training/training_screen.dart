@@ -138,6 +138,17 @@ class _TrainingScreenState extends State<TrainingScreen> {
   StreamSubscription? _jobSub;
   StreamSubscription? _roundSub;
 
+  /// Подписка на саму запись голоса. Нужна ТОЛЬКО чтобы показать игроку,
+  /// чем сервер занят прямо сейчас: воркер сохраняет транскрипт сразу
+  /// после распознавания и лишь потом зовёт судью, поэтому появление
+  /// transcript_status — честная граница между «распознаём речь» и
+  /// «разбираем ответ». Без неё оба этапа выглядели бы одной надписью на
+  /// полминуты, и непонятно было бы, идёт ли вообще что-то.
+  StreamSubscription? _asrSub;
+
+  /// Распознавание текущей попытки закончилось (транскрипт записан).
+  bool _asrDone = false;
+
   @override
   void initState() {
     super.initState();
@@ -148,6 +159,7 @@ class _TrainingScreenState extends State<TrainingScreen> {
   void dispose() {
     _jobSub?.cancel();
     _roundSub?.cancel();
+    _asrSub?.cancel();
     _watchdog?.cancel();
     _deleteSessionRecordings();
     _feedController.dispose();
@@ -303,12 +315,14 @@ class _TrainingScreenState extends State<TrainingScreen> {
       if (!mounted) return;
       setState(() {
         _stage = attempt == 1 ? _Stage.gradingFirst : _Stage.gradingSecond;
+        _asrDone = false;
         if (attempt == 1) {
           _firstAttemptAudio = storagePath;
         } else {
           _secondAttemptAudio = storagePath;
         }
       });
+      _watchAsr(recordingId);
       _scrollToBottomSoon();
 
       if (attempt == 1) {
@@ -324,6 +338,29 @@ class _TrainingScreenState extends State<TrainingScreen> {
       }
       rethrow;
     }
+  }
+
+  /// Следит за тем, когда сервер закончит распознавание.
+  ///
+  /// Ничего не решает и ни на что не влияет — только меняет надпись под
+  /// спиннером. Поэтому и ошибки здесь глотаются: не показать «Разбор
+  /// ошибок» вместо «Распознавание речи» не страшно, а уронить из-за
+  /// этого раунд — страшно.
+  void _watchAsr(String recordingId) {
+    _asrSub?.cancel();
+    _asrSub = supabase
+        .from('voice_recordings')
+        .stream(primaryKey: ['id'])
+        .eq('id', recordingId)
+        .listen((rows) {
+      if (!mounted || rows.isEmpty) return;
+      // Любой непустой статус означает, что распознавание отработало —
+      // в том числе 'empty' и 'failed': судья после них не зовётся, но и
+      // распознавание уже позади.
+      if (rows.first['transcript_status'] == null) return;
+      _asrSub?.cancel();
+      setState(() => _asrDone = true);
+    }, onError: (_) {});
   }
 
   /// Попытка №1 даёт только разбор ошибок — балл за неё не ставится
@@ -787,7 +824,14 @@ class _TrainingScreenState extends State<TrainingScreen> {
     switch (_stage) {
       case _Stage.gradingFirst:
         items.addAll(_voiceBubble(_firstAttemptAudio));
-        items.add(const _Thinking(label: 'Разбираю первую попытку'));
+        // Два этапа, а не один: сперва сервер распознаёт речь, потом
+        // судья разбирает ответ. Граница между ними настоящая — см.
+        // _watchAsr, — поэтому и надписи разные.
+        items.add(_Thinking(
+          label: _asrDone
+              ? 'Разбор ошибок'
+              : recognisingSpeechLabel(_targetLanguage),
+        ));
         break;
       case _Stage.awaitingSecond:
         items.addAll(_voiceBubble(_firstAttemptAudio));
@@ -805,7 +849,13 @@ class _TrainingScreenState extends State<TrainingScreen> {
             targetLanguage: _targetLanguage));
         items.addAll(_debugPanels('Попытка 1', _firstAttempt));
         items.addAll(_voiceBubble(_secondAttemptAudio));
-        items.add(const _Thinking(label: 'Оцениваю вторую попытку'));
+        // На второй попытке судья не объясняет ошибки, а ставит балл —
+        // поэтому и надпись другая.
+        items.add(_Thinking(
+          label: _asrDone
+              ? 'Оценка от ИИ'
+              : recognisingSpeechLabel(_targetLanguage),
+        ));
         break;
       case _Stage.roundDone:
         items.addAll(_voiceBubble(_firstAttemptAudio));
@@ -976,9 +1026,6 @@ class _ErrorReport extends StatelessWidget {
     final judge = attempt?.judgeStatus ?? JudgeStatus.ok;
     // Судья не ответил — пустой список ошибок НЕ значит, что ошибок нет.
     final judgeBroken = judge == JudgeStatus.degraded;
-    // Не поломка и не «ошибок нет»: игрок ответил не на том языке, и
-    // судью намеренно не звали.
-    final wrongLanguage = judge == JudgeStatus.wrongLanguage;
     final notRecognised = status == TranscriptStatus.empty || status == TranscriptStatus.failed;
     // Результата не было вовсе: список ошибок тут заведомо пуст, и показывать
     // вместо объяснения пустоту нельзя — нужен текст причины.
@@ -993,7 +1040,6 @@ class _ErrorReport extends StatelessWidget {
       _ when clientFailure != null => ('РЕЗУЛЬТАТ НЕ ПРИШЁЛ', AppColors.danger),
       TranscriptStatus.failed => ('РЕЧЬ НЕ РАСПОЗНАНА', AppColors.muted),
       TranscriptStatus.empty => ('НИЧЕГО НЕ УСЛЫШАЛ', AppColors.muted),
-      _ when wrongLanguage => ('НЕ ТОТ ЯЗЫК', AppColors.danger),
       _ when judgeBroken && (attempt?.judgeHitProviderLimit ?? false) =>
         ('ЛИМИТ ПРОВАЙДЕРА ИИ', AppColors.danger),
       _ when judgeBroken => ('РАЗБОР НЕ ПОЛУЧЕН', AppColors.muted),
@@ -1009,7 +1055,6 @@ class _ErrorReport extends StatelessWidget {
         'Не удалось распознать речь — это сбой на нашей стороне, балл за него не снижается. Попробуй сказать фразу ещё раз.',
       TranscriptStatus.empty =>
         'Похоже, записалась тишина. Говори чётче и ближе к микрофону, удерживая кнопку всё время, пока говоришь.',
-      _ when wrongLanguage => wrongLanguageNote(targetLanguage),
       _ when judgeBroken && (attempt?.judgeHitProviderLimit ?? false) =>
         'У провайдера ИИ закончился дневной лимит — он отказывается отвечать. Разбора поэтому нет, '
             'и это не признак того, что ошибок не было. Балл не снижается. Лимит снимается на стороне провайдера.',
@@ -1050,9 +1095,9 @@ class _ErrorReport extends StatelessWidget {
             if (transcript.isNotEmpty) const SizedBox(height: 10),
 
             if (isSecondAttempt) ...[
-              if (noResult || notRecognised || judgeBroken || wrongLanguage || correction.isEmpty)
+              if (noResult || notRecognised || judgeBroken || correction.isEmpty)
                 Text(hint, style: const TextStyle(color: AppColors.muted, fontSize: 12, height: 1.4)),
-            ] else if (noResult || errors.isEmpty || notRecognised || judgeBroken || wrongLanguage)
+            ] else if (noResult || errors.isEmpty || notRecognised || judgeBroken)
               Text(hint, style: const TextStyle(color: AppColors.muted, fontSize: 12, height: 1.4))
             else
               ...errors.map((e) => Padding(
@@ -1270,9 +1315,6 @@ class _PipelineDebug extends StatelessWidget {
     if (raw != null && raw.isNotEmpty) return raw;
     return switch (outcome.judgeStatus) {
       JudgeStatus.skipped => '(не вызывался — ${judge?['reason'] ?? 'нечего разбирать'})',
-      JudgeStatus.wrongLanguage =>
-        '(не вызывался — ответ не на том языке: ${judge?['detected_language'] ?? '?'} '
-            'вместо ${judge?['target_language'] ?? '?'})',
       JudgeStatus.degraded => '(ответа нет, см. причину ниже)',
       JudgeStatus.pending => '(ещё не отработал)',
       JudgeStatus.ok => '(ответ разобран, сырьё не сохранено)',

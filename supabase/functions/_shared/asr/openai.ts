@@ -11,7 +11,6 @@ import { empty, failed, fetchWithTimeout, type TranscriptionResult } from "./typ
 export async function transcribeOpenAi(
   audio: Uint8Array,
   languageCode: string,
-  _alternativeLanguages: string[],
   apiKey: string,
   _hintPhrases: string[],
   timeoutMs: number,

@@ -17,7 +17,6 @@ import { parseWav, toBase64 } from "./util.ts";
 export async function transcribeGoogle(
   audio: Uint8Array,
   languageCode: string,
-  alternativeLanguages: string[],
   apiKey: string,
   hintPhrases: string[],
   timeoutMs: number,
@@ -29,24 +28,10 @@ export async function transcribeGoogle(
   // середине. Ровно то, что выглядело как «распознаёт не всё, что я сказал».
   const model = Deno.env.get("ASR_MODEL") ?? "latest_long";
 
-  // Определение языка можно выключить одной переменной окружения, не
-  // трогая код. Оно нужно на всякий случай: alternativeLanguageCodes у
-  // Google описан как рассчитанный на короткие реплики ("voice command and
-  // voice search"), а фраза раунда — абзац. Если окажется, что на наших
-  // записях он портит обычное распознавание, выключение вернёт прежнее
-  // поведение, а проверка «не тот язык» продолжит работать по письменности
-  // (definitelyNotLanguage).
-  const detectionEnabled = (Deno.env.get("ASR_DETECT_LANGUAGE") ?? "1") !== "0";
-  const alternatives = !detectionEnabled ? [] : alternativeLanguages
-    .filter((code) => code !== languageCode && isKnownLanguage(code))
-    .slice(0, 3)
-    .map(bcp47For);
-
   const meta = {
     provider: "google",
     model,
     language: bcp47For(languageCode),
-    alternative_languages: alternatives,
     audio_bytes: audio.byteLength,
   };
   const startedAt = Date.now();
@@ -67,17 +52,17 @@ export async function transcribeGoogle(
         //
         // Раньше сюда уходил только целевой язык, и это была не настройка
         // качества, а жёсткое ограничение: Google обязан выдать текст на
-        // заданном языке и ничего другого выдать не может. Игрок,
-        // прочитавший фразу задания вслух вместо перевода, получал не
-        // «не тот язык», а набор целевых слов, похожих по звучанию на его
-        // родные, — и судья разбирал эту бессмыслицу всерьёз.
+        // заданном языке и ничего другого выдать не может — это здесь
+        // ЖЕЛАЕМОЕ поведение, а не ограничение.
         //
-        // Теперь родной язык игрока идёт альтернативой, и провайдер сам
-        // сообщает в ответе, что он в итоге услышал (results[].languageCode).
-        // Целевой язык остаётся ОСНОВНЫМ: он ожидаемый, а Google прямо
-        // рекомендует держать список альтернатив минимальным — чем их
-        // больше, тем чаще он ошибается с выбором.
-        ...(alternatives.length > 0 ? { alternativeLanguageCodes: alternatives } : {}),
+        // Какое-то время рядом стоял alternativeLanguageCodes с родным
+        // языком игрока, чтобы ловить «прочитал задание вслух вместо
+        // перевода». От этого отказались: распознаватель, которому дали
+        // выбор, слышит речь неносителя заметно хуже и путает акцент с
+        // другим языком, а цена ошибки — «не тот язык» за правильный
+        // ответ. Игрок и так знает, на каком языке от него ждут ответа;
+        // распознаватель слушает ровно этот язык, а защита от чтения
+        // задания вслух строится отдельно.
         model,
         // useEnhanced здесь НЕТ намеренно, не забыли. Улучшенные модели у
         // Google — это ровно две, phone_call и video; для latest_long

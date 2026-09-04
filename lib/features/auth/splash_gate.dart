@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../core/app_locale.dart';
+import '../../core/start_destination.dart';
 import '../../core/supabase_client.dart';
 
 /// Куда попасть при холодном старте: не вошёл -> /login; вошёл, но пары
@@ -33,24 +34,13 @@ class _SplashGateState extends State<SplashGate> {
     }
 
     try {
-      final languages = await supabase
-          .from('user_languages')
-          .select('id, placement_done')
-          .eq('user_id', session.user.id)
-          .eq('role', 'learning')
-          .limit(1);
+      final destination = await resolveStartDestination();
       // Язык интерфейса читается из профиля здесь, а не только на старте
       // main(): при первом входе на новом устройстве сессии в момент
       // main() ещё нет, и серверное значение прочитать было неоткуда.
       await AppLocale.refreshFromServer();
       if (!mounted) return;
-      if (languages.isEmpty) {
-        context.go('/onboarding');
-      } else if (languages.first['placement_done'] == false) {
-        context.go('/level-select');
-      } else {
-        context.go('/arena');
-      }
+      context.go(destination.route);
     } catch (_) {
       if (mounted) context.go('/onboarding');
     }

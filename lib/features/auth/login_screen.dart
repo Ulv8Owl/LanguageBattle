@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import '../../core/app_locale.dart';
+import '../../core/start_destination.dart';
 import '../../core/supabase_client.dart';
 
 class LoginScreen extends StatefulWidget {
@@ -37,13 +39,15 @@ class _LoginScreenState extends State<LoginScreen> {
         password: _passwordController.text,
       );
       if (!mounted) return;
-      final languages = await supabase
-          .from('user_languages')
-          .select('id')
-          .eq('user_id', currentUserId)
-          .limit(1);
+      // Куда идти дальше, решает общая функция, а не этот экран: иначе
+      // вход по паролю снова разойдётся с холодным стартом и пропустит
+      // шаг регистрации (см. lib/core/start_destination.dart).
+      final destination = await resolveStartDestination();
+      // Язык интерфейса лежит в профиле — до входа его прочитать было
+      // неоткуда.
+      await AppLocale.refreshFromServer();
       if (!mounted) return;
-      context.go(languages.isEmpty ? '/onboarding' : '/arena');
+      context.go(destination.route);
     } on AuthException catch (e) {
       setState(() => _error = e.message);
     } catch (e) {

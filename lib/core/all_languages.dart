@@ -75,6 +75,11 @@ class LanguageInfo {
   /// дописывают «язык» после названия.
   final String accusative;
 
+  /// Как назвать речь на этом языке: «английской речи», «речи на хинди».
+  /// Готовая форма, а не склонение на лету, — см. recognisingSpeechLabel
+  /// в languages.dart: у несклоняемых названий прилагательного нет вовсе.
+  final String speech;
+
   /// Флаг для плашек языковых пар и карточек игроков. Привязка языка к
   /// одной стране всегда условна — у английского, испанского,
   /// португальского и арабского стран много; берём страну происхождения,
@@ -86,6 +91,7 @@ class LanguageInfo {
   const LanguageInfo({
     required this.endonym,
     required this.accusative,
+    required this.speech,
     required this.flag,
     required this.scripts,
   });
@@ -94,42 +100,42 @@ class LanguageInfo {
 /// 32 языка: 12 самых изучаемых + крупнейшие рынки носителей + Европа.
 const Map<String, LanguageInfo> allLanguages = {
   // --- Эшелон A: топ-12 изучаемых в мире и крупнейшие рынки ---
-  'en': LanguageInfo(endonym: 'English', accusative: 'английский', flag: '🇬🇧', scripts: [Script.latin]),
-  'es': LanguageInfo(endonym: 'Español', accusative: 'испанский', flag: '🇪🇸', scripts: [Script.latin]),
-  'zh': LanguageInfo(endonym: '中文', accusative: 'китайский', flag: '🇨🇳', scripts: [Script.han]),
-  'hi': LanguageInfo(endonym: 'हिन्दी', accusative: 'хинди', flag: '🇮🇳', scripts: [Script.devanagari]),
-  'ar': LanguageInfo(endonym: 'العربية', accusative: 'арабский', flag: '🇸🇦', scripts: [Script.arabic]),
-  'pt': LanguageInfo(endonym: 'Português', accusative: 'португальский', flag: '🇵🇹', scripts: [Script.latin]),
-  'ru': LanguageInfo(endonym: 'Русский', accusative: 'русский', flag: '🇷🇺', scripts: [Script.cyrillic]),
-  'fr': LanguageInfo(endonym: 'Français', accusative: 'французский', flag: '🇫🇷', scripts: [Script.latin]),
-  'de': LanguageInfo(endonym: 'Deutsch', accusative: 'немецкий', flag: '🇩🇪', scripts: [Script.latin]),
-  'ja': LanguageInfo(endonym: '日本語', accusative: 'японский', flag: '🇯🇵', scripts: [Script.kana, Script.han]),
-  'ko': LanguageInfo(endonym: '한국어', accusative: 'корейский', flag: '🇰🇷', scripts: [Script.hangul]),
-  'it': LanguageInfo(endonym: 'Italiano', accusative: 'итальянский', flag: '🇮🇹', scripts: [Script.latin]),
+  'en': LanguageInfo(endonym: 'English', accusative: 'английский', speech: 'английской речи', flag: '🇬🇧', scripts: [Script.latin]),
+  'es': LanguageInfo(endonym: 'Español', accusative: 'испанский', speech: 'испанской речи', flag: '🇪🇸', scripts: [Script.latin]),
+  'zh': LanguageInfo(endonym: '中文', accusative: 'китайский', speech: 'китайской речи', flag: '🇨🇳', scripts: [Script.han]),
+  'hi': LanguageInfo(endonym: 'हिन्दी', accusative: 'хинди', speech: 'речи на хинди', flag: '🇮🇳', scripts: [Script.devanagari]),
+  'ar': LanguageInfo(endonym: 'العربية', accusative: 'арабский', speech: 'арабской речи', flag: '🇸🇦', scripts: [Script.arabic]),
+  'pt': LanguageInfo(endonym: 'Português', accusative: 'португальский', speech: 'португальской речи', flag: '🇵🇹', scripts: [Script.latin]),
+  'ru': LanguageInfo(endonym: 'Русский', accusative: 'русский', speech: 'русской речи', flag: '🇷🇺', scripts: [Script.cyrillic]),
+  'fr': LanguageInfo(endonym: 'Français', accusative: 'французский', speech: 'французской речи', flag: '🇫🇷', scripts: [Script.latin]),
+  'de': LanguageInfo(endonym: 'Deutsch', accusative: 'немецкий', speech: 'немецкой речи', flag: '🇩🇪', scripts: [Script.latin]),
+  'ja': LanguageInfo(endonym: '日本語', accusative: 'японский', speech: 'японской речи', flag: '🇯🇵', scripts: [Script.kana, Script.han]),
+  'ko': LanguageInfo(endonym: '한국어', accusative: 'корейский', speech: 'корейской речи', flag: '🇰🇷', scripts: [Script.hangul]),
+  'it': LanguageInfo(endonym: 'Italiano', accusative: 'итальянский', speech: 'итальянской речи', flag: '🇮🇹', scripts: [Script.latin]),
 
   // --- Эшелон B: большие базы носителей и растущие мобильные рынки ---
-  'id': LanguageInfo(endonym: 'Bahasa Indonesia', accusative: 'индонезийский', flag: '🇮🇩', scripts: [Script.latin]),
-  'tr': LanguageInfo(endonym: 'Türkçe', accusative: 'турецкий', flag: '🇹🇷', scripts: [Script.latin]),
-  'vi': LanguageInfo(endonym: 'Tiếng Việt', accusative: 'вьетнамский', flag: '🇻🇳', scripts: [Script.latin]),
-  'pl': LanguageInfo(endonym: 'Polski', accusative: 'польский', flag: '🇵🇱', scripts: [Script.latin]),
-  'nl': LanguageInfo(endonym: 'Nederlands', accusative: 'нидерландский', flag: '🇳🇱', scripts: [Script.latin]),
-  'th': LanguageInfo(endonym: 'ไทย', accusative: 'тайский', flag: '🇹🇭', scripts: [Script.thai]),
-  'uk': LanguageInfo(endonym: 'Українська', accusative: 'украинский', flag: '🇺🇦', scripts: [Script.cyrillic]),
-  'fa': LanguageInfo(endonym: 'فارسی', accusative: 'персидский', flag: '🇮🇷', scripts: [Script.arabic]),
-  'bn': LanguageInfo(endonym: 'বাংলা', accusative: 'бенгальский', flag: '🇧🇩', scripts: [Script.bengali]),
-  'ur': LanguageInfo(endonym: 'اردو', accusative: 'урду', flag: '🇵🇰', scripts: [Script.arabic]),
+  'id': LanguageInfo(endonym: 'Bahasa Indonesia', accusative: 'индонезийский', speech: 'индонезийской речи', flag: '🇮🇩', scripts: [Script.latin]),
+  'tr': LanguageInfo(endonym: 'Türkçe', accusative: 'турецкий', speech: 'турецкой речи', flag: '🇹🇷', scripts: [Script.latin]),
+  'vi': LanguageInfo(endonym: 'Tiếng Việt', accusative: 'вьетнамский', speech: 'вьетнамской речи', flag: '🇻🇳', scripts: [Script.latin]),
+  'pl': LanguageInfo(endonym: 'Polski', accusative: 'польский', speech: 'польской речи', flag: '🇵🇱', scripts: [Script.latin]),
+  'nl': LanguageInfo(endonym: 'Nederlands', accusative: 'нидерландский', speech: 'нидерландской речи', flag: '🇳🇱', scripts: [Script.latin]),
+  'th': LanguageInfo(endonym: 'ไทย', accusative: 'тайский', speech: 'тайской речи', flag: '🇹🇭', scripts: [Script.thai]),
+  'uk': LanguageInfo(endonym: 'Українська', accusative: 'украинский', speech: 'украинской речи', flag: '🇺🇦', scripts: [Script.cyrillic]),
+  'fa': LanguageInfo(endonym: 'فارسی', accusative: 'персидский', speech: 'персидской речи', flag: '🇮🇷', scripts: [Script.arabic]),
+  'bn': LanguageInfo(endonym: 'বাংলা', accusative: 'бенгальский', speech: 'бенгальской речи', flag: '🇧🇩', scripts: [Script.bengali]),
+  'ur': LanguageInfo(endonym: 'اردو', accusative: 'урду', speech: 'речи на урду', flag: '🇵🇰', scripts: [Script.arabic]),
 
   // --- Эшелон C: остальная Европа и Филиппины ---
-  'sv': LanguageInfo(endonym: 'Svenska', accusative: 'шведский', flag: '🇸🇪', scripts: [Script.latin]),
-  'no': LanguageInfo(endonym: 'Norsk', accusative: 'норвежский', flag: '🇳🇴', scripts: [Script.latin]),
-  'da': LanguageInfo(endonym: 'Dansk', accusative: 'датский', flag: '🇩🇰', scripts: [Script.latin]),
-  'fi': LanguageInfo(endonym: 'Suomi', accusative: 'финский', flag: '🇫🇮', scripts: [Script.latin]),
-  'cs': LanguageInfo(endonym: 'Čeština', accusative: 'чешский', flag: '🇨🇿', scripts: [Script.latin]),
-  'el': LanguageInfo(endonym: 'Ελληνικά', accusative: 'греческий', flag: '🇬🇷', scripts: [Script.greek]),
-  'he': LanguageInfo(endonym: 'עברית', accusative: 'иврит', flag: '🇮🇱', scripts: [Script.hebrew]),
-  'ro': LanguageInfo(endonym: 'Română', accusative: 'румынский', flag: '🇷🇴', scripts: [Script.latin]),
-  'hu': LanguageInfo(endonym: 'Magyar', accusative: 'венгерский', flag: '🇭🇺', scripts: [Script.latin]),
-  'tl': LanguageInfo(endonym: 'Tagalog', accusative: 'тагальский', flag: '🇵🇭', scripts: [Script.latin]),
+  'sv': LanguageInfo(endonym: 'Svenska', accusative: 'шведский', speech: 'шведской речи', flag: '🇸🇪', scripts: [Script.latin]),
+  'no': LanguageInfo(endonym: 'Norsk', accusative: 'норвежский', speech: 'норвежской речи', flag: '🇳🇴', scripts: [Script.latin]),
+  'da': LanguageInfo(endonym: 'Dansk', accusative: 'датский', speech: 'датской речи', flag: '🇩🇰', scripts: [Script.latin]),
+  'fi': LanguageInfo(endonym: 'Suomi', accusative: 'финский', speech: 'финской речи', flag: '🇫🇮', scripts: [Script.latin]),
+  'cs': LanguageInfo(endonym: 'Čeština', accusative: 'чешский', speech: 'чешской речи', flag: '🇨🇿', scripts: [Script.latin]),
+  'el': LanguageInfo(endonym: 'Ελληνικά', accusative: 'греческий', speech: 'греческой речи', flag: '🇬🇷', scripts: [Script.greek]),
+  'he': LanguageInfo(endonym: 'עברית', accusative: 'иврит', speech: 'речи на иврите', flag: '🇮🇱', scripts: [Script.hebrew]),
+  'ro': LanguageInfo(endonym: 'Română', accusative: 'румынский', speech: 'румынской речи', flag: '🇷🇴', scripts: [Script.latin]),
+  'hu': LanguageInfo(endonym: 'Magyar', accusative: 'венгерский', speech: 'венгерской речи', flag: '🇭🇺', scripts: [Script.latin]),
+  'tl': LanguageInfo(endonym: 'Tagalog', accusative: 'тагальский', speech: 'тагальской речи', flag: '🇵🇭', scripts: [Script.latin]),
 };
 
 /// Название языка для интерфейса, с честным запасным вариантом: код языка

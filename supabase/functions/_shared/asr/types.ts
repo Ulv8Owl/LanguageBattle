@@ -44,9 +44,12 @@ export interface TranscriptionResult {
  */
 export type AsrProvider = (
   audio: Uint8Array,
+  /**
+   * Язык, на котором провайдер ОБЯЗАН распознавать, — тот, на который
+   * игрок сейчас переводит. Не подсказка и не предпочтение: определения
+   * языка в игре нет намеренно, см. transcribeAudio в index.ts.
+   */
   languageCode: string,
-  /** Родной язык игрока (и другие возможные) — не все провайдеры его используют. */
-  alternativeLanguages: string[],
   apiKey: string,
   hintPhrases: string[],
   timeoutMs: number,

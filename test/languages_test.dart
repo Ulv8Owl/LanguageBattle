@@ -13,18 +13,20 @@ void main() {
     expect(translateToLabel('de'), 'Переведи на немецкий:');
   });
 
-  test('язык вне реестра не роняет подпись', () {
+  test('язык вне реестра не роняет подписи', () {
     expect(translateToLabel('xx'), 'Переведи на изучаемый язык:');
-    expect(wrongLanguageNote('xx'), 'Сообщение выше нужно перевести на изучаемый язык.');
+    expect(recognisingSpeechLabel('xx'), 'Распознавание речи');
   });
 
-  test('несклоняемые языки читаются без слова «язык» после названия', () {
-    // «на хинди язык» — то, что получалось бы, если дописывать слово
-    // «язык» после названия, как было в первой версии этой подписи.
-    expect(wrongLanguageNote('hi'), 'Сообщение выше нужно перевести на хинди.');
-    expect(wrongLanguageNote('ur'), 'Сообщение выше нужно перевести на урду.');
-    expect(wrongLanguageNote('he'), 'Сообщение выше нужно перевести на иврит.');
-    expect(wrongLanguageNote('en'), 'Сообщение выше нужно перевести на английский.');
+  test('подпись распознавания читается на любом языке', () {
+    expect(recognisingSpeechLabel('en'), 'Распознавание английской речи');
+    expect(recognisingSpeechLabel('ru'), 'Распознавание русской речи');
+    // У несклоняемых названий прилагательного нет — форма другая, но
+    // читается так же правильно. Ради этих трёх случаев форма и хранится
+    // готовой, а не собирается по шаблону.
+    expect(recognisingSpeechLabel('hi'), 'Распознавание речи на хинди');
+    expect(recognisingSpeechLabel('ur'), 'Распознавание речи на урду');
+    expect(recognisingSpeechLabel('he'), 'Распознавание речи на иврите');
   });
 
   test('в реестре 32 языка, каждый заполнен целиком', () {
@@ -32,6 +34,12 @@ void main() {
     for (final entry in allLanguages.entries) {
       expect(entry.value.endonym.trim(), isNotEmpty, reason: entry.key);
       expect(entry.value.accusative.trim(), isNotEmpty, reason: entry.key);
+      expect(entry.value.speech.trim(), isNotEmpty, reason: entry.key);
+      // Подпись подставляется как «Распознавание <speech>», поэтому форма
+      // обязана быть в родительном падеже: либо «<какой-то>ой речи», либо
+      // «речи на <языке>» у несклоняемых. Иначе получится «Распознавание
+      // английская речь».
+      expect(entry.value.speech, contains('речи'), reason: entry.key);
       expect(entry.value.flag.trim(), isNotEmpty, reason: entry.key);
       expect(entry.value.scripts, isNotEmpty, reason: entry.key);
     }

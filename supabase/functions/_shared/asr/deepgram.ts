@@ -21,49 +21,33 @@ import { empty, failed, fetchWithTimeout, type TranscribedWord, type Transcripti
 export async function transcribeDeepgram(
   audio: Uint8Array,
   languageCode: string,
-  /**
-   * Здесь не используется, и это осознанно. Deepgram определяет язык
-   * сам (detect_language=true) и списка кандидатов не требует; параметр
-   * оставлен, чтобы у всех провайдеров была одна сигнатура — Google без
-   * него определять язык не умеет.
-   */
-  _alternativeLanguages: string[],
   apiKey: string,
   hintPhrases: string[],
   timeoutMs: number,
 ): Promise<TranscriptionResult> {
   const baseUrl = Deno.env.get("ASR_BASE_URL") ?? "https://api.deepgram.com/v1";
   const model = Deno.env.get("ASR_MODEL") ?? "nova-3";
-  const detectionWanted = (Deno.env.get("ASR_DETECT_LANGUAGE") ?? "1") !== "0";
 
   /**
-   * Запрос собирается двумя способами, и это не дублирование, а страховка.
+   * Язык задаётся ЖЁСТКО и определение языка не запрашивается вовсе.
    *
-   * detect=false — минимальный запрос, который заведомо принимается:
-   * модель и жёстко заданный язык, ровно как в примере из документации
-   * Deepgram. detect=true — он же плюс определение языка.
+   * Раньше здесь стоял detect_language=true, и это вредило дважды. Во-первых,
+   * распознаватель, которому не сказали язык, слышит речь неносителя хуже:
+   * фраза «I need a new phone. My old one works badly» возвращалась как
+   * «Minita a New Phone My Old Bad Work». Во-вторых, на той же записи
+   * Deepgram объявлял языком русский — и игра засчитывала игроку «не тот
+   * язык» за правильный ответ на правильном языке.
    *
-   * Определение языка — вещь полезная, но НЕ обязательная: без него игра
-   * работает, без распознавания — нет. Поэтому если провайдер отверг
-   * запрос с определением (4xx — «такого сочетания параметров нет»), мы
-   * тут же повторяем минимальный. Расплата — молчание про «не тот язык»
-   * до тех пор, пока сработает проверка по письменности; альтернатива —
-   * полностью неработающее распознавание, что несравнимо хуже.
+   * Игрок и так знает, на какой язык переводит: задание прямо это говорит.
+   * Значит, и распознавателю незачем гадать — он должен слушать РОВНО тот
+   * язык, на котором от игрока ждут ответа. Защита от «прочитал задание
+   * вслух вместо перевода» строится отдельно и не через определение языка.
    */
-  const buildParams = (detect: boolean): URLSearchParams => {
+  const buildParams = (): URLSearchParams => {
     const params = new URLSearchParams();
     params.set("model", model);
     params.set("punctuate", "true");
-    if (detect) {
-      // Именно detect_language=true — задокументированная форма. Список
-      // языков (повторяющийся detect_language=en&detect_language=ru) в
-      // документации тоже описан, но поддержан не всеми моделями, а у
-      // nova-3 параметр language вообще принимает только en и multi.
-      // Ставить на этом распознавание всей игры нельзя.
-      params.set("detect_language", "true");
-    } else {
-      params.set("language", languageCode);
-    }
+    params.set("language", languageCode);
     // keyterm по умолчанию выключен: у nova-3 он только для английского и
     // тарифицируется отдельно, а языков в игре будет несколько десятков.
     if ((Deno.env.get("ASR_KEYTERMS") ?? "0") === "1" && languageCode === "en") {
@@ -85,33 +69,15 @@ export async function transcribeDeepgram(
       body: audio,
     }, budgetMs);
 
-  let detect = detectionWanted;
-  let res = await call(buildParams(detect), timeoutMs);
-  let retriedWithoutDetection = false;
-  let firstError = "";
-
-  // Повторяем ТОЛЬКО на 400 — «мы прислали не те параметры». 401 (ключ),
-  // 402 (деньги), 429 (лимит) и 5xx определением языка не лечатся: повтор
-  // там сжёг бы вторую попытку впустую и, что хуже, спрятал настоящую
-  // причину за успехом или за чужой ошибкой.
-  if (!res.ok && detect && res.status === 400) {
-    firstError = `${res.status}: ${(await res.text().catch(() => "")).slice(0, 300)}`;
-    console.error("asr/deepgram: отверг запрос с определением языка,", firstError);
-    detect = false;
-    retriedWithoutDetection = true;
-    const leftMs = timeoutMs - (Date.now() - startedAt);
-    // Меньше трёх секунд на вторую попытку — уже не попытка, а гарантия
-    // таймаута; в этом случае честнее вернуть исходную ошибку.
-    if (leftMs >= 3_000) res = await call(buildParams(false), leftMs);
-  }
+  // Один запрос, одна форма. Повторной попытки «без определения языка»
+  // больше нет — определения языка нет вообще, а значит нет и параметра,
+  // на котором Deepgram мог бы споткнуться.
+  const res = await call(buildParams(), timeoutMs);
 
   const meta = {
     provider: "deepgram",
     model,
     language: languageCode,
-    detect_language: detect,
-    retried_without_detection: retriedWithoutDetection,
-    ...(firstError ? { detection_rejected_with: firstError } : {}),
     keyterms: (Deno.env.get("ASR_KEYTERMS") ?? "0") === "1" && languageCode === "en"
       ? hintPhrases.length
       : 0,

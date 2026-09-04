@@ -28,7 +28,7 @@ import {
   type JudgeVerbosity,
   NEUTRAL_SCORE,
 } from "../_shared/evaluateGrammar.ts";
-import { definitelyNotLanguage, transcribeAudio } from "../_shared/asr/index.ts";
+import { transcribeAudio } from "../_shared/asr/index.ts";
 
 /**
  * Лига говорящего приравнена к уровню CEFR (см. supabase/migrations/0023 —
@@ -57,54 +57,27 @@ const EMPTY_TRANSCRIPT_SCORE = 1;
 type TranscriptStatus = "pending" | "ok" | "empty" | "failed";
 
 /** Статусы работы судьи — CHECK у voice_recordings (миграции 0014, 0024). */
-type JudgeStatus = "pending" | "ok" | "degraded" | "skipped" | "wrong_language";
+type JudgeStatus = "pending" | "ok" | "degraded" | "skipped";
 
 /** Балл за ответ не на том языке: задание не выполнено. */
-const WRONG_LANGUAGE_SCORE = 1;
 
 /**
- * Игрок ответил не на том языке, на который просили перевести?
+ * Определения языка в пайплайне НЕТ, и это осознанное решение.
  *
- * Отвечает ТОЛЬКО на этот вопрос — не «что за язык», а «точно ли не
- * целевой». Обе проверки стоят доли миллисекунды и никуда не ходят.
+ * Здесь стояла проверка «ответил не на том языке»: распознавателю давали
+ * родной язык игрока вторым кандидатом, и если он объявлял, что услышал
+ * именно родной, задание считалось невыполненным. На практике это ловило
+ * не тех: распознаватель, которому дали выбор языка, слышит речь
+ * неносителя хуже и принимает сильный акцент за другой язык. Правильный
+ * английский ответ возвращался как «Minita a New Phone My Old Bad Work» с
+ * вердиктом «услышан русский» — то есть игрок получал 1 балл за верный
+ * ответ на верном языке.
  *
- * Признаков два, и оба намеренно осторожны — ЛОЖНОЕ обвинение здесь хуже
- * пропуска. Пропустив, мы отдадим судье плохой ответ и игрок получит
- * низкий балл; обвинив зря, мы откажемся разбирать правильный ответ и
- * скажем человеку, что он говорил не на том языке, когда он говорил на
- * том. Это особенно важно теперь, когда языков в игре под сотню: чем их
- * больше, тем чаще распознаватель путает близкий язык с целевым на
- * сильном акценте, и «любой нецелевой» ловил бы такие случаи как ошибку.
- *
- * 1. Распознаватель услышал РОДНОЙ язык игрока. Это и есть тот самый
- *    случай — человек прочитал задание вслух вместо того, чтобы перевести.
- *    Проверяется именно родной язык, а не «любой нецелевой»: обвинять за
- *    то, что распознаватель перепутал целевой язык с соседним по звучанию,
- *    нельзя.
- *
- * 2. Письменность (definitelyNotLanguage). Кириллица там, где ждали
- *    английский, — не догадка, а факт, поэтому этот признак проверяется
- *    ВСЕГДА, даже когда провайдер назвал язык: если он услышал «английский»,
- *    а в тексте кириллица, прав текст.
+ * Теперь распознаватель слушает РОВНО тот язык, на который игрок
+ * переводит (см. _shared/asr/*.ts), и вопрос «а на том ли языке он
+ * говорил» пайплайну не задаётся вовсе. Защита от чтения задания вслух
+ * вместо перевода будет сделана отдельно и другим способом.
  */
-function wrongLanguage(
-  transcript: string,
-  detectedLanguage: string | null,
-  targetLanguage: string,
-  nativeLanguage: string,
-): { wrong: boolean; source: string } {
-  if (definitelyNotLanguage(transcript, targetLanguage)) {
-    return { wrong: true, source: "письменность транскрипта не та" };
-  }
-  if (
-    detectedLanguage &&
-    detectedLanguage === nativeLanguage &&
-    nativeLanguage !== targetLanguage
-  ) {
-    return { wrong: true, source: `ASR услышал родной язык игрока (${detectedLanguage})` };
-  }
-  return { wrong: false, source: "" };
-}
 
 /** Поля voice_recordings, которыми пользуется воркер. */
 /**
@@ -252,10 +225,10 @@ async function processJob(job_id: string): Promise<void> {
     // 0025), а не общий users.native_language: у полиглота с несколькими
     // родными разные пары могут быть anchored на разные из них
     // («английский от русского», «японский от китайского»), и подставлять
-    // сюда всегда один и тот же язык значило бы для части пар сравнивать
-    // не с тем языком в проверке «не тот язык» ниже. native_for бывает
-    // null у пар, не тронутых после этой миграции backfill'ом не
-    // затронул, — тогда честно откатываемся на общий родной.
+    // сюда всегда один и тот же язык значило бы объяснять ошибки на
+    // языке, которым игрок в этой паре не пользуется. native_for бывает
+    // null у пар, которых backfill миграции не затронул, — тогда честно
+    // откатываемся на общий родной.
     const { data: pair } = await supabase
       .from("user_languages")
       .select("native_for")
@@ -274,12 +247,11 @@ async function processJob(job_id: string): Promise<void> {
     }
 
     // Шаг 1 — распознавание речи.
-    const { transcript, status, debug: asrDebug, uncertainWords, detectedLanguage } =
+    const { transcript, status, debug: asrDebug, uncertainWords } =
       await resolveTranscript(
         supabase,
         recording,
         targetLanguage,
-        nativeLanguage,
         expectedPhrase,
         budgetLeft(),
       );
@@ -304,15 +276,6 @@ async function processJob(job_id: string): Promise<void> {
     let correctedText = "";
     let cleanedText = "";
 
-    // Считается один раз и до ветвления: проверка дешёвая, но вызывать её
-    // дважды в условии и в теле — верный способ однажды разойтись.
-    const languageVerdict = wrongLanguage(
-      transcript,
-      detectedLanguage,
-      targetLanguage,
-      nativeLanguage,
-    );
-
     if (status === "failed") {
       score = NEUTRAL_SCORE;
       feedback = "Не удалось распознать речь — балл выставлен нейтральным.";
@@ -323,20 +286,6 @@ async function processJob(job_id: string): Promise<void> {
       feedback = "Не удалось разобрать речь — попробуй сказать чётче и ближе к микрофону.";
       judgeStatus = "skipped";
       pipelineDebug.judge = { status: "skipped", reason: "записана тишина — судью не звали" };
-    } else if (languageVerdict.wrong) {
-      // Ответ не на том языке. Судью не зовём: разбирать грамматику
-      // русской фразы как английской бессмысленно, а ждать этого разбора
-      // игроку — впустую потраченные десятки секунд. Задание не выполнено,
-      // поэтому балл тот же, что за молчание.
-      score = WRONG_LANGUAGE_SCORE;
-      feedback = "Ответ не на том языке — фразу нужно перевести.";
-      judgeStatus = "wrong_language";
-      pipelineDebug.judge = {
-        status: "skipped",
-        reason: `не тот язык (${languageVerdict.source}) — судью не звали`,
-        detected_language: detectedLanguage,
-        target_language: targetLanguage,
-      };
     } else {
       // Лига говорящего на этом языке -> уровень CEFR (скрытая механика:
       // приравнивание лиг к A1-C2) — ограничивает только сложность текста
@@ -470,8 +419,6 @@ async function resolveTranscript(
   supabase: SupabaseClient,
   recording: VoiceRecordingRow,
   targetLanguage: string,
-  /** Родной язык игрока — уходит в ASR альтернативой (см. transcribeAudio). */
-  nativeLanguage: string,
   expectedPhrase: string,
   /** Остаток бюджета задачи — распознавание не должно его пережить. */
   budgetMs: number,
@@ -482,7 +429,6 @@ async function resolveTranscript(
   /** Слова, в которых распознавание не уверено, — судье в помощь. */
   uncertainWords: string[];
   /** Язык, который услышал распознаватель, или null, если он не сказал. */
-  detectedLanguage: string | null;
 }> {
   const existing = (recording.transcript ?? "").trim();
   if (existing.length > 0) {
@@ -496,7 +442,6 @@ async function resolveTranscript(
       uncertainWords: [],
       // Готовый транскрипт языка не помнит — дальше сработает проверка
       // по письменности.
-      detectedLanguage: null,
     };
   }
   if (recording.transcript_status === "empty" || recording.transcript_status === "failed") {
@@ -506,7 +451,6 @@ async function resolveTranscript(
       status: recording.transcript_status,
       debug: { status: recording.transcript_status, cached: true },
       uncertainWords: [],
-      detectedLanguage: null,
     };
   }
 
@@ -524,7 +468,6 @@ async function resolveTranscript(
       status: "failed",
       debug: { status: "failed", error: `не удалось скачать аудио: ${downloadErr?.message ?? downloadErr}` },
       uncertainWords: [],
-      detectedLanguage: null,
     };
   }
 
@@ -537,10 +480,6 @@ async function resolveTranscript(
     audio,
     targetLanguage,
     hintPhrases(expectedPhrase),
-    // Родной язык альтернативой: только так распознаватель может сообщить,
-    // что игрок ответил не на том языке, вместо того чтобы молча подбирать
-    // слова целевого языка под чужую речь.
-    [nativeLanguage],
     budgetMs,
   );
 
@@ -556,7 +495,6 @@ async function resolveTranscript(
       .filter((w) => w.confidence > 0 && w.confidence < 0.85)
       .map((w) => w.word)
       .slice(0, 12),
-    detectedLanguage: asr.detectedLanguage,
     };
 }
 
