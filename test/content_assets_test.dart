@@ -3,23 +3,85 @@ import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
 
-/// Проверки самих данных, а не кода: 600 фраз и 6000 слов правились
+/// Проверки самих данных, а не кода: банк фраз и 6000 слов собираются
 /// скриптами, и молча испортить их куда проще, чем заметить это на экране.
+///
+/// ФРАЗЫ проверяются в собранном виде (assets/phrases/cefr_*.json). Формат
+/// исходника (assets/cefr/*.txt) отдельно проверяет assets/cefr/validate.py,
+/// а здесь — то, что из него собралось: именно это читает приложение.
 void main() {
   const levels = ['a1', 'a2', 'b1', 'b2', 'c1', 'c2'];
+  const languages = ['en', 'ru', 'es'];
+
+  /// Сколько элементов во фразе каждого уровня: три на предложение,
+  /// предложений — по уровню (A1: 2 → 6, C2: 7 → 21).
+  const elementsPerLevel = {'a1': 6, 'a2': 9, 'b1': 12, 'b2': 15, 'c1': 18, 'c2': 21};
 
   List<Map<String, dynamic>> read(String path) =>
       (jsonDecode(File(path).readAsStringSync()) as List)
           .map((e) => Map<String, dynamic>.from(e as Map))
           .toList();
 
-  test('в каждом уровне ровно 100 фраз на трёх языках', () {
+  List<Map<String, dynamic>> elementsOf(Map<String, dynamic> phrase, String lang) =>
+      ((phrase['elements'] as Map)[lang] as List)
+          .map((e) => Map<String, dynamic>.from(e as Map))
+          .toList();
+
+  test('в каждом уровне 10 фраз на трёх языках', () {
     for (final level in levels) {
-      final phrases = read('assets/phrases/phrases_$level.json');
-      expect(phrases.length, 100, reason: level);
+      final phrases = read('assets/phrases/cefr_$level.json');
+      expect(phrases.length, 10, reason: level);
       for (final p in phrases) {
-        for (final lang in ['en', 'ru', 'es']) {
-          expect((p[lang] as String).trim(), isNotEmpty, reason: '$level/$lang');
+        for (final lang in languages) {
+          expect(elementsOf(p, lang), isNotEmpty, reason: '$level/$lang');
+        }
+      }
+    }
+  });
+
+  test('число элементов совпадает с уровнем и одинаково во всех языках', () {
+    // На этом стоит вся механика подсказок: тапнув по третьему элементу
+    // родной фразы, игрок обязан увидеть третий элемент изучаемой. Если
+    // разбиение разъедется хотя бы в одной строке, подсказка покажет
+    // чужой кусок — и заметить это на экране почти невозможно.
+    for (final level in levels) {
+      final phrases = read('assets/phrases/cefr_$level.json');
+      for (var i = 0; i < phrases.length; i++) {
+        for (final lang in languages) {
+          expect(elementsOf(phrases[i], lang).length, elementsPerLevel[level],
+              reason: '$level, фраза ${i + 1}, $lang');
+        }
+      }
+    }
+  });
+
+  test('к каждому элементу есть пояснение', () {
+    for (final level in levels) {
+      final phrases = read('assets/phrases/cefr_$level.json');
+      for (var i = 0; i < phrases.length; i++) {
+        for (final lang in languages) {
+          final explanations = (phrases[i]['explanations'] as Map)[lang] as List;
+          expect(explanations.length, elementsPerLevel[level],
+              reason: '$level, фраза ${i + 1}, $lang');
+          for (final e in explanations) {
+            expect((e as String).trim(), isNotEmpty, reason: '$level/$lang');
+          }
+        }
+      }
+    }
+  });
+
+  test('в собранных фразах не осталось служебного разделителя', () {
+    // «|» разделяет элементы в ИСХОДНИКЕ и не должен доехать ни до одного
+    // текста, который увидит игрок.
+    for (final level in levels) {
+      for (final p in read('assets/phrases/cefr_$level.json')) {
+        for (final lang in languages) {
+          for (final e in elementsOf(p, lang)) {
+            expect(e['text'] as String, isNot(contains('|')), reason: level);
+            expect(e['lead'] as String, isNot(contains('|')), reason: level);
+          }
+          expect((p['tail'] as Map)[lang] as String, isNot(contains('|')), reason: level);
         }
       }
     }
@@ -28,22 +90,12 @@ void main() {
   test('фразы не повторяются между уровнями', () {
     final all = <String>[];
     for (final level in levels) {
-      all.addAll(read('assets/phrases/phrases_$level.json').map((p) => p['en'] as String));
-    }
-    expect(all.length, 600);
-    expect(all.toSet().length, 600, reason: 'дубликаты фраз');
-  });
-
-  test('второе предложение у фраз своё, а не общее', () {
-    // Прежний банк состоял из десяти текстов, у которых второе предложение
-    // совпадало дословно: игрок каждый раунд переводил одно и то же.
-    final seconds = <String>[];
-    for (final level in levels) {
-      for (final p in read('assets/phrases/phrases_$level.json')) {
-        seconds.add((p['en'] as String).split('. ').last);
+      for (final p in read('assets/phrases/cefr_$level.json')) {
+        all.add(elementsOf(p, 'en').map((e) => e['text']).join(' '));
       }
     }
-    expect(seconds.toSet().length, seconds.length, reason: 'повторяются хвосты фраз');
+    expect(all.length, 60);
+    expect(all.toSet().length, 60, reason: 'дубликаты фраз');
   });
 
   test('в каждом уровне ровно 1000 слов с непустыми переводами', () {
@@ -51,7 +103,7 @@ void main() {
       final words = read('assets/vocab/words_$level.json');
       expect(words.length, 1000, reason: level);
       for (final w in words) {
-        for (final lang in ['en', 'ru', 'es']) {
+        for (final lang in languages) {
           expect((w[lang] as String).trim(), isNotEmpty, reason: '$level/$lang');
         }
       }
@@ -67,43 +119,21 @@ void main() {
     expect(all.toSet().length, 6000, reason: 'дубликаты слов');
   });
 
-  test('любой язык сверх en/ru/es переведён либо во ВСЕХ пунктах уровня, либо ни в одном', () {
-    // PhraseBank/FlashcardBank проверяют доступность языка по ОДНОМУ пункту
-    // (см. hasContentFor) — это дёшево, но полагается на то, что контент
+  test('слова: язык переведён либо во ВСЕХ пунктах уровня, либо ни в одном', () {
+    // FlashcardBank проверяет доступность языка по ОДНОМУ пункту (см.
+    // hasContentFor) — это дёшево, но полагается на то, что контент
     // никогда не бывает переведён наполовину. Здесь эта гарантия
-    // проверяется по-настоящему, по всем ста/тысяче пунктам, а не по
-    // одному: наполовину переведённый уровень пройдёт мимо ручной проверки,
-    // но не мимо этого теста.
+    // проверяется по-настоящему, по всей тысяче.
     for (final level in levels) {
-      for (final MapEntry(key: file, value: expectedCount) in {
-        'assets/phrases/phrases_$level.json': 100,
-        'assets/vocab/words_$level.json': 1000,
-      }.entries) {
-        final items = read(file);
-        final extraLanguages = items
-            .expand((item) => item.keys)
-            .where((k) => k != 'en' && k != 'ru' && k != 'es')
-            .toSet();
-        for (final lang in extraLanguages) {
-          final withLang = items.where((item) => (item[lang] as String?)?.trim().isNotEmpty ?? false);
-          expect(withLang.length, expectedCount, reason: '$file/$lang: переведена не вся колода');
-        }
+      final items = read('assets/vocab/words_$level.json');
+      final extraLanguages = items
+          .expand((item) => item.keys)
+          .where((k) => !languages.contains(k))
+          .toSet();
+      for (final lang in extraLanguages) {
+        final withLang = items.where((item) => (item[lang] as String?)?.trim().isNotEmpty ?? false);
+        expect(withLang.length, 1000, reason: 'words_$level/$lang: переведена не вся колода');
       }
-    }
-  });
-
-  test('первая колода уровня целиком собрана из его же фраз', () {
-    // Ради этого весь словарь и пересобирался: колода, которую игрок
-    // открывает первой, должна готовить ровно к тем фразам, что ему
-    // выпадут в его лиге.
-    for (final level in levels) {
-      final text = read('assets/phrases/phrases_$level.json')
-          .map((p) => (p['en'] as String).toLowerCase())
-          .join(' ');
-      final vocabulary = text.split(RegExp(r"[^a-z']+")).toSet();
-      final firstPack = read('assets/vocab/words_$level.json').take(100);
-      final fromPhrases = firstPack.where((w) => vocabulary.contains((w['en'] as String).toLowerCase()));
-      expect(fromPhrases.length, 100, reason: '$level: первый пак должен быть из фраз уровня');
     }
   });
 }

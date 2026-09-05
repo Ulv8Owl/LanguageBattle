@@ -1,6 +1,11 @@
 #!/usr/bin/env python3
-"""Собирает assets/phrases/phrases_<уровень>.json и
-assets/vocab/words_<уровень>.json из content/<язык>/*.txt.
+"""Собирает assets/vocab/words_<уровень>.json из content/<язык>/*.txt.
+
+ФРАЗЫ ЗДЕСЬ БОЛЬШЕ НЕ СОБИРАЮТСЯ. Их источник — датасет assets/cefr с
+разбиением на элементы и пояснениями к каждому, а собирает его отдельный
+скрипт tools/build_cefr.py. Прежние content/<язык>/phrases_*.txt удалены
+вместе с переходом: держать два источника фраз, из которых читается
+только один, — верный способ однажды поправить не тот.
 
 ЭТО ЕДИНСТВЕННЫЙ СПОСОБ ПРАВИТЬ assets/*.json — их саму руками не
 трогают, их перезаписывает этот скрипт. Формат-приёмник (JSON, ключи —
@@ -73,8 +78,8 @@ def build_one(kind: str, level: str) -> tuple[str, list[dict[str, str]]] | None:
         {lang: lines[i] for lang, lines in per_language.items()}
         for i in range(expected)
     ]
-    out_dir = REPO_ROOT / ("assets/phrases" if kind == "phrases" else "assets/vocab")
-    out_name = f"{'phrases' if kind == 'phrases' else 'words'}_{level}.json"
+    out_dir = REPO_ROOT / "assets/vocab"
+    out_name = f"{kind}_{level}.json"
     return str(out_dir / out_name), entries
 
 
@@ -93,7 +98,7 @@ def main() -> int:
 
     stale: list[str] = []
     try:
-        for kind in ("phrases", "words"):
+        for kind in ("words",):
             for level in LEVELS:
                 result = build_one(kind, level)
                 if result is None:

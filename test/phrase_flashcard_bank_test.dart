@@ -3,31 +3,91 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:language_battle/data/flashcard_bank.dart';
 import 'package:language_battle/data/phrase_bank.dart';
 
-/// PhraseEntry/FlashcardEntry раньше были тремя жёстко зашитыми полями
-/// (ru/en/es) — переход на произвольную карту ключей не должен был
-/// поменять поведение для уже существующих языков и обязан честно
-/// сигнализировать отсутствие нового.
+/// Фраза раунда теперь приходит разбитой на элементы (датасет
+/// assets/cefr), и на этом разбиении держатся сразу три вещи: подсказки
+/// («переверни элемент»), поэлементная оценка на сервере и пояснения в
+/// разборе. Проверяем именно склейку и смещения — то, чем клиент и сервер
+/// обязаны совпасть.
 void main() {
-  test('PhraseEntry.forLanguage — известный язык возвращает текст, неизвестный — null', () {
-    final entry = PhraseEntry.fromJson(const {'en': 'Hello', 'ru': 'Привет', 'es': 'Hola'});
-    expect(entry.forLanguage('en'), 'Hello');
-    expect(entry.forLanguage('ru'), 'Привет');
-    // Ключа для этого языка ещё нет в контенте — null, а не выдуманная
-    // подстановка на английский, как было в старой switch-реализации.
+  /// Кусок реального банка: первая фраза A1 в трёх языках.
+  PhraseEntry sample() => PhraseEntry.fromJson(const {
+        'elements': {
+          'en': [
+            {'lead': '', 'text': 'I get up'},
+            {'lead': ' ', 'text': 'at seven'},
+            {'lead': '. ', 'text': 'Then I make'},
+          ],
+          'ru': [
+            {'lead': '', 'text': 'Я встаю'},
+            {'lead': ' ', 'text': 'в семь'},
+            {'lead': '. ', 'text': 'Потом я делаю'},
+          ],
+        },
+        'tail': {'en': '.', 'ru': '.'},
+        'explanations': {
+          'en': ['Present Simple.', 'We use "at" with clock time.', '"Then" = after that.'],
+          'ru': ['Настоящее время.', 'Время всегда с предлогом «в».', '«Потом» = после этого.'],
+        },
+      });
+
+  test('фраза для показа собирается без разделителей', () {
+    final entry = sample();
+    expect(entry.forLanguage('en'), 'I get up at seven. Then I make.');
+    expect(entry.forLanguage('ru'), 'Я встаю в семь. Потом я делаю.');
+    // Языка нет в банке — null, а не выдуманная подстановка на английский.
     expect(entry.forLanguage('zh'), isNull);
   });
 
-  test('FlashcardEntry.forLanguage — то же самое поведение, что у PhraseEntry', () {
+  test('эталон для сервера собирается С разделителями', () {
+    // Игрок «|» не видит никогда, сервер — обязан: по ним он режет фразу
+    // на элементы и считает балл.
+    expect(sample().markedForLanguage('en'), 'I get up| at seven|. Then I make|.');
+  });
+
+  test('смещения элементов совпадают с чистой фразой', () {
+    // Тот же расчёт делает сервер (parseElements в elementScoring.ts), и
+    // именно смещениями он присылает непроизнесённые элементы. Разойдясь,
+    // клиент подсветил бы не тот кусок.
+    final entry = sample();
+    final clean = entry.forLanguage('en')!;
+    final offsets = entry.elementOffsets('en');
+    final elements = entry.elementsFor('en');
+    expect(offsets.length, elements.length);
+    for (var i = 0; i < elements.length; i++) {
+      expect(
+        clean.substring(offsets[i], offsets[i] + elements[i].text.length),
+        elements[i].text,
+        reason: 'элемент $i',
+      );
+    }
+  });
+
+  test('число элементов одинаково во всех языках — на этом стоят подсказки', () {
+    final entry = sample();
+    expect(entry.elementCount('en'), entry.elementCount('ru'));
+  });
+
+  test('пояснение берётся по номеру элемента', () {
+    final entry = sample();
+    expect(entry.explanationFor('en', 1), 'We use "at" with clock time.');
+    expect(entry.explanationFor('ru', 2), '«Потом» = после этого.');
+    // За границами списка — null, а не исключение посреди разбора.
+    expect(entry.explanationFor('en', 99), isNull);
+    expect(entry.explanationFor('zh', 0), isNull);
+  });
+
+  test('FlashcardEntry.forLanguage — прежнее поведение', () {
     final entry = FlashcardEntry.fromJson(const {'en': 'dolphin', 'ru': 'дельфин', 'es': 'delfín'});
     expect(entry.forLanguage('es'), 'delfín');
     expect(entry.forLanguage('de'), isNull);
   });
 
   test('PhraseBank.textFor не бросает на неизвестном языке — пустая строка', () {
-    // textFor — единственное место, которое звонки экранов дёргают
-    // напрямую (battle_screen/training_screen), и оно обязано остаться
-    // безопасным даже без предварительной проверки hasContentFor: пустая
-    // строка в тексте раунда — заметный, но не падающий сбой.
+    // textFor дёргают экраны напрямую, и оно обязано остаться безопасным
+    // даже без предварительной проверки hasContentFor: пустая строка в
+    // тексте раунда — заметный, но не падающий сбой.
     expect(PhraseBank.textFor(999999, 'xx'), '');
+    expect(PhraseBank.markedTextFor(999999, 'xx'), '');
+    expect(PhraseBank.elementsFor(999999, 'xx'), isEmpty);
   });
 }

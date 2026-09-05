@@ -11,6 +11,7 @@ import '../../core/languages.dart';
 import '../../core/supabase_client.dart';
 import '../../core/theme.dart';
 import '../../data/phrase_bank.dart';
+import '../../widgets/interactive_phrase.dart';
 import '../../data/player_rating.dart';
 import '../../data/voice_submission.dart';
 import '../../widgets/chrolingo_widgets.dart';
@@ -100,6 +101,29 @@ class _TrainingScreenState extends State<TrainingScreen> {
   int _roundNumber = 0;
   String? _roundId;
   String _phrase = '';
+
+  /// Сквозной индекс фразы текущего раунда: по нему разбор достаёт
+  /// элементы эталона и пояснения к ним.
+  int _phraseIndex = -1;
+
+  /// Элементы задания на родном языке (их видит игрок) и на изучаемом (их
+  /// он открывает подсказкой). Индекс в обоих списках — один и тот же
+  /// кусок смысла.
+  List<PhraseElement> _nativeElements = const [];
+  List<PhraseElement> _targetElements = const [];
+  String _nativeTail = '';
+
+  /// Какие элементы игрок открывал в этом раунде. Не убывает: перевернув
+  /// элемент обратно, перевод он уже увидел.
+  final Set<int> _revealed = {};
+
+  /// Подсказки работают только в Одиночной Игре. На проверке уровня они
+  /// выключены: подсмотрев всю фразу, игрок подтвердил бы любой уровень.
+  bool get _hintsAllowed => !widget.isPlacement;
+
+  /// Доля подсмотренного — множитель награды на сервере.
+  double get _hintRatio =>
+      _nativeElements.isEmpty ? 0 : _revealed.length / _nativeElements.length;
 
   List<Map<String, dynamic>> _firstAttemptErrors = [];
 
@@ -251,7 +275,10 @@ class _TrainingScreenState extends State<TrainingScreen> {
     // В базу пишем вариант на изучаемом языке: это то, что игрок должен
     // произнести, и именно он идёт подсказкой распознавателю речи.
     final promptText = PhraseBank.textFor(phraseIndex, _nativeLanguage);
-    final expected = PhraseBank.textFor(phraseIndex, _targetLanguage);
+    // На сервер уходит эталон С разделителями «|»: воркер оценивает ответ
+    // поэлементно и должен видеть ровно те границы, что видел игрок.
+    // Игроку эти разделители не показываются никогда.
+    final expected = PhraseBank.markedTextFor(phraseIndex, _targetLanguage);
     final row = await supabase
         .from('training_rounds')
         .insert({'session_id': sessionId, 'round_number': n, 'generated_phrase': expected})
@@ -262,6 +289,11 @@ class _TrainingScreenState extends State<TrainingScreen> {
       _roundNumber = n;
       _roundId = row['id'] as String;
       _phrase = promptText;
+      _phraseIndex = phraseIndex;
+      _nativeElements = PhraseBank.elementsFor(phraseIndex, _nativeLanguage);
+      _targetElements = PhraseBank.elementsFor(phraseIndex, _targetLanguage);
+      _nativeTail = PhraseBank.entry(phraseIndex)?.tailFor(_nativeLanguage) ?? '';
+      _revealed.clear();
       _firstAttemptErrors = [];
       _firstAttempt = null;
       _secondAttempt = null;
@@ -515,6 +547,10 @@ class _TrainingScreenState extends State<TrainingScreen> {
       try {
         final reward = await supabase.rpc('claim_training_reward', params: {
           'p_training_round_id': roundId,
+          // Доля подсказок — множитель награды. Считает её клиент, потому
+          // что подсказка это действие в интерфейсе, которого сервер не
+          // видит; см. комментарий у training_rounds.hint_ratio.
+          'p_hint_ratio': _hintRatio,
         });
         if (reward is Map && reward['coins'] != null) {
           coins = (reward['coins'] as num).toInt();
@@ -596,6 +632,7 @@ class _TrainingScreenState extends State<TrainingScreen> {
     _history.add(_CompletedRound(
       roundNumber: _roundNumber,
       phrase: _phrase,
+      phraseIndex: _phraseIndex,
       errors: _firstAttemptErrors,
       score: _finalScore ?? 0,
       firstAttempt: _firstAttempt,
@@ -777,12 +814,16 @@ class _TrainingScreenState extends State<TrainingScreen> {
       // иначе, шагнув «Дальше», игрок терял и свои голосовые, и разбор.
       items.addAll(_voiceBubble(done.firstAudio));
       items.add(_ErrorReport(
-          errors: done.errors, attempt: done.firstAttempt, targetLanguage: _targetLanguage));
+          errors: done.errors,
+          attempt: done.firstAttempt,
+          phraseIndex: done.phraseIndex,
+          targetLanguage: _targetLanguage));
       items.addAll(_debugPanels('Раунд ${done.roundNumber}, попытка 1', done.firstAttempt));
       items.addAll(_voiceBubble(done.secondAudio, score: done.score));
       items.add(_ErrorReport(
           errors: const [],
           attempt: done.secondAttempt,
+          phraseIndex: done.phraseIndex,
           targetLanguage: _targetLanguage,
           isSecondAttempt: true));
       items.add(_ScoreCard(score: done.score, coins: null, attempt: done.secondAttempt));
@@ -819,6 +860,16 @@ class _TrainingScreenState extends State<TrainingScreen> {
       total: _totalRounds,
       text: _phrase,
       targetLanguage: _targetLanguage,
+      nativeElements: _nativeElements,
+      targetElements: _targetElements,
+      nativeTail: _nativeTail,
+      // Подсказка имеет смысл, только пока игрок ещё не ответил: после
+      // отправки записи открывать элементы уже не за чем, а награда за
+      // раунд к этому моменту посчитана.
+      interactive: _hintsAllowed &&
+          (_stage == _Stage.awaitingFirst || _stage == _Stage.awaitingSecond),
+      revealed: _revealed,
+      onReveal: (index) => setState(() => _revealed.add(index)),
     ));
 
     switch (_stage) {
@@ -838,6 +889,7 @@ class _TrainingScreenState extends State<TrainingScreen> {
         items.add(_ErrorReport(
             errors: _firstAttemptErrors,
             attempt: _firstAttempt,
+            phraseIndex: _phraseIndex,
             targetLanguage: _targetLanguage));
         items.addAll(_debugPanels('Попытка 1', _firstAttempt));
         break;
@@ -846,6 +898,7 @@ class _TrainingScreenState extends State<TrainingScreen> {
         items.add(_ErrorReport(
             errors: _firstAttemptErrors,
             attempt: _firstAttempt,
+            phraseIndex: _phraseIndex,
             targetLanguage: _targetLanguage));
         items.addAll(_debugPanels('Попытка 1', _firstAttempt));
         items.addAll(_voiceBubble(_secondAttemptAudio));
@@ -862,12 +915,14 @@ class _TrainingScreenState extends State<TrainingScreen> {
         items.add(_ErrorReport(
             errors: _firstAttemptErrors,
             attempt: _firstAttempt,
+            phraseIndex: _phraseIndex,
             targetLanguage: _targetLanguage));
         items.addAll(_debugPanels('Попытка 1', _firstAttempt));
         items.addAll(_voiceBubble(_secondAttemptAudio, score: _finalScore));
         items.add(_ErrorReport(
             errors: const [],
             attempt: _secondAttempt,
+            phraseIndex: _phraseIndex,
             targetLanguage: _targetLanguage,
             isSecondAttempt: true));
         items.add(_ScoreCard(score: _finalScore ?? 0, coins: _earnedCoins, attempt: _secondAttempt));
@@ -884,6 +939,9 @@ class _TrainingScreenState extends State<TrainingScreen> {
 class _CompletedRound {
   final int roundNumber;
   final String phrase;
+
+  /// Сквозной индекс фразы — по нему разбор достаёт элементы и пояснения.
+  final int phraseIndex;
   final List<Map<String, dynamic>> errors;
   final int score;
   final RecordingOutcome? firstAttempt;
@@ -899,6 +957,7 @@ class _CompletedRound {
   const _CompletedRound({
     required this.roundNumber,
     required this.phrase,
+    required this.phraseIndex,
     required this.errors,
     required this.score,
     required this.firstAttempt,
@@ -911,17 +970,36 @@ class _CompletedRound {
 class _AiSay extends StatelessWidget {
   final int roundNumber;
   final int total;
+
+  /// Задание целиком — запасной вариант, когда элементов нет (фраза
+  /// старого формата или уже сыгранный раунд в ленте).
   final String text;
 
   /// Язык, на котором нужно ОТВЕТИТЬ. Сам текст показан на родном языке —
   /// без этой подписи непонятно, повторить его или перевести.
   final String targetLanguage;
 
+  /// Элементы задания. Пустой список — показываем обычный текст.
+  final List<PhraseElement> nativeElements;
+  final List<PhraseElement> targetElements;
+  final String nativeTail;
+
+  /// Можно ли подсматривать перевод элементов.
+  final bool interactive;
+  final Set<int> revealed;
+  final ValueChanged<int>? onReveal;
+
   const _AiSay({
     required this.roundNumber,
     required this.total,
     required this.text,
     required this.targetLanguage,
+    this.nativeElements = const [],
+    this.targetElements = const [],
+    this.nativeTail = '',
+    this.interactive = false,
+    this.revealed = const {},
+    this.onReveal,
   });
 
   @override
@@ -955,7 +1033,24 @@ class _AiSay extends StatelessWidget {
                     style: AppFonts.mono(fontSize: 10, weight: FontWeight.w700, color: AppColors.gold),
                   ),
                   const SizedBox(height: 5),
-                  Text(text, style: const TextStyle(color: AppColors.cream, height: 1.4)),
+                  if (nativeElements.isEmpty)
+                    Text(text, style: const TextStyle(color: AppColors.cream, height: 1.4))
+                  else
+                    InteractivePhrase(
+                      nativeElements: nativeElements,
+                      targetElements: targetElements,
+                      nativeTail: nativeTail,
+                      interactive: interactive,
+                      revealed: revealed,
+                      onReveal: onReveal,
+                    ),
+                  // Полоска подсказок только там, где подсказки возможны:
+                  // в ленте уже сыгранного раунда она сообщала бы о том,
+                  // на что игрок повлиять не может.
+                  if (interactive) ...[
+                    const SizedBox(height: 10),
+                    HintMeter(revealed: revealed.length, total: nativeElements.length),
+                  ],
                 ],
               ),
             ),
@@ -998,22 +1093,65 @@ class _ErrorReport extends StatelessWidget {
   final List<Map<String, dynamic>> errors;
   final RecordingOutcome? attempt;
 
+  /// Сквозной индекс фразы раунда: по нему берутся элементы эталона и
+  /// пояснение к каждому из них. -1 — фраза неизвестна (старый раунд).
+  final int phraseIndex;
+
   /// Вторая попытка: показываем «Голосовое» и «Разбор» с подсветкой, но без
   /// текстовых объяснений — их для неё судья и не генерирует (режим
   /// marksOnly в evaluateGrammar.ts), чтобы не тратить время ответа.
   final bool isSecondAttempt;
 
-  /// Язык, на который надо было перевести. Нужен ровно для одной реплики —
-  /// «Сообщение выше нужно перевести на английский язык», когда игрок
-  /// ответил не на том языке.
+  /// Язык, на который надо было перевести: на нём показывается эталон и
+  /// на нём же написаны пояснения к его элементам.
   final String targetLanguage;
 
   const _ErrorReport({
     required this.errors,
     required this.attempt,
     required this.targetLanguage,
+    required this.phraseIndex,
     this.isSecondAttempt = false,
   });
+
+  /// Элементы эталона на изучаемом языке — то, что игрок должен был
+  /// произнести. Пустой список означает, что фраза раунда неизвестна
+  /// (старый раунд), и разбор откатывается на прежний вид со списком
+  /// сообщений судьи.
+  List<PhraseElement> get _elements =>
+      phraseIndex < 0 ? const [] : PhraseBank.elementsFor(phraseIndex, targetLanguage);
+
+  /// Пояснение к каждому элементу — на изучаемом языке, потому что
+  /// объясняет оно именно его грамматику («"at seven" — we use "at" with
+  /// clock time»). Пояснение на родном языке в датасете тоже есть, но оно
+  /// разбирает РОДНУЮ фразу, а игроку здесь нужна не она.
+  List<String> get _explanations {
+    final entry = phraseIndex < 0 ? null : PhraseBank.entry(phraseIndex);
+    if (entry == null) return const [];
+    return entry.explanationsByLanguage[targetLanguage] ?? const [];
+  }
+
+  /// Номера элементов, которые игрок не произнёс.
+  ///
+  /// Какие именно — решает СЕРВЕР: он присылает их строками grammar_errors
+  /// категории element со смещением в чистой фразе. Клиент только
+  /// переводит смещение в номер элемента (elementOffsets считает его той
+  /// же формулой, что и сервер) и ничего не пересчитывает сам — иначе
+  /// подсветка могла бы разойтись с выставленным баллом.
+  Set<int> get _missedIndices {
+    final entry = phraseIndex < 0 ? null : PhraseBank.entry(phraseIndex);
+    if (entry == null) return const {};
+    final offsets = entry.elementOffsets(targetLanguage);
+    final missedOffsets = {
+      for (final e in errors)
+        if ((e['category'] as String?) == 'element')
+          (e['offset_start'] as num?)?.toInt() ?? -1,
+    };
+    return {
+      for (var i = 0; i < offsets.length; i++)
+        if (missedOffsets.contains(offsets[i])) i,
+    };
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -1099,6 +1237,12 @@ class _ErrorReport extends StatelessWidget {
                 Text(hint, style: const TextStyle(color: AppColors.muted, fontSize: 12, height: 1.4)),
             ] else if (noResult || errors.isEmpty || notRecognised || judgeBroken)
               Text(hint, style: const TextStyle(color: AppColors.muted, fontSize: 12, height: 1.4))
+            else if (_elements.isNotEmpty)
+              _ElementBreakdown(
+                elements: _elements,
+                missedIndices: _missedIndices,
+                explanations: _explanations,
+              )
             else
               ...errors.map((e) => Padding(
                     padding: const EdgeInsets.only(bottom: 8),
@@ -1122,6 +1266,139 @@ class _ErrorReport extends StatelessWidget {
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+/// Разбор ответа по элементам: что нужно было сказать, что потеряно и
+/// почему это устроено именно так.
+///
+/// РАЗДЕЛИТЕЛЯ «|» ЗДЕСЬ НЕТ. В исходнике датасета он служебный, и
+/// показывать его игроку — значит объяснять ему формат наших файлов.
+/// Вместо него элементы разведены визуально: каждый лежит в своей плашке
+/// с рамкой. Плашка сама говорит «я отдельная штука, по мне можно
+/// нажать» — стрелка-подсказка рядом с заголовком договаривает остальное.
+///
+/// Цветом помечены только НЕПРОИЗНЕСЁННЫЕ элементы (их называет сервер).
+/// Нажать можно на любой, включая сказанные верно: пояснение — это не
+/// «работа над ошибками», а справка по фразе, и разобраться в удавшемся
+/// куске игрок вправе не меньше.
+class _ElementBreakdown extends StatelessWidget {
+  final List<PhraseElement> elements;
+  final Set<int> missedIndices;
+  final List<String> explanations;
+
+  const _ElementBreakdown({
+    required this.elements,
+    required this.missedIndices,
+    required this.explanations,
+  });
+
+  void _showExplanation(BuildContext context, int index) {
+    final explanation = index < explanations.length ? explanations[index] : null;
+    showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: AppColors.navy2,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Container(
+                width: 36,
+                height: 4,
+                margin: const EdgeInsets.only(bottom: 16),
+                decoration: BoxDecoration(
+                  color: AppColors.lineStrong,
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+              Text(
+                elements[index].text,
+                style: AppFonts.ui(fontSize: 16, weight: FontWeight.w800, color: AppColors.gold),
+              ),
+              const SizedBox(height: 12),
+              Text(
+                explanation ?? 'Пояснения к этой части фразы пока нет.',
+                style: const TextStyle(color: AppColors.cream, fontSize: 13, height: 1.5),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          missedIndices.isEmpty
+              ? 'Сказано всё. Нажми на часть фразы, чтобы разобрать её подробнее'
+              : 'Нажми на часть фразы, чтобы понять, как она устроена',
+          style: AppFonts.ui(fontSize: 11, color: AppColors.muted),
+        ),
+        const SizedBox(height: 10),
+        Wrap(
+          spacing: 6,
+          runSpacing: 6,
+          children: [
+            for (var i = 0; i < elements.length; i++)
+              _ElementChip(
+                text: elements[i].text,
+                missed: missedIndices.contains(i),
+                onTap: () => _showExplanation(context, i),
+              ),
+          ],
+        ),
+      ],
+    );
+  }
+}
+
+class _ElementChip extends StatelessWidget {
+  final String text;
+  final bool missed;
+  final VoidCallback onTap;
+
+  const _ElementChip({required this.text, required this.missed, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    final color = missed ? AppColors.danger : AppColors.lineStrong;
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(8),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+        decoration: BoxDecoration(
+          border: Border.all(color: color),
+          borderRadius: BorderRadius.circular(8),
+          color: missed ? AppColors.danger.withValues(alpha: 0.12) : Colors.transparent,
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              text,
+              style: TextStyle(
+                color: missed ? AppColors.danger : AppColors.cream,
+                fontSize: 12.5,
+                height: 1.2,
+              ),
+            ),
+            const SizedBox(width: 5),
+            Icon(Icons.help_outline, size: 12, color: AppColors.muted.withValues(alpha: 0.8)),
+          ],
+        ),
       ),
     );
   }

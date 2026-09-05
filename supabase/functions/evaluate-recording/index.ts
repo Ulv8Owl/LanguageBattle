@@ -26,9 +26,11 @@ import {
   type CefrLevel,
   evaluateGrammar,
   type JudgeVerbosity,
+  JUDGE_ENABLED,
   NEUTRAL_SCORE,
 } from "../_shared/evaluateGrammar.ts";
 import { transcribeAudio } from "../_shared/asr/index.ts";
+import { scoreByElements } from "../_shared/elementScoring.ts";
 
 /**
  * Лига говорящего приравнена к уровню CEFR (см. supabase/migrations/0023 —
@@ -215,7 +217,7 @@ async function processJob(job_id: string): Promise<void> {
     // Фраза раунда на изучаемом языке — то, что игрок должен был сказать.
     // Нужна дважды: подсказкой распознавателю и эталоном судье, поэтому
     // читается один раз здесь.
-    const expectedPhrase = await roundPhrase(supabase, recording);
+    const expectedPhrase = await roundPhrase(supabase, recording, targetLanguage);
 
     // Родной язык игрока нужен ДО распознавания, а не только судье: он
     // уходит в ASR альтернативой, чтобы распознаватель мог сказать «это
@@ -318,41 +320,85 @@ async function processJob(job_id: string): Promise<void> {
         verbosity,
         budget_left_ms: budgetLeft(),
       };
-      const result = await evaluateGrammar(
-        transcript,
-        targetLanguage,
-        nativeLanguage,
-        verbosity,
-        level,
-        expectedPhrase,
-        budgetLeft(),
-        uncertainWords,
-      );
+      // Поэлементная оценка — основной путь, пока судья выключен.
+      // Считается по тому же эталону с «|», который клиент показывал
+      // игроку, поэтому балл и подсветка не могут разойтись.
+      const byElements = JUDGE_ENABLED ? null : scoreByElements(expectedPhrase, transcript);
 
-      score = result.score;
-      errors = result.errors;
-      judgeStatus = result.degraded ? "degraded" : "ok";
-      pipelineDebug.judge = result.debug;
-      correctedText = result.corrected;
-      cleanedText = result.cleaned;
-      // Пустой список ошибок значит «ошибок нет» ТОЛЬКО если объяснения
-      // вообще запрашивались. В бою их не просят (verbosity brief), и
-      // писать там «ошибок не найдено» — значит утверждать то, чего судья
-      // не говорил: правка при этом может быть на пол-фразы.
-      const explanationsAsked = verbosity === "detailed";
-      feedback = result.degraded
-        ? "Не удалось получить разбор от ИИ — балл выставлен нейтральным."
-        : errors.length > 0
-        ? errors.map((e) => e.message).slice(0, 3).join(" ")
-        : explanationsAsked
-        ? "Отлично, ошибок не найдено!"
-        : "Разбор показан подсветкой правки.";
+      if (byElements) {
+        score = byElements.score;
+        // Каждый непроизнесённый элемент — строка в grammar_errors.
+        // message пустой намеренно: пояснение к элементу лежит в датасете
+        // (assets/cefr/explanations_*.txt) и показывается клиентом по
+        // тапу, а не пересылается с сервера на каждый раунд.
+        errors = byElements.verdicts
+          .filter((v) => !v.correct)
+          .map((v) => ({
+            offset: v.offset,
+            length: v.text.length,
+            message: "",
+            replacement: v.text,
+            category: "element",
+          }));
+        judgeStatus = "skipped";
+        // Эталон без «|» — то, с чем клиент сравнивает сказанное.
+        correctedText = expectedPhrase.replaceAll("|", "");
+        cleanedText = transcript;
+        feedback = `Произнесено ${byElements.correctCount} из ${byElements.totalCount} частей фразы.`;
+        pipelineDebug.judge = {
+          status: "skipped",
+          reason: "судья выключен (JUDGE_ENABLED=0) — оценка поэлементная",
+          correct_elements: byElements.correctCount,
+          total_elements: byElements.totalCount,
+        };
+      } else if (!JUDGE_ENABLED) {
+        // Судья выключен, а фраза пришла без «|» — это старый раунд,
+        // заведённый до перехода на поэлементный банк. Балл нейтральный:
+        // ни оценить, ни обвинить игрока тут не за что.
+        score = NEUTRAL_SCORE;
+        judgeStatus = "skipped";
+        feedback = "Эта фраза из старого набора — балл выставлен нейтральным.";
+        pipelineDebug.judge = {
+          status: "skipped",
+          reason: "судья выключен, а в эталоне нет разделителей элементов",
+        };
+      } else {
+        const result = await evaluateGrammar(
+          transcript,
+          targetLanguage,
+          nativeLanguage,
+          verbosity,
+          level,
+          expectedPhrase.replaceAll("|", ""),
+          budgetLeft(),
+          uncertainWords,
+        );
 
-      if (result.degraded) {
-        console.error("evaluate-recording: судья деградировал", {
-          recordingId: recording.id,
-          reason: result.failureReason,
-        });
+        score = result.score;
+        errors = result.errors;
+        judgeStatus = result.degraded ? "degraded" : "ok";
+        pipelineDebug.judge = result.debug;
+        correctedText = result.corrected;
+        cleanedText = result.cleaned;
+        // Пустой список ошибок значит «ошибок нет» ТОЛЬКО если объяснения
+        // вообще запрашивались. В бою их не просят (verbosity brief), и
+        // писать там «ошибок не найдено» — значит утверждать то, чего судья
+        // не говорил: правка при этом может быть на пол-фразы.
+        const explanationsAsked = verbosity === "detailed";
+        feedback = result.degraded
+          ? "Не удалось получить разбор от ИИ — балл выставлен нейтральным."
+          : errors.length > 0
+          ? errors.map((e) => e.message).slice(0, 3).join(" ")
+          : explanationsAsked
+          ? "Отлично, ошибок не найдено!"
+          : "Разбор показан подсветкой правки.";
+
+        if (result.degraded) {
+          console.error("evaluate-recording: судья деградировал", {
+            recordingId: recording.id,
+            reason: result.failureReason,
+          });
+        }
       }
     }
 
@@ -537,18 +583,35 @@ async function trainingAttemptNumber(
 async function roundPhrase(
   supabase: SupabaseClient,
   recording: VoiceRecordingRow,
+  targetLanguage: string,
 ): Promise<string> {
   try {
-    const { table, id } = recording.training_round_id
-      ? { table: "training_rounds", id: recording.training_round_id }
-      : { table: "rounds", id: recording.round_id };
-    if (!id) return "";
+    if (recording.training_round_id) {
+      // В Одиночной Игре язык один, и эталон с разделителями лежит прямо
+      // в generated_phrase.
+      const { data } = await supabase
+        .from("training_rounds")
+        .select("generated_phrase")
+        .eq("id", recording.training_round_id)
+        .maybeSingle();
+      return (data?.generated_phrase ?? "").trim();
+    }
+    if (!recording.round_id) return "";
 
     const { data } = await supabase
-      .from(table)
-      .select("generated_phrase")
-      .eq("id", id)
+      .from("rounds")
+      .select("generated_phrase, expected_by_language")
+      .eq("id", recording.round_id)
       .maybeSingle();
+
+    // В Дуэли generated_phrase — это ОБЕ фразы через слэш (так они
+    // показаны в ленте), и оценивать по ней нельзя: непонятно, какая
+    // половина чья. Эталон для оценки лежит по языкам — миграция 0029.
+    const byLanguage = data?.expected_by_language as Record<string, string> | null;
+    const forSpeaker = byLanguage?.[targetLanguage];
+    if (typeof forSpeaker === "string" && forSpeaker.trim().length > 0) {
+      return forSpeaker.trim();
+    }
     return (data?.generated_phrase ?? "").trim();
   } catch (e) {
     console.error("evaluate-recording: не смог получить фразу раунда", e);

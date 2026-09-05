@@ -299,12 +299,27 @@ class _BattleScreenState extends State<BattleScreen> {
         ? '${PhraseBank.textFor(phraseIndex, m.languageForSlot(m.playerAId!, 'target'))} / '
             '${PhraseBank.textFor(phraseIndex, m.languageForSlot(m.playerBId!, 'target'))}'
         : PhraseBank.textFor(phraseIndex, m.languagePair ?? 'en');
+    // Эталон для оценки — отдельно от того, что показано в ленте, и по
+    // языкам: в Дуэли игроки переводят на разные языки, и по строке «фраза
+    // A / фраза B» невозможно понять, какая половина чья. Разделители «|»
+    // есть только здесь; в ленту они не попадают.
+    final expectedByLanguage = <String, String>{};
+    for (final language in m.isDuel
+        ? {
+            m.languageForSlot(m.playerAId!, 'target'),
+            m.languageForSlot(m.playerBId!, 'target'),
+          }
+        : {m.languagePair ?? 'en'}) {
+      final marked = PhraseBank.markedTextFor(phraseIndex, language);
+      if (marked.isNotEmpty) expectedByLanguage[language] = marked;
+    }
     try {
       await supabase.from('rounds').upsert(
         {
           'match_id': m.id,
           'round_number': n,
           'generated_phrase': phrase,
+          'expected_by_language': expectedByLanguage,
           'phrase_index': phraseIndex,
         },
         onConflict: 'match_id,round_number',

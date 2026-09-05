@@ -41,7 +41,7 @@ class ContentLanguages {
       // Пересечение: язык готов, только если переведены И фразы, И слова.
       // Одни фразы без слов ломают Тренировку, одни слова без фраз — все
       // остальные режимы.
-      final withPhrases = phrases.first.byLanguage.keys.toSet();
+      final withPhrases = phrases.first.elementsByLanguage.keys.toSet();
       final withWords = words.first.byLanguage.keys.toSet();
       final result = withPhrases.intersection(withWords).intersection(allLanguages.keys.toSet());
       _cache = result.isEmpty ? _fallback : result;
