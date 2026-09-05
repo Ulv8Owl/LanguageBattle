@@ -117,7 +117,7 @@ def split_elements(line: str, where: str) -> tuple[list[dict[str, str]], str]:
 
 
 def load_phrases(level: str, lang: str) -> tuple[list[list[dict[str, str]]], list[str]]:
-    path = SOURCE_DIR / f"phrases_{level}_{lang}.txt"
+    path = SOURCE_DIR / "phrases" / lang.upper() / f"phrases_{level}.txt"
     lines = read_lines(path)
     if len(lines) != PHRASES_PER_LEVEL:
         raise SourceError(
