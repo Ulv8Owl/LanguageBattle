@@ -1,22 +1,51 @@
 # CEFR phrase dataset (EN / RU / ES)
 
-18 files + validator.
+18 phrase files + 36 explanation files + validator.
 
-## Naming
+## Layout
 
-- `phrases_<LEVEL>_<lang>.txt` — 10 phrases, one per line
+```
+phrases/<LANG>/phrases_<LEVEL>.txt                        18 files
+explanations/<NATIVE>-<TARGET>/explanations_<LEVEL>.txt   36 files
+```
 
-`LEVEL` ∈ A1 A2 B1 B2 C1 C2 · `lang` ∈ en ru es
+`LEVEL` ∈ A1 A2 B1 B2 C1 C2 · `LANG` ∈ EN RU ES ·
+pair directories: EN-RU EN-ES RU-EN RU-ES ES-EN ES-RU
 
-## No explanation files any more
+## Why explanations are per pair, not per language
 
-The dataset used to ship `explanations_<LEVEL>_<lang>.txt` with a
-pre-written note per element. They were removed: such a note is written
-about the *native* wording («в семь», not "at seven") and knows nothing
-about what the learner actually said. The per-element commentary is now
-written by the language model at answer time, and only for the elements
-the learner got wrong — see
-`supabase/functions/_shared/explainElements.ts`.
+An explanation has to know two things at once: which language to be
+written in (the learner's own) and which language it is about (the one
+being learned). A per-language layout gives only the second half — and
+that is exactly how the previous version broke: a learner on the ru→en
+pair was shown a note about the *Russian* wording («в семь») instead of
+the English one ("at seven").
+
+The directory is named NATIVE-TARGET, in the same order as the learner's
+own pair: `RU-EN` is Russian text about English.
+
+## Explanation line format
+
+```
+<phrase>.<element> «<element text in the TARGET language>» — <explanation>
+```
+
+The guillemets hold an *anchor*: `validate.py` checks it against the
+phrase file character by character, so an explanation can never silently
+drift onto the neighbouring chunk. Only the part after ` — ` reaches the
+learner; the element text itself is already the heading of the panel.
+
+Inside the explanation, words of the target language are quoted with
+double quotes (`"at seven"`), and the validator requires at least one such
+quote per line.
+
+`tools/cefr_explanations.py` fills the anchors in from the phrase files —
+typing 4860 of them by hand would guarantee typos:
+
+```
+python3 tools/cefr_explanations.py skeleton A1 en          # blank template
+python3 tools/cefr_explanations.py fill A1 ru en < bodies  # "1.1 <text>" lines
+```
 
 ## Structure
 
@@ -54,5 +83,8 @@ placed at clause level so the alignment survives the differences in word order.
 python3 validate.py
 ```
 
-Checks: 18 files present · 10 lines per phrase file · sentence count per level ·
-element count per level · en/ru/es element parity per line.
+Checks: all 54 files present · 10 lines per phrase file · sentence count per
+level · element count per level · en/ru/es element parity per line ·
+explanation numbering complete and unique · anchors matching the target-language
+elements · a target-language quote in every explanation · the explanation
+language matching its pair directory.

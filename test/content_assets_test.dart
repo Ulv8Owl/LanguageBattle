@@ -55,12 +55,59 @@ void main() {
     }
   });
 
-  test('готовых пояснений в банке нет', () {
-    // Разбор ошибок пишет модель по факту ответа игрока
-    // (_shared/explainElements.ts). Заранее написанный текст сюда
-    // вернуться не должен: он про РОДНУЮ формулировку и не знает, что
-    // игрок сказал, — а выглядит на экране точно так же, из-за чего
-    // молчание модели однажды уже прошло незамеченным.
+  test('разборы собраны для всех шести пар и всех уровней', () {
+    // Разбор написан для ПАРЫ, а не для языка: на том, которым игрок
+    // владеет, про тот, который он учит. Прошлая версия банка знала только
+    // второе — и игроку с парой ru->en показывала разбор русской
+    // формулировки вместо английской. Здесь проверяется, что для каждой
+    // пары собран полный комплект: пропущенный файл на экране выглядит
+    // как «разбора нет», и заметить это в одном раунде почти невозможно.
+    for (final level in levels) {
+      for (final native in languages) {
+        for (final target in languages) {
+          if (native == target) continue;
+          final path = 'assets/phrases/explain_${level}_$native-$target.json';
+          expect(File(path).existsSync(), isTrue, reason: path);
+          final table = (jsonDecode(File(path).readAsStringSync()) as List)
+              .map((row) => (row as List).cast<String>())
+              .toList();
+          expect(table.length, 10, reason: path);
+          for (var i = 0; i < table.length; i++) {
+            expect(table[i].length, elementsPerLevel[level],
+                reason: '$path, фраза ${i + 1}');
+            for (final text in table[i]) {
+              expect(text.trim(), isNotEmpty, reason: '$path, фраза ${i + 1}');
+            }
+          }
+        }
+      }
+    }
+  });
+
+  test('в разборе нет служебного якоря из исходника', () {
+    // В файле датасета строка начинается с номера и текста элемента в
+    // «ёлочках» — это якорь для проверки, а не часть объяснения. Игрок
+    // видит текст элемента в заголовке разбора, и второй раз он там был бы
+    // просто повтором: именно так выглядела прежняя версия этого окна.
+    for (final level in levels) {
+      for (final native in languages) {
+        for (final target in languages) {
+          if (native == target) continue;
+          final path = 'assets/phrases/explain_${level}_$native-$target.json';
+          for (final row in jsonDecode(File(path).readAsStringSync()) as List) {
+            for (final text in (row as List).cast<String>()) {
+              expect(RegExp(r'^\d+\.\d+ «').hasMatch(text), isFalse, reason: path);
+            }
+          }
+        }
+      }
+    }
+  });
+
+  test('готовых пояснений внутри банка фраз нет', () {
+    // Разборы лежат ОТДЕЛЬНО, по одному файлу на пару. Вернуть их внутрь
+    // cefr_*.json значило бы возить с каждой фразой шесть версий текста,
+    // из которых игроку нужна ровно одна.
     for (final level in levels) {
       for (final p in read('assets/phrases/cefr_$level.json')) {
         expect(p.containsKey('explanations'), isFalse, reason: level);

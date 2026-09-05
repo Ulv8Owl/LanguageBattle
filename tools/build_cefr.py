@@ -1,16 +1,20 @@
 #!/usr/bin/env python3
-"""Собирает assets/phrases/cefr_<уровень>.json из assets/cefr/*.txt.
+"""Собирает банк фраз и разборы из assets/cefr.
 
-ИСТОЧНИК — 18 текстовых файлов в assets/cefr: по шесть уровней (A1..C2) на
-каждый из трёх языков. Формат описан в assets/cefr/README.md и проверяется
-assets/cefr/validate.py; здесь он только читается.
+ИСТОЧНИК:
 
-ГОТОВЫХ ПОЯСНЕНИЙ БОЛЬШЕ НЕТ. Раньше рядом лежали файлы explanations_* с
-заранее написанным разбором каждого элемента, и он попадал в этот JSON.
-От них отказались: пояснение писалось про РОДНУЮ формулировку («в семь», а
-не «at seven») и ничего не знало о том, что игрок сказал на самом деле.
-Разбор ошибок теперь пишет языковая модель по факту ответа — см.
-supabase/functions/_shared/explainElements.ts.
+    assets/cefr/phrases/<LANG>/phrases_<LEVEL>.txt          18 файлов
+    assets/cefr/explanations/<РОДНОЙ>-<ЦЕЛЕВОЙ>/explanations_<LEVEL>.txt   36
+
+Формат описан в assets/cefr/README.md и проверяется assets/cefr/validate.py;
+здесь он только читается.
+
+ПОЯСНЕНИЯ РАЗЛОЖЕНЫ ПО ПАРАМ, А НЕ ПО ЯЗЫКАМ. Разбор обязан знать сразу
+две вещи: на каком языке его читать (родной язык игрока) и про какой язык
+он вообще (тот, который игрок учит). Прошлая версия датасета знала только
+второе — и потому игроку с парой ru→en показывала разбор русской
+формулировки «в семь» вместо английской "at seven". Каталог называется
+РОДНОЙ-ЦЕЛЕВОЙ, в том же порядке, в каком пара задана у игрока.
 
 ЧТО СОБИРАЕТСЯ. Один JSON на уровень — то, что реально нужно приложению в
 раунде, без разбора текста на клиенте:
@@ -36,6 +40,16 @@ supabase/functions/_shared/explainElements.ts.
 точка предыдущего предложения, ни пробел. Разложив их один раз здесь, мы
 избавляем клиент от разбора пунктуации в каждом кадре.
 
+Пояснения выкладываются ОТДЕЛЬНЫМИ файлами на пару и уровень:
+
+    assets/phrases/explain_<уровень>_<родной>-<целевой>.json
+
+    [ ["разбор 1.1", "разбор 1.2", ...], ... ]   // 10 фраз, по элементам
+
+Отдельными — потому что игроку нужна ровно одна пара из шести, а всё
+вместе это больше мегабайта. Класть шесть пар в общий cefr_<уровень>.json
+значило бы качать в шесть раз больше ради того же экрана.
+
 Запуск:
     python3 tools/build_cefr.py            # собрать
     python3 tools/build_cefr.py --check    # только сверить, не писать
@@ -55,6 +69,11 @@ OUT_DIR = REPO_ROOT / "assets" / "phrases"
 
 LEVELS = ["A1", "A2", "B1", "B2", "C1", "C2"]
 LANGUAGES = ["en", "ru", "es"]
+# Пары «родной-целевой»: все шесть сочетаний трёх языков. Разбор одной и
+# той же английской формы для русскоговорящего и для испаноговорящего —
+# это два разных текста, а не один переведённый: ошибаются они по разным
+# причинам, и объяснять надо именно причину.
+PAIRS = [(n, t) for n in LANGUAGES for t in LANGUAGES if n != t]
 
 # Сколько элементов во фразе каждого уровня. Не «сколько получилось», а
 # требование: три элемента на предложение, предложений — по уровню
@@ -68,6 +87,11 @@ PHRASES_PER_LEVEL = 10
 # предложения плюс пробелы. Класс \w здесь не годится — он не знает про
 # апострофы в «don't» и про кириллицу в некоторых сборках Python.
 LEAD_RE = re.compile(r"^[\s.,;:!?…—–-]*")
+
+# Строка пояснения: «<фраза>.<элемент> «<якорь>» — <разбор>». Якорь —
+# текст элемента целевого языка; он служебный и до игрока не доезжает,
+# зато позволяет сверить, что разбор не уехал на соседний кусок.
+EXPLANATION_RE = re.compile(r"^(\d+)\.(\d+) «(.+?)» — (.+)$")
 
 
 class SourceError(Exception):
@@ -137,6 +161,50 @@ def load_phrases(level: str, lang: str) -> tuple[list[list[dict[str, str]]], lis
     return all_elements, tails
 
 
+def load_explanations(level: str, native: str, target: str,
+                      target_elements: list[list[dict[str, str]]]) -> list[list[str]]:
+    """Пояснения пары для уровня: [фраза][элемент] -> текст разбора.
+
+    Якорь в «ёлочках» сверяется с элементом ЦЕЛЕВОГО языка посимвольно и в
+    результат не попадает: игрок видит текст элемента в заголовке разбора,
+    и второй раз он там не нужен. Расхождение якоря — остановка сборки:
+    разбор, уехавший на соседний элемент, на экране неотличим от верного.
+    """
+    path = (SOURCE_DIR / "explanations" / f"{native.upper()}-{target.upper()}"
+            / f"explanations_{level}.txt")
+    lines = read_lines(path)
+    elements = ELEMENTS_PER_LEVEL[level]
+    table: list[list[str | None]] = [[None] * elements for _ in range(PHRASES_PER_LEVEL)]
+
+    for i, line in enumerate(lines, start=1):
+        m = EXPLANATION_RE.match(line)
+        if not m:
+            raise SourceError(f"{path.name}:{i}: строка не по формату «N.M «элемент» — разбор»")
+        phrase_no, element_no = int(m.group(1)), int(m.group(2))
+        anchor, body = m.group(3), m.group(4).strip()
+        if not (1 <= phrase_no <= PHRASES_PER_LEVEL):
+            raise SourceError(f"{path.name}:{i}: номер фразы {phrase_no} вне 1..{PHRASES_PER_LEVEL}")
+        if not (1 <= element_no <= elements):
+            raise SourceError(f"{path.name}:{i}: номер элемента {element_no} вне 1..{elements}")
+        if table[phrase_no - 1][element_no - 1] is not None:
+            raise SourceError(f"{path.name}:{i}: пояснение {phrase_no}.{element_no} уже было")
+        if not body:
+            raise SourceError(f"{path.name}:{i}: пустой разбор")
+        actual = target_elements[phrase_no - 1][element_no - 1]["text"]
+        if anchor != actual:
+            raise SourceError(
+                f"{path.name}:{i}: якорь «{anchor}» не совпадает с элементом "
+                f"{phrase_no}.{element_no} языка {target}: «{actual}»"
+            )
+        table[phrase_no - 1][element_no - 1] = body
+
+    for p_i in range(PHRASES_PER_LEVEL):
+        for e_i in range(elements):
+            if table[p_i][e_i] is None:
+                raise SourceError(f"{path.name}: нет пояснения {p_i + 1}.{e_i + 1}")
+    return table  # type: ignore[return-value]
+
+
 def build_level(level: str) -> list[dict]:
     elements_by_lang: dict[str, list[list[dict[str, str]]]] = {}
     tails_by_lang: dict[str, list[str]] = {}
@@ -160,6 +228,18 @@ def build_level(level: str) -> list[dict]:
     return phrases
 
 
+def build_explanations(level: str) -> dict[str, list[list[str]]]:
+    """Пояснения всех шести пар уровня: «родной-целевой» -> [фраза][элемент]."""
+    by_pair: dict[str, list[list[str]]] = {}
+    target_cache: dict[str, list[list[dict[str, str]]]] = {}
+    for native, target in PAIRS:
+        if target not in target_cache:
+            target_cache[target], _ = load_phrases(level, target)
+        by_pair[f"{native}-{target}"] = load_explanations(
+            level, native, target, target_cache[target])
+    return by_pair
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--check", action="store_true",
@@ -167,22 +247,30 @@ def main() -> int:
     args = parser.parse_args()
 
     stale: list[str] = []
+
+    def emit(out: Path, payload: object, note: str) -> None:
+        """Записать JSON или, в режиме --check, отметить устаревшим."""
+        new_text = json.dumps(payload, ensure_ascii=False) + "\n"
+        old_text = out.read_text(encoding="utf-8") if out.exists() else None
+        changed = old_text != new_text
+        if args.check:
+            if changed:
+                stale.append(str(out.relative_to(REPO_ROOT)))
+            return
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_text(new_text, encoding="utf-8")
+        print(f"{out.relative_to(REPO_ROOT)}: {note} — "
+              f"{'обновлён' if changed else 'без изменений'}")
+
     try:
         for level in LEVELS:
             phrases = build_level(level)
-            out = OUT_DIR / f"cefr_{level.lower()}.json"
-            new_text = json.dumps(phrases, ensure_ascii=False) + "\n"
-            old_text = out.read_text(encoding="utf-8") if out.exists() else None
-            changed = old_text != new_text
-            if args.check:
-                if changed:
-                    stale.append(str(out.relative_to(REPO_ROOT)))
-                continue
-            out.parent.mkdir(parents=True, exist_ok=True)
-            out.write_text(new_text, encoding="utf-8")
-            print(f"{out.relative_to(REPO_ROOT)}: {len(phrases)} фраз по "
-                  f"{ELEMENTS_PER_LEVEL[level]} элементов — "
-                  f"{'обновлён' if changed else 'без изменений'}")
+            emit(OUT_DIR / f"cefr_{level.lower()}.json", phrases,
+                 f"{len(phrases)} фраз по {ELEMENTS_PER_LEVEL[level]} элементов")
+
+            for pair, table in build_explanations(level).items():
+                emit(OUT_DIR / f"explain_{level.lower()}_{pair}.json", table,
+                     f"{sum(len(row) for row in table)} пояснений")
     except SourceError as e:
         print(f"ОСТАНОВ: {e}", file=sys.stderr)
         return 1
@@ -193,7 +281,7 @@ def main() -> int:
             for path in stale:
                 print(f"  {path}")
             return 1
-        print("assets/phrases/cefr_*.json актуальны относительно assets/cefr/.")
+        print("assets/phrases/*.json актуальны относительно assets/cefr/.")
     return 0
 
 

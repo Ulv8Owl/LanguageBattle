@@ -232,6 +232,12 @@ class _TrainingScreenState extends State<TrainingScreen> {
         });
         return;
       }
+      // Разборы элементов для пары игрока. Грузятся здесь, а не в момент
+      // показа: разбор открывается тапом, и уходить за файлом в сеть под
+      // пальцем игрока значило бы показывать пустую панель на секунду.
+      // Отсутствие файла не мешает раунду — тогда объяснение спросят у
+      // модели (см. _messagesByIndex).
+      await PhraseBank.loadExplanations(level, _nativeLanguage, _targetLanguage);
       _phraseOrder = [
         for (var i = 0; i < PhraseBank.perLevel; i++) level * PhraseBank.perLevel + i,
       ]..shuffle();
@@ -1130,7 +1136,7 @@ class _ErrorReport extends StatelessWidget {
   List<PhraseElement> get _elements =>
       phraseIndex < 0 ? const [] : PhraseBank.elementsFor(phraseIndex, targetLanguage);
 
-  /// Номер элемента -> объяснение ошибки от модели.
+  /// Номер потерянного элемента -> его разбор.
   ///
   /// КЛЮЧИ этой карты и есть потерянные элементы, и какие именно — решает
   /// СЕРВЕР: он присылает их строками grammar_errors категории element со
@@ -1139,10 +1145,13 @@ class _ErrorReport extends StatelessWidget {
   /// ничего не пересчитывает сам — иначе подсветка могла бы разойтись с
   /// выставленным баллом.
   ///
-  /// Пустая строка в значении означает, что модель до этого элемента не
-  /// дошла (лимит на число разборов за раунд или сбой провайдера). Ключ
-  /// при этом есть: элемент всё равно потерян и подсветить его надо.
-  Map<int, String> get _messagesByIndex {
+  /// ОТКУДА БЕРЁТСЯ ТЕКСТ. Сначала — датасет: разбор для пары
+  /// «родной-целевой» написан заранее, доступен мгновенно и не зависит ни
+  /// от лимитов провайдера, ни от его настроения. Модель подключается
+  /// там, где датасет молчит: старая фраза не из банка, непокрытая пара,
+  /// элемент за пределами таблицы. Если молчат обе — значение пустое, и
+  /// это видно на экране прямым текстом, а не подменяется чем-то похожим.
+  Map<int, _Explanation> get _messagesByIndex {
     final entry = phraseIndex < 0 ? null : PhraseBank.entry(phraseIndex);
     if (entry == null) return const {};
     final offsets = entry.elementOffsets(targetLanguage);
@@ -1153,10 +1162,18 @@ class _ErrorReport extends StatelessWidget {
       if (offset == null) continue;
       byOffset[offset] = (e['message'] as String?)?.trim() ?? '';
     }
-    return {
-      for (var i = 0; i < offsets.length; i++)
-        if (byOffset.containsKey(offsets[i])) i: byOffset[offsets[i]]!,
-    };
+    final result = <int, _Explanation>{};
+    for (var i = 0; i < offsets.length; i++) {
+      if (!byOffset.containsKey(offsets[i])) continue;
+      final fromDataset = PhraseBank.explanationFor(
+          phraseIndex, i, nativeLanguage, targetLanguage);
+      if (fromDataset.isNotEmpty) {
+        result[i] = _Explanation(fromDataset, fromModel: false);
+      } else {
+        result[i] = _Explanation(byOffset[offsets[i]]!, fromModel: true);
+      }
+    }
+    return result;
   }
 
   @override
@@ -1282,6 +1299,18 @@ class _ErrorReport extends StatelessWidget {
   }
 }
 
+/// Разбор одного элемента и то, откуда он взялся.
+///
+/// ИСТОЧНИК ХРАНИТСЯ НЕ ИЗ ЛЮБОПЫТСТВА. Однажды в этом окне уже показывали
+/// заготовку, неотличимую на вид от ответа модели, и молчание модели
+/// прошло незамеченным. Теперь источник подписан прямо под текстом: две
+/// строки разного происхождения не должны выглядеть одинаково.
+class _Explanation {
+  final String text;
+  final bool fromModel;
+  const _Explanation(this.text, {required this.fromModel});
+}
+
 /// Разбор ответа по элементам: что нужно было сказать, что потеряно и
 /// почему это устроено именно так.
 ///
@@ -1298,16 +1327,14 @@ class _ErrorReport extends StatelessWidget {
 class _ElementBreakdown extends StatelessWidget {
   final List<PhraseElement> elements;
 
-  /// Номер элемента -> разбор от модели. Ключи этой карты и есть
+  /// Номер элемента -> разбор и его источник. Ключи этой карты и есть
   /// потерянные элементы: сервер прислал строку об ошибке ровно на них.
   ///
-  /// ЗАПАСНОГО ТЕКСТА БОЛЬШЕ НЕТ. Раньше при пустом значении показывалось
-  /// готовое пояснение из датасета — и это оказалось хуже пустоты: игрок
-  /// видел текст про РОДНУЮ формулировку («на улице» вместо «it is») и
-  /// считал его ответом модели, а настоящая причина (модель не ответила)
-  /// оставалась незамеченной. Теперь пусто — значит честно сказано, что
-  /// разбора нет.
-  final Map<int, String> messagesByIndex;
+  /// Пустой текст значения означает, что разбора нет ни в датасете, ни от
+  /// модели. Это состояние показывается прямым текстом: подменять его
+  /// чем-то похожим на объяснение уже пробовали, и молчание модели тогда
+  /// прошло незамеченным.
+  final Map<int, _Explanation> messagesByIndex;
 
   const _ElementBreakdown({
     required this.elements,
@@ -1317,7 +1344,8 @@ class _ElementBreakdown extends StatelessWidget {
   Set<int> get _missedIndices => messagesByIndex.keys.toSet();
 
   void _showExplanation(BuildContext context, int index) {
-    final explanation = (messagesByIndex[index] ?? '').trim();
+    final found = messagesByIndex[index];
+    final explanation = (found?.text ?? '').trim();
     showModalBottomSheet<void>(
       context: context,
       backgroundColor: AppColors.navy2,
@@ -1348,14 +1376,22 @@ class _ElementBreakdown extends StatelessWidget {
               Text(
                 explanation.isNotEmpty
                     ? explanation
-                    : 'Разбор этой части не пришёл — ИИ не ответил. '
-                        'Подробности в отладочной панели под раундом.',
+                    : 'Разбора этой части нет: в датасете её нет, и модель '
+                        'тоже не ответила. Причина — в отладочной панели '
+                        'под раундом.',
                 style: TextStyle(
                   color: explanation.isNotEmpty ? AppColors.cream : AppColors.muted,
                   fontSize: 13,
                   height: 1.5,
                 ),
               ),
+              if (explanation.isNotEmpty) ...[
+                const SizedBox(height: 12),
+                Text(
+                  found!.fromModel ? 'разбор от ИИ' : 'разбор из датасета',
+                  style: AppFonts.mono(fontSize: 9, color: AppColors.muted),
+                ),
+              ],
             ],
           ),
         ),
