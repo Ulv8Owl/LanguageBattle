@@ -1,0 +1,90 @@
+1.1 «В прошлые выходные» — "Выходные" solo existe en plural con este sentido, así que "прошлые" también va en plural. La preposición "в" con acusativo sitúa la acción en el pasado y no se puede omitir.
+1.2 «мы навестили» — "Навестить" es perfectivo: la visita ocurrió una vez y terminó. Su pareja imperfectiva "навещать" describiría una costumbre repetida. La terminación marca sujeto plural, concordando con "мы".
+1.3 «моих бабушку и дедушку» — El ruso no tiene una sola palabra para «los abuelos», así que nombra a los dos. Son animados, y los animados toman la forma del genitivo en acusativo: de ahí "моих" y no "мои".
+1.4 «Они живут» — Presente de "жить" con terminación de plural: "они живут". El ruso no distingue entre «viven» y «están viviendo»: una sola forma sirve para ambas.
+1.5 «в маленькой деревне» — "В" de lugar rige el caso preposicional, y el adjetivo sigue al sustantivo en género y caso: "маленькая деревня" pasa a "в маленькой деревне".
+1.6 «у моря» — "У" siempre rige genitivo: "море" pasa a "моря". Significa «justo al lado de», más cerca que "около", y sin idea de movimiento.
+1.7 «Мы остались» — "Остаться" es perfectivo, una estancia única y terminada. El pasado ruso concuerda en número y género, nunca en persona: "остались" vale para cualquier plural.
+1.8 «там» — "Там" significa «allí», sin movimiento. "Туда" sería «hacia allí» y acompaña a verbos de movimiento.
+1.9 «до вечера воскресенья» — "До" rige genitivo, así que "вечер" pasa a "вечера". El día también va en genitivo, "воскресенья", porque depende de "вечера": literalmente «hasta la tarde del domingo».
+2.1 «Я начал» — El pasado ruso concuerda con el género de quien habla, no con la persona: un hombre dice "начал" y una mujer "начала". El español no marca esto en el verbo.
+2.2 «новую работу» — Complemento directo en acusativo: "новая работа" pasa a "новую работу". Cambian las terminaciones del adjetivo y del sustantivo.
+2.3 «в марте» — Los meses llevan "в" más caso preposicional: "март" pasa a "в марте". Los nombres de los meses se escriben en minúscula, igual que en español.
+2.4 «Офис» — El sujeto va en nominativo. El ruso no tiene artículos, así que nada marca "офис" como «la oficina»: eso lo hace el contexto.
+2.5 «намного больше» — "Больше" es el comparativo de "большой" y se forma de manera irregular, sin sufijo. "Намного" significa «mucho» y lo refuerza.
+2.6 «чем прежний» — "Чем" introduce la segunda parte de la comparación. "Прежний" es un adjetivo que va solo, «la anterior»: el ruso no necesita repetir el sustantivo ni añadir nada.
+2.7 «Мне нравится» — "Нравиться" funciona al revés, igual que el español "gustar": lo que gusta es el sujeto y la persona va en dativo, "мне". Literalmente «el equipo me es agradable».
+2.8 «моя команда» — Como es el sujeto gramatical de "нравится", "команда" va en nominativo, y "моя" concuerda con ella en femenino.
+2.9 «но рабочий день длинный» — Aquí no hay verbo ninguno: el presente de "быть" no se usa en ruso. "Длинный" es un adjetivo pleno que concuerda con el masculino "день".
+3.1 «Вчера» — Es un adverbio, sin preposición ni terminación. "Вчера" suele abrir la frase.
+3.2 «я забыл зонт» — "Забыть" es perfectivo. El pasado "забыл" es masculino; una mujer diría "забыла". "Зонт" es masculino inanimado, así que su acusativo se ve igual que el nominativo.
+3.3 «дома» — Adverbio fijo que significa «en casa», con acento en la primera sílaba. No es la misma palabra que "дома", plural de "дом", acentuada en la segunda.
+3.4 «Дождь шёл» — El ruso le da a la lluvia un sujeto de verdad: "дождь" es el sustantivo y "шёл" el verbo, literalmente «la lluvia iba». No hay construcción impersonal como el español «llovió».
+3.5 «после обеда» — "После" siempre rige genitivo, así que "обед" pasa a "обеда". La expresión significa «por la tarde», aunque literalmente diga «después de la comida».
+3.6 «поэтому я сильно промок» — "Поэтому" significa «por eso». "Промокнуть" es perfectivo, y su pasado masculino pierde el sufijo del todo: "промок", nunca "промокнул".
+3.7 «В следующий раз» — "В" más acusativo para un momento futuro. Las dos palabras van en masculino acusativo, que aquí coincide con el nominativo: "следующий раз".
+3.8 «я посмотрю» — Los verbos perfectivos no tienen presente, así que esta forma es futuro: "посмотрю" significa «miraré». El ruso no necesita ninguna palabra auxiliar.
+3.9 «прогноз погоды заранее» — "Прогноз" es el complemento directo en acusativo y no cambia. "Погоды" va en genitivo detrás: así une el ruso dos sustantivos, donde el español usaría «de».
+4.1 «Мы едем» — "Ехать" es ir en transporte, frente a "идти" a pie. Aquí el presente describe un viaje ya planeado, igual que el español «vamos a ir».
+4.2 «в Португалию» — "В" más acusativo marca la dirección; "в Португалии" con preposicional significaría estar allí. Los nombres de países se declinan como cualquier sustantivo.
+4.3 «в июле» — Los meses con "в" más preposicional: "июль" pasa a "в июле", otra vez en minúscula.
+4.4 «Моя жена» — "Моя" concuerda con el femenino "жена", y todo el grupo es el sujeto, así que va en nominativo.
+4.5 «купила билеты» — "Купить" es perfectivo, una compra terminada. La terminación de "купила" marca sujeto femenino, concordando con "жена". "Билеты" es acusativo plural, idéntico al nominativo.
+4.6 «на прошлой неделе» — Las semanas llevan "на" más preposicional, no "в": "прошлая неделя" pasa a "на прошлой неделе". Los meses y los años llevan "в", así que esta preposición hay que memorizarla.
+4.7 «Мне ещё нужно» — Construcción impersonal: la persona va en dativo, "мне", y no hay sujeto gramatical alguno. "Ещё" significa aquí «todavía».
+4.8 «купить» — Tras "нужно" el verbo se queda en infinitivo. El perfectivo "купить" presenta la compra como un acto único y terminado.
+4.9 «новый чемодан» — El acusativo de un masculino inanimado se ve igual que el nominativo, así que no cambia nada: "новый чемодан".
+5.1 «Мой телефон» — "Мой" concuerda con el masculino "телефон", y el grupo es el sujeto, así que va en nominativo.
+5.2 «сломался» — La partícula "-ся" hace el verbo intransitivo: el teléfono se rompió solo, exactamente como el «se» del español. Sin ella, "сломал", alguien lo habría roto.
+5.3 «в прошлый вторник» — Los días de la semana llevan "в" más acusativo: "в прошлый вторник". Los nombres de los días van en minúscula.
+5.4 «Я отнёс его» — "Отнести" es perfectivo y significa llevar algo a un sitio. "Его" es el acusativo de "он" y se refiere al teléfono.
+5.5 «в маленькую мастерскую» — Dirección con "в" más acusativo: "маленькая мастерская" pasa a "в маленькую мастерскую". Con preposicional, "в мастерской", significaría estar allí.
+5.6 «рядом с офисом» — "Рядом" necesita "с", y "с" rige instrumental: "офис" pasa a "офисом". Por sí solo "рядом" no puede decir junto a qué.
+5.7 «Ремонт» — El sujeto en nominativo. Sin artículos, nada marca "ремонт" como «la reparación»: lo hace la frase anterior.
+5.8 «был дешёвым» — En pasado sí aparece el verbo "быть", y entonces el adjetivo predicativo pasa al instrumental: "дешёвым". En presente no habría ni verbo ni esa terminación.
+5.9 «но занял три дня» — "Занять" es perfectivo, «tardar, llevar tiempo». Tras dos, tres y cuatro el sustantivo va en genitivo singular: "три дня", nunca "три дни".
+6.1 «Я обычно» — "Обычно" es un adverbio de frecuencia y va delante del verbo, igual que en español.
+6.2 «готовлю» — Primera persona del singular de "готовить". Fíjate en la "л" que aparece solo en esta forma: "готовлю", pero "он готовит".
+6.3 «дома» — El mismo adverbio fijo de la tercera frase: "дома" significa «en casa» y no lleva preposición.
+6.4 «Рестораны» — Nominativo plural como sujeto. Sin artículos, el plural desnudo "рестораны" es como el ruso dice «los restaurantes en general».
+6.5 «это приятно» — "Это" recoge toda la idea, y "приятно" es una forma corta neutra usada impersonalmente. No hay verbo ni sujeto real.
+6.6 «но они дорогие» — "Они" sustituye a "рестораны". "Дорогие" es un adjetivo pleno en nominativo plural, y otra vez no hay ningún verbo «son».
+6.7 «В прошлом месяце» — Los meses llevan "в" más preposicional: "прошлый месяц" pasa a "в прошлом месяце". Una semana llevaría "на".
+6.8 «я ел вне дома» — "Есть" es irregular: "я ем", pasado "ел". "Вне" rige genitivo, así que "дом" pasa a "дома" — las mismas letras que el adverbio anterior, pero otra palabra y otro acento.
+6.9 «всего два раза» — "Всего" significa aquí «solo», no «en total». Tras "два" el sustantivo va en genitivo singular: "два раза".
+7.1 «Мой руководитель» — "Руководитель" es masculino, de ahí "мой". La palabra vale tanto para «jefe» como para «responsable de departamento».
+7.2 «попросил меня» — "Попросить" es perfectivo. "Меня" es el acusativo de "я": la persona a la que se pide va directamente en acusativo, sin preposición, igual que en español.
+7.3 «написать отчёт» — Tras "попросил меня" el verbo se queda en infinitivo. "Написать" es perfectivo, así que el informe se piensa como algo que hay que terminar.
+7.4 «Я закончил» — Pasado perfectivo, masculino: "закончил". Una mujer diría "закончила".
+7.5 «первую часть» — Acusativo femenino: "первая часть" pasa a "первую часть". Los ordinales son adjetivos en ruso y concuerdan como cualquier otro.
+7.6 «вчера вечером» — Dos adverbios seguidos, el segundo en instrumental: "вечером". Ninguno lleva preposición, y el orden es fijo: primero el día, luego la parte del día.
+7.7 «Я отправлю» — Un verbo perfectivo con terminaciones de presente significa futuro: "отправлю" es «enviaré». No hace falta ningún auxiliar aparte.
+7.8 «остальное» — Un adjetivo neutro usado como sustantivo: "остальное" significa «el resto». El ruso permite que un adjetivo vaya solo, sin sustantivo detrás.
+7.9 «в пятницу» — Los días llevan "в" más acusativo: "пятница" pasa a "в пятницу".
+8.1 «Когда я был ребёнком» — Tras el pasado de "быть" el sustantivo predicativo pasa al instrumental: "ребёнком". En presente no habría verbo y el sustantivo se quedaría en nominativo.
+8.2 «я ненавидел» — Pasado imperfectivo: el sentimiento duró un tiempo en vez de ocurrir una vez. La terminación de "ненавидел" depende otra vez del género de quien habla.
+8.3 «овощи» — Acusativo plural, idéntico al nominativo por ser inanimado. El ruso usa el plural "овощи", igual que el español «las verduras».
+8.4 «Теперь» — "Теперь" significa «ahora» en contraste con antes. "Сейчас" sería «en este preciso momento» y aquí sonaría mal.
+8.5 «я ем их» — "Есть" en presente: "я ем", "он ест". "Их" es el acusativo de "они" y remite a las verduras.
+8.6 «почти каждый день» — "Почти" va justo delante de lo que matiza. "Каждый день" es una expresión de tiempo en acusativo y no lleva preposición.
+8.7 «Люди» — "Люди" es el plural irregular de "человек". La forma "человеки" no existe, así que hay que aprender la pareja de memoria.
+8.8 «могут меняться» — Tras "мочь" el verbo se queda en infinitivo: "могут меняться". La "-ся" lo hace intransitivo: la gente cambia ella misma, no cambia otra cosa.
+8.9 «я думаю» — La fórmula "я думаю" suaviza la afirmación al final de la frase, igual que el español «creo», y va separada por coma.
+9.1 «Спортзал» — El sujeto en nominativo. "Спортзал" es una palabra compuesta de "спортивный" y "зал", y es masculina.
+9.2 «рядом с моим домом» — "Рядом с" más instrumental: "мой дом" pasa a "моим домом". Las dos palabras reciben terminación de instrumental.
+9.3 «закрылся в прошлом месяце» — La partícula "-ся" vuelve a hacerlo intransitivo: el gimnasio cerró, nadie lo cerró. "В прошлом месяце" usa "в" más preposicional, como en la sexta frase.
+9.4 «Теперь» — El mismo contraste con el pasado que en la octava frase: "теперь" opone el presente a lo de antes.
+9.5 «я бегаю» — "Бегать" describe una carrera repetida o sin dirección fija, mientras que "бежать" sería un trayecto único. La costumbre pide "бегаю".
+9.6 «в парке» — "В" más preposicional para estar dentro de algo: "парк" pasa a "в парке".
+9.7 «Это бесплатно» — "Бесплатно" es una forma corta neutra usada impersonalmente, sin verbo alguno. "Это" remite a correr por el parque.
+9.8 «и воздух» — Nominativo como sujeto de lo que sigue. Sin artículo, nada distingue "воздух" de «el aire».
+9.9 «намного лучше» — "Лучше" es el comparativo irregular de "хороший". "Намного" es el mismo refuerzo que en la segunda frase.
+10.1 «Я купил» — Pasado perfectivo: una compra única y terminada. Otra vez la terminación masculina — una mujer diría "купила".
+10.2 «велосипед» — Acusativo de un masculino inanimado, idéntico al nominativo: "велосипед".
+10.3 «весной» — El instrumental sin preposición expresa la estación: "весной", "летом", "зимой". Es el mismo patrón que "вечером" para los momentos del día.
+10.4 «Я пользуюсь им» — "Пользоваться" siempre rige instrumental, así que "он" pasa a "им". Es un caso que exige el verbo, no algo que se pueda deducir del significado.
+10.5 «почти» — "Почти" suaviza lo que viene detrás y va justo delante, como en la octava frase.
+10.6 «каждый день» — Acusativo para una expresión de tiempo repetida, sin preposición. "Каждый" es masculino porque "день" lo es.
+10.7 «Он быстрее» — "Он" se refiere a la bici: los pronombres rusos siguen el género gramatical. "Быстрее" es el comparativo y no necesita ningún verbo.
+10.8 «автобуса» — Tras un comparativo el ruso puede omitir "чем" y poner el segundo término en genitivo: "быстрее автобуса" equivale a "быстрее, чем автобус".
+10.9 «и я лучше себя чувствую» — "Чувствовать себя" es una pareja fija para hablar de cómo se encuentra uno, y "себя" no se puede quitar. "Лучше" es el mismo comparativo irregular de la novena frase.
