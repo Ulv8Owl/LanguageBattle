@@ -1,0 +1,180 @@
+1.1 "The performance review" — The fixed HR term for the annual appraisal. Naming it flatly, with "the", already sets a resigned tone.
+1.2 "went about as well" — "About as well as" is a comparative frame used almost exclusively for lowered expectations.
+1.3 "as these things ever do" — "These things" reduces the event to a familiar genre; "ever" turns the comparison into a verdict on the whole ritual.
+1.4 "I was told" — Agentless passive. The speaker was a recipient, not a participant — the key to the irony that follows.
+1.5 "I have \"excellent communication skills\"" — The quotation marks are scare quotes: the words are quoted precisely because the speaker does not accept them.
+1.6 ", which apparently means I answer emails" — "Apparently" signals reported reasoning the speaker finds absurd. The deflation from "skills" to "emails" is the joke.
+1.7 "There was also" — "There was" keeps the agent hidden again, as though the feedback simply materialised.
+1.8 "a gentle suggestion" — In British workplace English "gentle suggestion" usually describes something that was neither gentle nor a suggestion.
+1.9 "that I could be more strategic" — "Could be more X" is standard appraisal softening for "you are not X". "Strategic" is the vaguest praise-word in corporate English.
+1.10 "Nobody has ever explained" — Present Perfect with "ever" covers the speaker's entire career, which is what makes the complaint funny.
+1.11 "what that word means" — An embedded question keeps statement word order: "what that word means", never "what does that word mean".
+1.12 "in practice" — The phrase that quietly separates corporate language from actual work; it carries the whole argument.
+1.13 "I nodded" — A physical action instead of a reaction. The absence of comment is the comment.
+1.14 "the way you nod" — Generic "you" invites the reader into a shared experience; "the way" introduces a manner clause without "in which".
+1.15 "when the alternative is a longer conversation" — Understatement: agreement is presented as the cheaper option, not the honest one.
+1.16 "On balance" — A discourse marker borrowed from formal argument. Applying it to forty tedious minutes is deliberately over-serious.
+1.17 "I'd call it" — "I would call it" hedges the verdict and makes it sound like a considered judgement.
+1.18 "a productive forty minutes" — A plural period treated as one unit takes "a". The word "productive" is the final piece of straight-faced irony.
+2.1 "I hit" — "Hit a plateau / a wall / a limit" — the collocation is fixed and slightly physical, which is why it feels honest.
+2.2 "the classic plateau" — "Classic" here means "predictable and shared by everyone", not "excellent".
+2.3 "at around B1" — "At around" is deliberately imprecise; levels are being used as informal landmarks, not as certificates.
+2.4 "Everything I said" — A contact relative clause with "that" omitted, standard in fluent speech.
+2.5 "was technically correct" — "Technically" concedes accuracy while withdrawing approval — one of the most useful ironic adverbs in English.
+2.6 "and completely lifeless" — The pairing of a positive and a damning adjective in one breath is the whole self-diagnosis.
+2.7 "What finally shifted things" — A pseudo-cleft; fronting the "what" clause builds expectation before the answer.
+2.8 "wasn't a textbook" — The negative half of the cleft prepares a contrast that the comma will complete.
+2.9 ", it was a podcast about football" — A comma splice used for rhythm — acceptable in informal writing where a colon would feel heavy.
+2.10 "Half of it" — "Half of it" with a singular verb, because "it" refers to the podcast as a mass.
+2.11 "went straight over my head" — Idiom for "I understood none of it". "Straight" intensifies without sounding self-pitying.
+2.12 ", which turned out to be the point" — "Turn out" reveals an unexpected truth; "the point" reframes failure as method.
+2.13 "You pick up rhythm" — Impersonal "you" for a general truth. "Pick up" = acquire without studying.
+2.14 "long before" — A comparative of time used as a connector; "long" makes the gap feel structural rather than accidental.
+2.15 "you pick up vocabulary" — The deliberate repetition of "pick up" creates a balanced, aphoristic sentence.
+2.16 "Now I sound" — "Sound" + adjective or "like" + noun; it describes the impression made on others.
+2.17 "almost like a person" — Comic understatement: the implied earlier state was "not quite human".
+2.18 ", at least on good days" — A final qualifier that undercuts the claim just enough to keep it likeable.
+3.1 "Moving cities" — A gerund subject, and a compact idiom: "move cities" needs no preposition.
+3.2 "in your thirties" — Fixed plural for a decade of life, with the generic "your".
+3.3 "is a strange kind of reset" — "A kind of" softens a metaphor the speaker is not fully committing to. "Reset" is borrowed from technology.
+3.4 "You keep" — The generic "you" continues; it turns a private experience into a shared rule.
+3.5 "the same problems" — "The same" always takes "the".
+3.6 ", but the walls are different" — A concrete image standing in for everything abstract. This is the sentence the whole line is built on.
+3.7 "For the first two months" — "For" + duration, with "the first" fixing which two months.
+3.8 "I was convinced" — Stronger than "I thought", and it implies the conviction later collapsed.
+3.9 "I'd made a mistake" — Past Perfect inside a past frame: the mistake preceded the conviction.
+3.10 "Then a barista" — The indefinite article introduces a stranger who will matter more than the sentence admits.
+3.11 "started remembering my order" — "Start + -ing" for a gradual habit. Remembering an order is a very small event carrying a very large meaning.
+3.12 ", and something quietly settled" — Vague subject plus a quiet verb; the deliberate imprecision is the emotional point.
+3.13 "It turns out" — A discourse marker announcing a conclusion the speaker did not expect to reach.
+3.14 "belonging" — A gerund used as an abstract noun; no article.
+3.15 "is mostly repetition" — A flat, unromantic definition. The plainness is what makes it convincing.
+3.16 "I still miss" — "Still" preserves the feeling without reopening the argument.
+3.17 "the old flat" — "Old" here means "previous", not "aged".
+3.18 ", mainly for the light" — The narrowing to one physical detail avoids sentimentality — a very English closing move.
+4.1 "We asked him" — "Ask somebody for something"; the person comes first.
+4.2 "for a simple form" — "Simple" is doing the heavy lifting: it defines the gap that the rest of the line will measure.
+4.3 ", ideally by Thursday" — "Ideally" pre-emptively lowers the demand, and "by" marks a deadline rather than a moment.
+4.4 "What came back" — Another pseudo-cleft, and "came back" makes the deliverable sound like something released into the wild.
+4.5 "three weeks later" — The time gap does the criticism so the speaker does not have to.
+4.6 "was a small, beautiful framework" — Genuine praise placed exactly where a complaint was expected; this is what makes the irony affectionate.
+4.7 "It handled" — "Handle a case" is standard engineering usage.
+4.8 "every case" — "Every" + singular noun, setting up the sting in the next element.
+4.9 "we had never mentioned" — Past Perfect + "never": the requirements were invented, not requested.
+4.10 "To be entirely fair" — A fairness marker; "entirely" makes the concession sound almost reluctant.
+4.11 "the code" — Uncountable in this sense: never "a code" for a body of software.
+4.12 "is genuinely elegant" — "Genuinely" marks sincerity in a passage full of irony, so the reader knows where the line is.
+4.13 "It is also" — "Also" pivots from praise to problem without any adversative word — smoother and more damning than "but".
+4.14 "the only thing" — The superlative frame prepares a conclusion that cannot be argued with.
+4.15 "nobody else can maintain" — "Maintain" is the precise technical verb for keeping code alive; "bus factor" is the concept behind the joke.
+4.16 "There's a lesson in there" — "In there" gestures at the story rather than stating the moral.
+4.17 "that I keep failing" — "Keep + -ing" for stubborn repetition, now aimed at the speaker.
+4.18 "to learn myself" — The reflexive at the end redistributes the blame and rescues the whole line from smugness.
+5.1 "My father" — "My father" rather than "my dad" sets a slightly formal frame that the warmth then undercuts.
+5.2 "has developed" — Present Perfect for a state built up over time and still current.
+5.3 "a complicated relationship with his tablet" — "A complicated relationship with" is normally used about people; applying it to a device is the joke.
+5.4 "He treats every notification" — "Treat X as Y" is the pattern; "every" makes it a rule rather than an incident.
+5.5 "as a personal challenge" — The register jumps upward, mimicking how seriously he takes it.
+5.6 "to his authority" — The abstract noun completes the mock-heroic framing.
+5.7 "When I visit" — Present Simple after "when" for a recurring situation.
+5.8 ", we spend twenty minutes" — "Spend time + -ing" is the fixed pattern.
+5.9 "resolving crises I cannot reproduce" — "Reproduce" is software-testing vocabulary; borrowing it for family life is precise and funny.
+5.10 "Last month" — A single anecdote drops into the general pattern to make it concrete.
+5.11 "he sent me a voice message" — Double object: "send somebody something".
+5.12 "that was four seconds of breathing" — A defining relative clause delivering the image with no comment attached.
+5.13 "I've stopped explaining" — "Stop + -ing" = abandoning the activity itself.
+5.14 "and started" — The ellipsis of the auxiliary ("have") is normal when two perfect verbs share a subject.
+5.15 "just fixing things" — "Just" marks the surrender of principle; it is the pivot of the whole line.
+5.16 "He's happier" — A comparative with no "than": the second half is understood.
+5.17 ", I'm faster" — Parallel clauses with no conjunction — the rhythm carries the reasoning.
+5.18 ", and neither of us has to admit anything" — "Neither of us" takes a singular verb in careful English. The unspoken agreement is the point of the story.
+6.1 "The workshop" — A neutral word that the rest of the line will slowly hollow out.
+6.2 "was billed" — "Be billed as" = advertised as. It implies a gap between the promise and the product.
+6.3 "as a strategic alignment session" — Three corporate nouns in a row; the pile-up is the satire.
+6.4 "In practice" — The standard pivot from claim to reality, echoing line 1.
+6.5 "it was eleven people" — The oddly exact number makes the scene real and slightly absurd.
+6.6 "agreeing loudly about nothing" — A reduced relative clause. "Loudly" plus "nothing" is the contradiction that carries the humour.
+6.7 "Somebody put" — Anonymity again; the speaker declines to name the guilty party.
+6.8 "the word \"synergy\"" — Quoted as an object, not used as a word — the classic way English marks a term as discredited.
+6.9 "on an actual slide" — "Actual" expresses disbelief that the thing really happened, not just that it was said.
+6.10 "I'd like to say" — A frame that announces the confession before it arrives.
+6.11 "I objected" — Short and formal, which is exactly why the next clause can undercut it.
+6.12 ", but I was mostly watching the clock" — Past Continuous for the real, ongoing behaviour behind the imagined one.
+6.13 "We left" — The plain narrative verb resumes after the digression.
+6.14 "with four action points" — "Action point" is meeting jargon for a task someone has agreed to do.
+6.15 ", two of which had owners" — "Two of which" is the formal relative structure. "Owner" completes the jargon; the arithmetic makes the joke.
+6.16 "By Friday" — "By" + a point in time for a deadline that arrives on its own.
+6.17 "the whole thing" — Dismissive summary; it refuses the event any further dignity.
+6.18 "had quietly evaporated" — Past Perfect for what had already happened by Friday. "Evaporate" plus "quietly" is a precise metaphor for corporate forgetting.
+7.1 "I went through" — "Go through a phase" is the fixed idiom for a temporary obsession, and it admits the ending in advance.
+7.2 "a phase" — The indefinite article keeps it one of several; the speaker is not claiming to be interesting.
+7.3 "of taking bread very seriously" — "Take something seriously" — the humour is in applying it to bread.
+7.4 "There was a starter" — Existential "there was" introduces a new participant in the story.
+7.5 "in the fridge" — British "fridge"; Americans more often say "refrigerator" in writing.
+7.6 "with a name and a feeding schedule" — Two details that quietly turn the starter into a pet. Nothing is explained, which is why it works.
+7.7 "For about six weeks" — The approximation signals that the exact number was never the point.
+7.8 "my kitchen" — The possessive keeps the scene domestic and small.
+7.9 "smelled genuinely wonderful" — "Smell" is a linking verb, so it takes an adjective, not an adverb.
+7.10 "Then work got busy" — "Get + adjective" for a change of state; the vagueness of "work" is honest.
+7.11 ", and the starter" — The subject returns for its final appearance.
+7.12 "met a quiet end" — A slightly literary euphemism for death, used affectionately about a jar of flour.
+7.13 "I tell people" — Present Simple for the repeated excuse.
+7.14 "I'll start again" — "Will" for a promise the speaker half believes.
+7.15 "when things calm down" — After "when" about the future, English uses the present tense.
+7.16 "We both know" — The turn towards the reader; the confession becomes shared.
+7.17 "that things" — Repetition of "things" links the promise directly to its refutation.
+7.18 "do not calm down" — The uncontracted "do not" gives the sentence a flat, final rhythm that "don't" would lose.
+8.1 "We've known each other" — Present Perfect for a state that began in the past and continues; "know" is not used in the continuous.
+8.2 "long enough" — "Enough" follows the adjective or adverb it modifies: "long enough", never "enough long".
+8.3 "to skip the updates" — "The updates" = the ritual exchange of news. Skipping it is presented as an achievement.
+8.4 "He'll call" — "Will" for characteristic, habitual behaviour, not for the future.
+8.5 "once every few months" — A frequency phrase built from "once" plus a vague interval.
+8.6 ", usually while driving somewhere" — A reduced clause with an implied subject. "Somewhere" refuses the detail on purpose.
+8.7 "Nothing important" — Adjectives follow indefinite pronouns: "nothing important", never "important nothing".
+8.8 "is ever said" — Passive with "ever" after a negative subject; it makes the rule sound like a law of nature.
+8.9 "in the first ten minutes" — The specificity implies long familiarity with the pattern.
+8.10 "Then, somewhere near the end" — The commas slow the sentence down exactly where the meaning turns.
+8.11 "one real thing" — "Real" is doing enormous work here: everything before it was not.
+8.12 "slips out" — An involuntary verb: nobody decided to say it, which is what makes it credible.
+8.13 "Neither of us" — Takes a singular verb in standard English.
+8.14 "comments on it" — "Comment on" requires the preposition.
+8.15 ", which is the whole arrangement" — "Arrangement" reframes an unspoken habit as a negotiated deal — dry and precise.
+8.16 "I'd struggle" — "Would struggle to" is a very English way of saying "could not".
+8.17 "to explain that friendship" — "That", not "this": the speaker is standing slightly outside it.
+8.18 "to anyone under thirty" — The generational aside lands lightly and leaves the judgement to the reader.
+9.1 "The chatbot" — Naming the machine as a character is what allows the whole line to be ironic.
+9.2 "was very keen" — "Keen to" is British for eager. Attributing enthusiasm to software is the first joke.
+9.3 "to help me today" — "Today" fixes the incident in time and hints that this happens often.
+9.4 "It asked" — Neutral reporting verb; the flatness is deliberate.
+9.5 "whether I'd tried" — "Whether" for a reported yes/no question, plus Past Perfect for the earlier attempt.
+9.6 "turning the router off and on" — After "try", the "-ing" form means testing a method. The separable phrasal verb splits around "the router".
+9.7 "I had" — Ellipsis: "I had tried". The bare auxiliary is exactly how English answers this kind of question.
+9.8 ", twice" — One word as its own clause; the brevity carries the exasperation.
+9.9 ", as I'd already explained in writing" — "As" = just as, in the way that. "In writing" quietly proves the machine was not listening.
+9.10 "After eleven minutes" — The precise number is the complaint; no adjective is needed.
+9.11 "it offered" — "Offer to + verb" for a voluntary act, which makes the machine sound generous.
+9.12 "to connect me to a human" — "A human" rather than "a person" is the register joke of the modern support call.
+9.13 "The human" — The word is now used as a category, echoing the machine's own vocabulary.
+9.14 "asked the same question" — The repetition is the entire argument of the line.
+9.15 ", but at least sounded embarrassed" — "At least" concedes a minimum; "embarrassed" restores the humanity the story was missing.
+9.16 "Progress" — A one-word sentence used as a verdict.
+9.17 ", of a sort" — A fixed qualifier meaning "barely deserving the name".
+9.18 ", and the router now works" — The plain factual ending refuses to resolve the irony, which is what makes it land.
+10.1 "I left a stable job" — "Stable" is chosen for its warmth and its dullness at the same time.
+10.2 "for something" — "For" marks the exchange; "something" withholds the detail deliberately.
+10.3 "considerably less certain" — "Considerably" is formal understatement; the vagueness is the honesty.
+10.4 "Everyone said" — Reported consensus, always slightly suspect in English narration.
+10.5 "it was brave" — Backshifted reported speech, and the word the rest of the sentence will dismantle.
+10.6 ", which is what people say when they mean reckless" — A relative clause plus "when they mean" — the standard structure for decoding a euphemism.
+10.7 "The first year" — A defined period; naming it prepares an honest admission.
+10.8 "was genuinely difficult" — "Genuinely" again marks sincerity inside an ironic register.
+10.9 ", and I don't recommend it lightly" — "Not lightly" is litotes: the negative form makes the warning stronger.
+10.10 "But I stopped" — The pivot of the whole line, placed at the start of the sentence for weight.
+10.11 "checking the clock" — "Stop + -ing" for a habit abandoned. The image replaces any explanation of happiness.
+10.12 "at four in the afternoon" — The exact hour is what makes the detail believable.
+10.13 "That sounds small" — "Sound" + adjective for how a claim comes across to others.
+10.14 "written down" — A reduced passive clause: "when it is written down".
+10.15 ", and it isn't" — Three words, contradicting the sentence they are attached to. The refusal to elaborate is the emphasis.
+10.16 "Ask me again" — An imperative addressed to the reader, which changes the whole footing of the line.
+10.17 "in five years" — "In" + a future period for the point when it will have passed.
+10.18 ", and I might have a proper answer" — "And" after an imperative works as a conditional. "Might" and "proper" together admit the story is not finished.
