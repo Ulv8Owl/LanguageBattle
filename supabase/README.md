@@ -437,11 +437,15 @@ Editor. Чтобы проверить сквозной путь «два реа�
    ```
 2. **Секреты самой функции** (не попадают в git, хранятся в Supabase):
    ```
-   npx supabase secrets set GOOGLE_API_KEY=<ключ Google>
+   npx supabase secrets set GOOGLE_API_KEY=<ключ Google Cloud, вида AIza...>
+   npx supabase secrets set LLM_API_KEY=<ключ AI Studio для Gemini>
    npx supabase secrets set LLM_MODEL=<имя модели Gemini>
    ```
-   Один ключ покрывает распознавание, синтез и модель — подробности и
-   диагностика отказов в разделе «Один ключ Google на три сервиса».
+   Ключей на практике два, а не один: Cloud-ключ (`AIza...`) обслуживает
+   распознавание и синтез, а Gemini живёт в AI Studio со своим ключом.
+   Почему так и как отличать отказы — в разделе «Ключи Google: какой для
+   чего». Если ваш Cloud-ключ примут все три сервиса, `LLM_API_KEY` можно
+   не задавать: `GOOGLE_API_KEY` подхватится и моделью тоже.
 
    **`LLM_MODEL` задавать ОБЯЗАТЕЛЬНО, значения по умолчанию у него нет.**
    Однажды в коде стояло имя модели, которой у провайдера не существует:
@@ -452,6 +456,19 @@ Editor. Чтобы проверить сквозной путь «два реа�
 
    Список доступных моделей приложит `config-check` (ниже) — при отказе с
    «модель не найдена» он сам кладёт его в поле `available_models`.
+
+   **В этом списке есть модели, которые вам всё равно откажут.** Проверено:
+   `gemini-2.5-flash` числится в выдаче `/models`, но на вызов отвечает
+   `404` — «no longer available to new users». Список показывает, что
+   вообще существует, а не что доступно вашему проекту. Рабочий выбор на
+   сегодня — `gemini-3.6-flash` (именно его Google называет в тексте
+   отказа) или псевдоним `gemini-flash-latest`.
+
+   У всех сегодняшних flash-моделей рассуждения включены по умолчанию, и
+   их токены тратятся из общего бюджета ответа. Поэтому `LLM_MAX_TOKENS`
+   по умолчанию 0 (без потолка): низкий потолок модель израсходует на
+   рассуждения и вернёт пустой ответ с `finishReason=MAX_TOKENS`, что
+   выглядит как поломка, а не как нехватка бюджета.
 
    **Другой провайдер модели** (любой OpenAI-совместимый) — это две
    переменные, а не правка кода:
@@ -765,7 +782,7 @@ npx supabase functions deploy evaluate-recording
 
 | Где | Что там лежит | Кто видит | Как задать |
 |-----|---------------|-----------|------------|
-| **Секреты Edge Function** | `GOOGLE_API_KEY` (общий), при необходимости `ASR_API_KEY` / `TTS_API_KEY` / `LLM_API_KEY`, плюс `LLM_PROVIDER`, `LLM_MODEL`, `ASR_PROVIDER`, флаги `EXPLAIN_ENABLED` / `EXPLAIN_PREFER_DATASET` / `JUDGE_ENABLED` | только код функций на серверах Supabase | `npx supabase secrets set KEY=value` |
+| **Секреты Edge Function** | `GOOGLE_API_KEY` (Cloud-ключ для ASR и TTS) и `LLM_API_KEY` (ключ AI Studio для Gemini), при необходимости `ASR_API_KEY` / `TTS_API_KEY`, плюс `LLM_PROVIDER`, `LLM_MODEL`, `ASR_PROVIDER`, флаги `EXPLAIN_ENABLED` / `EXPLAIN_PREFER_DATASET` / `JUDGE_ENABLED` | только код функций на серверах Supabase | `npx supabase secrets set KEY=value` |
 | **Supabase Vault** (SQL) | `evaluate_recording_url`, `service_role_key` — их читает триггер БД | только `SECURITY DEFINER`-функции в БД | `select vault.create_secret(...)` |
 | **`.env` приложения** | `SUPABASE_URL`, `SUPABASE_ANON_KEY` — и больше НИЧЕГО | **все**: файл лежит внутри APK/IPA | обычный файл, в git не попадает |
 
@@ -787,33 +804,46 @@ npx supabase functions deploy evaluate-recording
 отладочная сборка упадёт с объяснением, вместо того чтобы молча уехать в
 магазин приложений вместе с ключом.
 
-### Один ключ Google на три сервиса
+### Ключи Google: какой для чего
 
 Приложение ходит в три API Google: распознавание речи
 (`speech.googleapis.com`), синтез речи (`texttospeech.googleapis.com`) и
-модель (`generativelanguage.googleapis.com`). Ключ у них может быть один:
+модель (`generativelanguage.googleapis.com`).
+
+Задумывалось, что ключ будет один. **На практике их два**, и это проверено
+живыми запросами, а не выведено из документации:
+
+| Ключ | Откуда | Что обслуживает |
+|---|---|---|
+| `AIza...` | Google Cloud → Credentials → API key | распознавание и синтез |
+| `AQ....` | AI Studio (может быть привязан к service account) | Gemini |
+
+Cloud-ключ Gemini не обслуживает, а ключ AI Studio Cloud-сервисы не
+узнаю́т как ключ вовсе. Отсюда и порядок поиска: сначала переменная
+сервиса (`ASR_API_KEY`, `TTS_API_KEY`, `LLM_API_KEY`), потом общая
+`GOOGLE_API_KEY`. Рабочая раскладка:
 
 ```
-npx supabase secrets set GOOGLE_API_KEY=<ключ>
+npx supabase secrets set GOOGLE_API_KEY=<Cloud-ключ AIza...>   # ASR и TTS
+npx supabase secrets set LLM_API_KEY=<ключ AI Studio>          # Gemini
 npx supabase secrets set LLM_MODEL=<имя модели Gemini>
 ```
 
-Порядок поиска ключа — сначала переменная сервиса (`ASR_API_KEY`,
-`TTS_API_KEY`, `LLM_API_KEY`), потом общая. Переопределение на сервис
-осталось не для красоты: «может быть один» — это не «обязан». Cloud-API и
-AI Studio выдают ключи по-разному, и один и тот же ключ там принимают не
-всегда. Симптом характерный и по нему легко ошибиться диагнозом:
+Диагностика отказов — по коду ошибки, и здесь легко ошибиться диагнозом:
 
-* ключ **не тот формат** для этого API — `401 CREDENTIALS_MISSING`,
+* ключ **не того рода** для этого API — `401 CREDENTIALS_MISSING`,
   «API keys are not supported by this API». Выглядит как «ключ не
-  передали», хотя он передан: сервис просто не узнал его как ключ;
+  передали», хотя он передан: сервис просто не узнал его как ключ. Это
+  ровно случай «ключ AI Studio отдали в Speech-to-Text»;
 * ключ **свой, но API запрещён** — `403 API_KEY_SERVICE_BLOCKED`, в
   подробностях будет номер проекта и имя API. Чинится в консоли Google:
   включить API в проекте и разрешить его в ограничениях ключа;
-* ключа **нет вовсе** — `400 API_KEY_INVALID`, «API key not valid».
-
-Если один ключ на все три не принимается, заводятся два и раскладываются
-по своим переменным — код от этого не меняется.
+* ключа **нет вовсе** или он битый — `400 API_KEY_INVALID`, «API key not
+  valid»;
+* ключ **рабочий, но платить нечем** — `429 RESOURCE_EXHAUSTED`,
+  «prepayment credits are depleted». Это НЕ проблема ключа и не повод его
+  менять: пополняется в AI Studio → Billing. Судья такой отказ узнаёт
+  (`isProviderLimit`) и не тратит попытки на повторы.
 
 ### Проверка, что ключи заданы и работают: `config-check`
 

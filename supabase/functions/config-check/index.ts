@@ -160,10 +160,23 @@ async function checkLlm(): Promise<CheckResult> {
         user: "ping",
         json: true,
         temperature: 0,
-        timeoutMs: 15_000,
-        maxTokens: 64,
+        timeoutMs: 30_000,
+        // Потолок ЩЕДРЫЙ, хотя ответ ожидается в десяток символов.
+        //
+        // Здесь стояло 64, и это ломало саму проверку. У всех доступных
+        // сегодня flash-моделей Gemini рассуждения включены по умолчанию
+        // (thinking: true в списке моделей), а токены рассуждений тратятся
+        // из того же бюджета, что и ответ. С потолком в 64 модель успевала
+        // только подумать: приходил finishReason=MAX_TOKENS с пустым
+        // текстом, и проверка объявляла неисправным работающий ключ —
+        // худший вид отчёта, потому что чинить после него идут не туда.
+        //
+        // Настоящие вызовы (судья, разбор) потолка не ставят вовсе, так
+        // что ограничение здесь не проверяет ничего полезного; пусть оно
+        // просто не мешает.
+        maxTokens: 4096,
       });
-    }, 20_000);
+    }, 40_000);
     return {
       configured: true,
       reachable: true,
@@ -185,7 +198,13 @@ async function checkLlm(): Promise<CheckResult> {
         ? await listGeminiModels(baseUrl, apiKey)
         : await listModels(baseUrl, apiKey);
       result.detail += ` — похоже, модель ${model} провайдер не знает. ` +
-        "Выберите имя из available_models и задайте: npx supabase secrets set LLM_MODEL=<имя>";
+        "Выберите имя из available_models и задайте: npx supabase secrets set LLM_MODEL=<имя>. " +
+        // Список показывает, что существует, а не что доступно вашему
+        // проекту: gemini-2.5-flash в нём есть, но на вызов отвечает 404
+        // «no longer available to new users». Без этой оговорки следующее
+        // имя выбирают из того же списка и получают тот же отказ.
+        "Учтите: в списке есть модели, закрытые для новых проектов — " +
+        "если выбранная отвечает 404 «no longer available to new users», берите более новую.";
     }
     return result;
   }
