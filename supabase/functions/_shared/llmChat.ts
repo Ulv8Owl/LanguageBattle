@@ -9,8 +9,8 @@
  *
  * ПРОВАЙДЕРЫ:
  *
- *   gemini (по умолчанию) — Google Gemini API, generativelanguage.googleapis.com.
- *   openai               — любой сервис с OpenAI-совместимым /chat/completions.
+ *   openai (по умолчанию) — любой сервис с OpenAI-совместимым /chat/completions.
+ *   gemini                — Google Gemini API, generativelanguage.googleapis.com.
  *
  * Почему у Gemini выбран generateContent, а не Interactions API. Новый
  * Interactions API у Google действительно есть, и в документации он назван
@@ -44,8 +44,44 @@ export interface ChatRequest {
 const DEFAULT_OPENAI_BASE = "https://api.b.ai/v1";
 const DEFAULT_GEMINI_BASE = "https://generativelanguage.googleapis.com/v1beta";
 
+/**
+ * Провайдер модели. По умолчанию openai-совместимый — тот, на котором
+ * судья работал до Gemini и работает сейчас.
+ *
+ * Какое-то время по умолчанию стоял gemini. Отката кода это не потребовало
+ * и не потребует в обратную сторону: путь до Gemini никуда не делся, он
+ * включается одной переменной LLM_PROVIDER=gemini. Ради этого адаптер и
+ * писался — чтобы смена провайдера была настройкой, а не правкой двух
+ * файлов, которые успеют разойтись на первой же.
+ */
 export function llmProvider(): string {
-  return (Deno.env.get("LLM_PROVIDER") ?? "gemini").toLowerCase();
+  return (Deno.env.get("LLM_PROVIDER") ?? "openai").toLowerCase();
+}
+
+/**
+ * Ключ для модели.
+ *
+ * LLM_API_KEY главнее всегда. Общий GOOGLE_API_KEY подхватывается ТОЛЬКО
+ * когда провайдер действительно Google: у стороннего сервиса ключ Google
+ * не просто не подойдёт — мы отправим чужому получателю рабочий ключ от
+ * распознавания и синтеза. Утечка ключа стоит дороже, чем понятный отказ
+ * «ключ не задан», поэтому здесь не «попробуем, вдруг подойдёт», а явная
+ * проверка провайдера.
+ */
+export function llmKey(): string | null {
+  const own = Deno.env.get("LLM_API_KEY");
+  if (own && own.length > 0) return own;
+  if (llmProvider() !== "gemini") return null;
+  const shared = Deno.env.get("GOOGLE_API_KEY");
+  return shared && shared.length > 0 ? shared : null;
+}
+
+/** Что подсказать, когда ключа модели нет. */
+export function missingLlmKeyMessage(): string {
+  const base = "нет ключа модели: npx supabase secrets set LLM_API_KEY=<ключ>";
+  return llmProvider() === "gemini"
+    ? `${base} (для Gemini подойдёт и общий GOOGLE_API_KEY)`
+    : base;
 }
 
 /** Имя модели. Пусто — ошибка, и намеренно: см. комментарий в llmChat. */
@@ -66,6 +102,9 @@ export function llmConfigDebug(): Record<string, unknown> {
     provider: llmProvider(),
     model: llmModel() ?? "(не задана)",
     base_url: llmBaseUrl(),
+    key_from: Deno.env.get("LLM_API_KEY")
+      ? "LLM_API_KEY"
+      : (llmProvider() === "gemini" && Deno.env.get("GOOGLE_API_KEY") ? "GOOGLE_API_KEY" : "(не задан)"),
   };
 }
 

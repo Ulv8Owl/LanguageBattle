@@ -17,7 +17,15 @@
 import { bcp47For } from "../_shared/asr/index.ts";
 import { evaluateGrammar, trivialProbeEnabled } from "../_shared/evaluateGrammar.ts";
 import { googleKey, googleKeySource, missingKeyMessage } from "../_shared/googleKey.ts";
-import { llmBaseUrl, llmChat, llmModel, llmProvider } from "../_shared/llmChat.ts";
+import {
+  llmBaseUrl,
+  llmChat,
+  llmConfigDebug,
+  llmKey,
+  llmModel,
+  llmProvider,
+  missingLlmKeyMessage,
+} from "../_shared/llmChat.ts";
 import { synthesizeSpeech } from "../_shared/tts.ts";
 
 /// Заведомо ошибочная фраза: судья ОБЯЗАН найти здесь минимум одну ошибку
@@ -126,12 +134,12 @@ async function checkAsr(): Promise<CheckResult> {
 }
 
 async function checkLlm(): Promise<CheckResult> {
-  const apiKey = googleKey("llm");
+  const apiKey = llmKey();
   if (!apiKey) {
     return {
       configured: false,
       reachable: null,
-      detail: `судья и разбор ошибок не заработают: ${missingKeyMessage("llm")}`,
+      detail: `судья и разбор ошибок не заработают: ${missingLlmKeyMessage()}`,
     };
   }
 
@@ -411,13 +419,10 @@ Deno.serve(async (req) => {
           key_from: googleKeySource("asr"),
           ...asr,
         },
-        llm: {
-          provider: llmProvider(),
-          base_url: llmBaseUrl(),
-          model: llmModel() ?? "(не задана)",
-          key_from: googleKeySource("llm"),
-          ...llm,
-        },
+        // Ровно тот же снимок настроек, что уходит в отладочную панель
+        // раунда: расходиться этим двум описаниям одной конфигурации
+        // нельзя — по ним сверяют «а то ли вообще проверяли».
+        llm: { ...llmConfigDebug(), ...llm },
         // llm выше проверяет только доступность эндпоинта; judge прогоняет
         // настоящий разбор — эндпоинт может отвечать 200, а судья при этом
         // не работать.

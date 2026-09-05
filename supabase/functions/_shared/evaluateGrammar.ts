@@ -3,8 +3,7 @@
 // всего проекта, и смена провайдера (Gemini <-> OpenAI-совместимый) это
 // правка переменных окружения Edge Function, а не кода.
 
-import { googleKey, missingKeyMessage } from "./googleKey.ts";
-import { llmChat, llmConfigDebug } from "./llmChat.ts";
+import { llmChat, llmConfigDebug, llmKey, missingLlmKeyMessage } from "./llmChat.ts";
 
 export interface GrammarError {
   offset: number;
@@ -437,8 +436,8 @@ async function callLlmOnce(
   /** Сколько отпущено на ЭТОТ запрос — уже с учётом бюджета всей задачи. */
   callTimeoutMs: number,
 ): Promise<string> {
-  const apiKey = googleKey("llm");
-  if (!apiKey) throw new Error(missingKeyMessage("llm"));
+  const apiKey = llmKey();
+  if (!apiKey) throw new Error(missingLlmKeyMessage());
 
   // Потолка длины ответа по умолчанию НЕТ, и это важно. Любой наш потолок
   // здесь резал ответ: рассуждающие модели тратят часть бюджета на

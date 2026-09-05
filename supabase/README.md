@@ -438,14 +438,13 @@ Editor. Чтобы проверить сквозной путь «два реа�
 2. **Секреты самой функции** (не попадают в git, хранятся в Supabase):
    ```
    npx supabase secrets set GOOGLE_API_KEY=<ключ Google Cloud, вида AIza...>
-   npx supabase secrets set LLM_API_KEY=<ключ AI Studio для Gemini>
-   npx supabase secrets set LLM_MODEL=<имя модели Gemini>
+   npx supabase secrets set LLM_API_KEY=<ключ провайдера модели>
+   npx supabase secrets set LLM_MODEL=<имя модели>
    ```
-   Ключей на практике два, а не один: Cloud-ключ (`AIza...`) обслуживает
-   распознавание и синтез, а Gemini живёт в AI Studio со своим ключом.
-   Почему так и как отличать отказы — в разделе «Ключи Google: какой для
-   чего». Если ваш Cloud-ключ примут все три сервиса, `LLM_API_KEY` можно
-   не задавать: `GOOGLE_API_KEY` подхватится и моделью тоже.
+   `GOOGLE_API_KEY` — распознавание и синтез речи. `LLM_API_KEY` — модель,
+   и это ОТДЕЛЬНЫЙ ключ: провайдер модели по умолчанию не Google (см.
+   «Провайдер модели» ниже), а общий ключ Google уходить стороннему
+   сервису не должен.
 
    **`LLM_MODEL` задавать ОБЯЗАТЕЛЬНО, значения по умолчанию у него нет.**
    Однажды в коде стояло имя модели, которой у провайдера не существует:
@@ -470,15 +469,26 @@ Editor. Чтобы проверить сквозной путь «два реа�
    рассуждения и вернёт пустой ответ с `finishReason=MAX_TOKENS`, что
    выглядит как поломка, а не как нехватка бюджета.
 
-   **Другой провайдер модели** (любой OpenAI-совместимый) — это две
-   переменные, а не правка кода:
+   **Провайдер модели.** По умолчанию `openai` — любой сервис с
+   OpenAI-совместимым `/chat/completions`, база по умолчанию
+   `https://api.b.ai/v1`. Меняется переменными, не кодом:
    ```
-   npx supabase secrets set LLM_PROVIDER=openai
    npx supabase secrets set LLM_BASE_URL=https://<провайдер>/v1
    npx supabase secrets set LLM_API_KEY=<ключ провайдера>
    ```
    `LLM_BASE_URL` — база БЕЗ `/chat/completions` в конце: код дописывает
    этот путь сам.
+
+   **Переключиться на Gemini** — одна переменная:
+   ```
+   npx supabase secrets set LLM_PROVIDER=gemini
+   npx supabase secrets set LLM_MODEL=gemini-3.6-flash
+   ```
+   Только при `LLM_PROVIDER=gemini` ключ модели может подхватиться из
+   общего `GOOGLE_API_KEY`. При любом другом провайдере общий ключ
+   игнорируется намеренно: отправить чужому сервису рабочий Cloud-ключ от
+   распознавания и синтеза дороже, чем получить понятный отказ «ключ не
+   задан».
 
    Почему у Gemini используется `generateContent`, а не более новый
    Interactions API: нам нужен не текст, а строгий JSON заданной формы, и
@@ -782,7 +792,7 @@ npx supabase functions deploy evaluate-recording
 
 | Где | Что там лежит | Кто видит | Как задать |
 |-----|---------------|-----------|------------|
-| **Секреты Edge Function** | `GOOGLE_API_KEY` (Cloud-ключ для ASR и TTS) и `LLM_API_KEY` (ключ AI Studio для Gemini), при необходимости `ASR_API_KEY` / `TTS_API_KEY`, плюс `LLM_PROVIDER`, `LLM_MODEL`, `ASR_PROVIDER`, флаги `EXPLAIN_ENABLED` / `EXPLAIN_PREFER_DATASET` / `JUDGE_ENABLED` | только код функций на серверах Supabase | `npx supabase secrets set KEY=value` |
+| **Секреты Edge Function** | `GOOGLE_API_KEY` (Cloud-ключ для ASR и TTS) и `LLM_API_KEY` (ключ провайдера модели), при необходимости `ASR_API_KEY` / `TTS_API_KEY`, плюс `LLM_PROVIDER`, `LLM_MODEL`, `ASR_PROVIDER`, флаги `EXPLAIN_ENABLED` / `EXPLAIN_PREFER_DATASET` / `JUDGE_ENABLED` | только код функций на серверах Supabase | `npx supabase secrets set KEY=value` |
 | **Supabase Vault** (SQL) | `evaluate_recording_url`, `service_role_key` — их читает триггер БД | только `SECURITY DEFINER`-функции в БД | `select vault.create_secret(...)` |
 | **`.env` приложения** | `SUPABASE_URL`, `SUPABASE_ANON_KEY` — и больше НИЧЕГО | **все**: файл лежит внутри APK/IPA | обычный файл, в git не попадает |
 
@@ -806,27 +816,30 @@ npx supabase functions deploy evaluate-recording
 
 ### Ключи Google: какой для чего
 
-Приложение ходит в три API Google: распознавание речи
+Приложение умеет ходить в три API Google: распознавание речи
 (`speech.googleapis.com`), синтез речи (`texttospeech.googleapis.com`) и
 модель (`generativelanguage.googleapis.com`).
 
-Задумывалось, что ключ будет один. **На практике их два**, и это проверено
-живыми запросами, а не выведено из документации:
+Из них к Google сегодня ходят двое: распознавание и синтез. Модель по
+умолчанию берётся у стороннего OpenAI-совместимого провайдера, и её ключ
+живёт отдельно (`LLM_API_KEY`) — см. «Провайдер модели» выше.
 
-| Ключ | Откуда | Что обслуживает |
-|---|---|---|
-| `AIza...` | Google Cloud → Credentials → API key | распознавание и синтез |
-| `AQ....` | AI Studio (может быть привязан к service account) | Gemini |
-
-Cloud-ключ Gemini не обслуживает, а ключ AI Studio Cloud-сервисы не
-узнаю́т как ключ вовсе. Отсюда и порядок поиска: сначала переменная
-сервиса (`ASR_API_KEY`, `TTS_API_KEY`, `LLM_API_KEY`), потом общая
-`GOOGLE_API_KEY`. Рабочая раскладка:
+Cloud-ключ (`AIza...`) обслуживает и распознавание, и синтез, поэтому у
+них общая переменная. Отдельные `ASR_API_KEY` / `TTS_API_KEY` остались на
+случай, когда ключу разрешён список API уже, чем нужно.
 
 ```
 npx supabase secrets set GOOGLE_API_KEY=<Cloud-ключ AIza...>   # ASR и TTS
-npx supabase secrets set LLM_API_KEY=<ключ AI Studio>          # Gemini
-npx supabase secrets set LLM_MODEL=<имя модели Gemini>
+```
+
+**Если возвращаете модель на Gemini**, помните: Cloud-ключ Gemini не
+обслуживает, а ключ AI Studio (`AQ....`) Cloud-сервисы не узнаю́т как ключ
+вовсе — проверено живыми запросами. То есть ключей и там будет два:
+
+```
+npx supabase secrets set LLM_PROVIDER=gemini
+npx supabase secrets set LLM_API_KEY=<ключ AI Studio>
+npx supabase secrets set LLM_MODEL=gemini-3.6-flash
 ```
 
 Диагностика отказов — по коду ошибки, и здесь легко ошибиться диагнозом:

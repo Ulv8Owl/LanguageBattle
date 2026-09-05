@@ -33,8 +33,7 @@
  */
 
 import { extractJson, isProviderLimit } from "./evaluateGrammar.ts";
-import { googleKey, missingKeyMessage } from "./googleKey.ts";
-import { llmChat, llmConfigDebug } from "./llmChat.ts";
+import { llmChat, llmConfigDebug, llmKey, missingLlmKeyMessage } from "./llmChat.ts";
 
 /** Одно объяснение: к какому элементу и что сказать игроку. */
 export interface ElementExplanation {
@@ -194,8 +193,8 @@ async function callOnce(
   useResponseFormat: boolean,
   timeoutMs: number,
 ): Promise<string> {
-  const apiKey = googleKey("llm");
-  if (!apiKey) throw new Error(missingKeyMessage("llm"));
+  const apiKey = llmKey();
+  if (!apiKey) throw new Error(missingLlmKeyMessage());
 
   return await llmChat(apiKey, {
     system: SYSTEM_PROMPT,
