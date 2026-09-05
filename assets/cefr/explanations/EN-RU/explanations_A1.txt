@@ -1,0 +1,60 @@
+1.1 «Я встаю» — Present tense of "вставать", used for a daily habit. Russian has no separate continuous form, so "я встаю" covers both "I get up" and "I am getting up". The pronoun "я" could be dropped, because the ending "-ю" already means "I".
+1.2 «в семь» — Clock time takes "в" plus the number: "в семь", "в восемь". The word for o'clock, "часов", can be left out and usually is.
+1.3 «каждое утро» — "Каждое" agrees with "утро", which is neuter, so it ends in "-ое". With a masculine noun you would say "каждый день", with a feminine one "каждую неделю". No preposition is used at all.
+1.4 «Потом я делаю» — "Потом" means "then, after that". Russian would let you drop "я" here, since the ending of "делаю" already says who acts, but keeping it is never wrong.
+1.5 «кофе» — An indeclinable masculine noun: "кофе" looks the same in every case, including the direct object. There is no article to add and no plural in this meaning.
+1.6 «и читаю новости» — The subject is not repeated after "и": one "я" covers both verbs, exactly as in English. "Новости" exists only in the plural, so anything agreeing with it must be plural too.
+2.1 «Мой офис» — "Мой" agrees with the masculine noun "офис". With a feminine noun it becomes "моя", with a neuter one "моё". Russian has no articles, so the possessive is the only determiner here.
+2.2 «находится рядом» — "Находится" literally means "is located". Russian normally drops the verb "to be" in the present tense, but for location this verb is the natural choice. "Рядом" means "nearby" and needs "с" to say what it is near.
+2.3 «с вокзалом» — The preposition "с" takes the instrumental case here: "вокзал" becomes "вокзалом". That ending is what marks the word's role — Russian uses endings where English uses word order.
+2.4 «Я иду» — "Идти" is the verb for going on foot, and specifically for one trip: now, or regularly in a described routine. Going by vehicle would be "ехать".
+2.5 «туда» — "Туда" already means "to there" — the direction is inside the word, so no preposition is added. "Там" would mean "there" with no movement.
+2.6 «пешком десять минут» — "Пешком" means "on foot". Duration goes in the accusative with no preposition at all: "десять минут", not "в десять минут".
+3.1 «Я не люблю» — Negation is simply "не" placed right before the verb; there is no auxiliary like English "don't". The verb keeps its normal form: "не люблю".
+3.2 «холодную погоду» — "Любить" takes a direct object in the accusative, so both words change: "холодная погода" becomes "холодную погоду". Feminine nouns take "-у" and their adjectives take "-ую".
+3.3 «поэтому я сижу дома» — "Поэтому" means "that is why". "Дома" is a fixed adverb meaning "at home" — no preposition, and note it is stressed on the first syllable, unlike the plural of "дом".
+3.4 «Сегодня» — "Сегодня" means "today". It is an adverb, takes no preposition and no article, and usually opens the sentence.
+3.5 «на улице» — Russian says "на улице", literally "on the street", where English says "outside" or hides it inside the weather "it". The preposition "на" takes the prepositional case: "улица" becomes "улице".
+3.6 «сильный ветер» — Russian describes weather with a noun plus an adjective — literally "a strong wind". "Сильный" is masculine because "ветер" is, and the verb "is" is simply left out: the present tense of "быть" is not used in Russian.
+4.1 «Мой брат» — "Мой" again, matching the masculine "брат". Family words behave like any other noun and take ordinary case endings.
+4.2 «работает» — Third person singular of "работать": "я работаю", "ты работаешь", "он работает". The ending carries the person, which is why the pronoun can be dropped.
+4.3 «в большом отеле» — "В" for location takes the prepositional case: "отель" becomes "в отеле", and the adjective follows suit, "большой" to "большом".
+4.4 «Он начинает» — "Он" replaces "мой брат". The ending "-ет" marks third person singular and matches that pronoun.
+4.5 «работу» — Direct object in the accusative: "работа" becomes "работу". Feminine nouns ending in "-а" take "-у" there.
+4.6 «в шесть» — Clock time with "в", the same pattern as "в семь" in the first phrase.
+5.1 «У нас есть» — This is how Russian says "we have": literally "at us there is". The owner follows "у" in the genitive, "мы" becoming "нас", and the thing owned is the grammatical subject.
+5.2 «маленькая собака» — Because "собака" is the subject, it stays in the nominative. It is feminine, so the adjective is "маленькая".
+5.3 «и она много спит» — "Она" refers back to "собака", which is grammatically feminine — Russian follows the gender of the word even for a male dog. "Много" goes before the verb.
+5.4 «Вечером» — The instrumental case with no preposition expresses a regular time of day: "утром", "днём", "вечером", "ночью". One word does the work of English "in the evening".
+5.5 «мы гуляем» — "Гулять" means to walk for pleasure, not to walk somewhere. The ending "-ем" marks "мы".
+5.6 «в парке» — "В" plus the prepositional case for being inside something: "парк" becomes "в парке".
+6.1 «Я» — Russian has no present-tense verb "to be", so "Я студент" is a complete sentence with no verb at all. Adding anything for "am" is the classic English-speaker mistake.
+6.2 «студент» — The noun stays in the nominative because it renames the subject. And there is no article: "a student" is simply "студент".
+6.3 «и я учу испанский» — "Учу" comes from "учить", to study a subject. Language names are lower case in Russian: "испанский", never with a capital letter.
+6.4 «Мои занятия» — "Занятия" is plural, so the possessive is "мои". Russian prefers the plural here where English says "my class".
+6.5 «проходят» — "Проходить" means "to take place". The ending "-ят" is third person plural, agreeing with the plural "занятия".
+6.6 «в понедельник и четверг» — Days of the week take "в" plus the accusative: "в понедельник", "в четверг". The preposition is said once and covers both days.
+7.1 «Этот магазин» — "Этот" means "this", masculine to match "магазин". It becomes "эта" with feminine nouns and "это" with neuter ones.
+7.2 «открыт» — A short-form adjective used as a predicate: "открыт" for masculine, "открыта" for feminine, "открыто" for neuter. No verb for "is" is needed.
+7.3 «каждый день» — "Каждый" is masculine because "день" is. Time expressions like this take the accusative, which for "день" happens to look like the nominative.
+7.4 «Я покупаю» — "Покупать" is the imperfective verb: it describes a repeated action, which is what "каждый день" requires. The perfective "куплю" would mean one single purchase.
+7.5 «хлеб и молоко» — Both "хлеб" and "молоко" are direct objects in the accusative, but neither changes shape: inanimate masculine and neuter nouns look the same in the nominative and the accusative.
+7.6 «здесь» — "Здесь" means "here", with no preposition. "Сюда" would mean "to here" and is used with verbs of motion.
+8.1 «Мой телефон» — Masculine "телефон" takes "мой". Note that the possessive agrees with the thing owned, not with the owner.
+8.2 «очень старый» — "Очень" goes before the adjective. "Старый" is masculine to match "телефон", and again there is no word for "is".
+8.3 «поэтому он медленный» — "Он" replaces "телефон" — Russian pronouns follow grammatical gender, so an object can be "он" or "она". "Медленный" agrees with it in the masculine.
+8.4 «Я хочу» — "Хотеть" is irregular: "я хочу", "ты хочешь", "он хочет". It is worth learning as a whole rather than by rule.
+8.5 «новый» — The adjective stands on its own and means "a new one" — Russian needs no equivalent of English "one". It is masculine because the implied noun is "телефон".
+8.6 «в следующем году» — "В" plus the prepositional case for a period of time: "следующий год" becomes "в следующем году". Both words change their endings.
+9.1 «В субботу» — Days of the week take "в" plus the accusative: "суббота" becomes "в субботу".
+9.2 «я убираю» — "Убирать" is the imperfective, used because this happens every Saturday. The ending "-аю" marks "я".
+9.3 «свою комнату» — "Свой" means "one's own" and always refers back to the subject; "мою" would be understood, but "свою" is what Russians say. Both words are accusative feminine: "своя комната" becomes "свою комнату".
+9.4 «После этого» — "После" always takes the genitive, so "это" becomes "этого". The whole phrase means "after that".
+9.5 «я готовлю» — "Готовить" means "to cook". Note the letter "л" that appears only in the first person: "готовлю", but "он готовит".
+9.6 «обед для семьи» — "Обед" is the direct object in the accusative and does not change form. "Для" always takes the genitive: "семья" becomes "семьи".
+10.1 «Я не пью» — "Не" goes directly before the verb. "Пить" is irregular in the present: "я пью", "ты пьёшь", "они пьют".
+10.2 «кофе» — Indeclinable, so the accusative object looks exactly like the dictionary form: "кофе". No article and no ending to add.
+10.3 «вечером» — The instrumental with no preposition for a time of day, the same pattern as "утром" and "ночью".
+10.4 «Это вредно» — "Это" means "this", referring to the whole previous idea. "Вредно" is a neuter short form used impersonally — there is no subject and no verb.
+10.5 «для моего сна» — "Для" takes the genitive, so both words change: "мой сон" becomes "моего сна". Note that "сон" loses its vowel when it takes an ending.
+10.6 «поэтому я пью чай» — "Поэтому" introduces the result. "Чай" is a masculine inanimate noun, so its accusative looks like the nominative.

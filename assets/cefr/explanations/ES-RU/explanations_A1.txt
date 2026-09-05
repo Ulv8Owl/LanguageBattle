@@ -1,0 +1,60 @@
+1.1 «Я встаю» — Presente de "вставать" para un hábito. El ruso no distingue entre «me levanto» y «me estoy levantando»: una sola forma sirve para las dos. El pronombre "я" puede omitirse, porque la terminación ya indica la primera persona.
+1.2 «в семь» — La hora lleva "в" y el número, sin artículo: "в семь". El ruso no tiene artículos, así que «a las siete» se queda en dos palabras.
+1.3 «каждое утро» — "Каждое" concuerda con "утро", que es neutro; con un masculino sería "каждый день" y con un femenino "каждую неделю". El ruso concuerda como el español, pero tiene tres géneros.
+1.4 «Потом я делаю» — "Потом" significa «luego». Aquí "я" es opcional igual que en español: la terminación del verbo ya dice quién actúa.
+1.5 «кофе» — Sustantivo indeclinable y masculino: "кофе" no cambia nunca, ni siquiera como complemento directo. Tampoco lleva artículo, porque en ruso no existen.
+1.6 «и читаю новости» — El sujeto no se repite tras "и". "Новости" solo existe en plural, así que todo lo que concuerde con esa palabra irá también en plural.
+2.1 «Мой офис» — "Мой" concuerda con "офис", que es masculino. Con femenino sería "моя" y con neutro "моё": la misma lógica del español, pero sin artículo delante.
+2.2 «находится рядом» — "Находится" significa «se encuentra». El ruso normalmente omite el verbo «ser» en presente, pero para la ubicación este verbo es lo natural. "Рядом" pide la preposición "с".
+2.3 «с вокзалом» — La preposición "с" exige el caso instrumental: "вокзал" pasa a "вокзалом". Esto es lo nuevo para un hispanohablante: la palabra cambia de terminación según su papel en la frase.
+2.4 «Я иду» — "Идти" es ir a pie, y además en un trayecto concreto. Para ir en transporte se usa "ехать": el ruso elige el verbo según cómo te desplazas.
+2.5 «туда» — "Туда" ya significa «hacia allí»: la dirección va dentro de la palabra y no se añade preposición. "Там" sería «allí» sin movimiento.
+2.6 «пешком десять минут» — "Пешком" significa «a pie». La duración va en acusativo y sin preposición: "десять минут".
+3.1 «Я не люблю» — La negación es solo "не" delante del verbo, sin auxiliares, igual que el «no» español. El verbo no cambia de forma: "не люблю".
+3.2 «холодную погоду» — "Любить" pide acusativo, y cambian las dos palabras: "холодная погода" pasa a "холодную погоду". Donde el español marca el complemento por la posición, el ruso lo marca con la terminación.
+3.3 «поэтому я сижу дома» — "Поэтому" significa «por eso». "Дома" es un adverbio fijo, «en casa», sin preposición ninguna.
+3.4 «Сегодня» — "Сегодня" significa «hoy». Es un adverbio, sin preposición ni artículo, y suele abrir la frase.
+3.5 «на улице» — El ruso dice literalmente «en la calle» donde el español dice «hace viento», sin sujeto ni lugar. La preposición "на" rige el caso preposicional: "улица" pasa a "улице".
+3.6 «сильный ветер» — El ruso describe el tiempo con un sustantivo y un adjetivo: literalmente «viento fuerte». No hay verbo, porque el presente de «ser» no se usa en ruso, y "сильный" es masculino porque "ветер" lo es.
+4.1 «Мой брат» — "Мой" concuerda con el masculino "брат". El posesivo ocupa el lugar que en español ocuparían artículo y posesivo juntos.
+4.2 «работает» — Tercera persona del singular de "работать": "я работаю", "он работает". La terminación indica la persona, igual que en español.
+4.3 «в большом отеле» — "В" de lugar exige el caso preposicional: "отель" pasa a "в отеле", y el adjetivo le sigue, "большой" a "большом". Además el adjetivo va delante del sustantivo, al revés que en español.
+4.4 «Он начинает» — "Он" sustituye a "мой брат". La terminación "-ет" marca la tercera persona del singular.
+4.5 «работу» — Complemento directo en acusativo: "работа" pasa a "работу". Los femeninos en "-а" hacen "-у".
+4.6 «в шесть» — La hora otra vez con "в", igual que "в семь" en la primera frase.
+5.1 «У нас есть» — Así dice el ruso «tenemos»: literalmente «junto a nosotros hay». El poseedor va tras "у" en genitivo y lo poseído es el sujeto de la frase.
+5.2 «маленькая собака» — "Собака" es el sujeto, así que va en nominativo. Es femenino, y por eso "маленькая": la concordancia funciona como en español.
+5.3 «и она много спит» — "Она" se refiere a "собака": el ruso usa el género gramatical de la palabra, aunque el perro sea macho. "Много" va delante del verbo.
+5.4 «Вечером» — El caso instrumental sin preposición expresa el momento del día: "утром", "днём", "вечером". El español necesita «por la tarde»; el ruso, una sola palabra.
+5.5 «мы гуляем» — "Гулять" es pasear por placer, no ir a un sitio. La terminación "-ем" corresponde a "мы".
+5.6 «в парке» — "В" más caso preposicional para estar dentro de algo: "парк" pasa a "в парке".
+6.1 «Я» — El ruso no tiene verbo «ser» en presente: "Я студент" es una frase completa sin verbo. Añadir algo equivalente a «soy» es el error típico del hispanohablante.
+6.2 «студент» — "Студент" va en nominativo porque identifica al sujeto. Y sin artículo: el ruso no tiene ni «un» ni «el».
+6.3 «и я учу испанский» — "Учить" es estudiar una materia. Los idiomas se escriben en minúscula: "испанский", nunca con mayúscula.
+6.4 «Мои занятия» — "Занятия" es plural, así que el posesivo es "мои". El ruso prefiere el plural donde el español dice «mi clase».
+6.5 «проходят» — "Проходить" significa «tener lugar». La terminación "-ят" es tercera persona del plural y concuerda con "занятия".
+6.6 «в понедельник и четверг» — Los días llevan "в" más acusativo: "в понедельник". La preposición se dice una vez para los dos días, y no hay artículo como en el español «los lunes».
+7.1 «Этот магазин» — "Этот" significa «este», masculino para "магазин". Con femenino sería "эта" y con neutro "это".
+7.2 «открыт» — Forma corta del adjetivo, usada como predicado: "открыт", "открыта", "открыто" según el género. No hace falta ningún verbo «estar».
+7.3 «каждый день» — "Каждый" es masculino porque "день" lo es. Es un acusativo de tiempo, aunque en esta palabra la forma no cambie.
+7.4 «Я покупаю» — "Покупать" es imperfectivo: sirve para acciones repetidas, que es lo que pide «todos los días». El perfectivo "куплю" hablaría de una sola compra.
+7.5 «хлеб и молоко» — Tanto "хлеб" como "молоко" son complementos directos en acusativo, pero no cambian: los masculinos inanimados y los neutros tienen la misma forma que en nominativo.
+7.6 «здесь» — "Здесь" significa «aquí», sin preposición. "Сюда" sería «hacia aquí», con verbos de movimiento.
+8.1 «Мой телефон» — "Телефон" es masculino, de ahí "мой". El posesivo concuerda con la cosa poseída, no con el dueño.
+8.2 «очень старый» — "Очень" va delante del adjetivo. "Старый" es masculino por "телефон", y de nuevo no hay verbo «ser».
+8.3 «поэтому он медленный» — "Он" sustituye a "телефон": en ruso los objetos también son "он" o "она" según su género, igual que en español. "Медленный" concuerda en masculino.
+8.4 «Я хочу» — "Хотеть" es irregular: "я хочу", "ты хочешь", "он хочет". Conviene aprenderlo de memoria.
+8.5 «новый» — El adjetivo va solo y significa «uno nuevo»: el ruso no necesita añadir nada más, y el masculino de "новый" indica que se habla del teléfono.
+8.6 «в следующем году» — "В" más caso preposicional para un periodo: "следующий год" pasa a "в следующем году". Cambian las terminaciones de las dos palabras.
+9.1 «В субботу» — Los días llevan "в" más acusativo: "суббота" pasa a "в субботу".
+9.2 «я убираю» — "Убирать" es imperfectivo, porque ocurre todos los sábados. La terminación "-аю" corresponde a "я".
+9.3 «свою комнату» — "Свой" significa «propio» y remite al sujeto de la frase; es lo que dicen los rusos donde el español repite «mi». Las dos palabras van en acusativo femenino: "своя комната" pasa a "свою комнату".
+9.4 «После этого» — "После" siempre rige genitivo, así que "это" pasa a "этого". La expresión entera significa «después de eso».
+9.5 «я готовлю» — "Готовить" significa «cocinar». Fíjate en la "л" que aparece solo en la primera persona: "готовлю", pero "он готовит".
+9.6 «обед для семьи» — "Обед" es complemento directo en acusativo y no cambia de forma. "Для" rige genitivo: "семья" pasa a "семьи".
+10.1 «Я не пью» — "Не" va justo delante del verbo. "Пить" es irregular: "я пью", "ты пьёшь", "они пьют".
+10.2 «кофе» — Indeclinable: como complemento directo, "кофе" tiene la misma forma que en el diccionario, y sin artículo.
+10.3 «вечером» — Instrumental sin preposición para el momento del día, igual que "утром" o "ночью".
+10.4 «Это вредно» — "Это" recoge toda la idea anterior. "Вредно" es una forma neutra impersonal: no hay sujeto ni verbo, algo parecido a «es malo» pero sin el «es».
+10.5 «для моего сна» — "Для" rige genitivo y cambian las dos palabras: "мой сон" pasa a "моего сна". Además "сон" pierde la vocal al recibir terminación.
+10.6 «поэтому я пью чай» — "Поэтому" introduce la consecuencia. "Чай" es masculino inanimado, así que su acusativo se ve igual que el nominativo.
