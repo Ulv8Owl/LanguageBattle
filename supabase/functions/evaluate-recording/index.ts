@@ -31,6 +31,7 @@ import {
 } from "../_shared/evaluateGrammar.ts";
 import { transcribeAudio } from "../_shared/asr/index.ts";
 import { scoreByElements } from "../_shared/elementScoring.ts";
+import { explainMissedElements } from "../_shared/explainElements.ts";
 
 /**
  * Лига говорящего приравнена к уровню CEFR (см. supabase/migrations/0023 —
@@ -327,29 +328,52 @@ async function processJob(job_id: string): Promise<void> {
 
       if (byElements) {
         score = byElements.score;
-        // Каждый непроизнесённый элемент — строка в grammar_errors.
-        // message пустой намеренно: пояснение к элементу лежит в датасете
-        // (assets/cefr/explanations_*.txt) и показывается клиентом по
-        // тапу, а не пересылается с сервера на каждый раунд.
-        errors = byElements.verdicts
-          .filter((v) => !v.correct)
-          .map((v) => ({
-            offset: v.offset,
-            length: v.text.length,
-            message: "",
-            replacement: v.text,
-            category: "element",
-          }));
-        judgeStatus = "skipped";
         // Эталон без «|» — то, с чем клиент сравнивает сказанное.
         correctedText = expectedPhrase.replaceAll("|", "");
         cleanedText = transcript;
+
+        // ЧТО неверно — уже решено, без модели. Осталось объяснить ПОЧЕМУ
+        // правильно именно так, и вот это делает модель — только для
+        // потерянных элементов и только если успевает в остаток бюджета.
+        // Не ответила — не беда: клиент откатится на пояснение из
+        // датасета, а балл от неё и не зависел.
+        const missed = byElements.verdicts
+          .map((v, index) => ({ verdict: v, index }))
+          .filter(({ verdict }) => !verdict.correct);
+        const explained = await explainMissedElements(
+          targetLanguage,
+          nativeLanguage,
+          correctedText,
+          transcript,
+          missed.map(({ verdict, index }) => ({ index, text: verdict.text })),
+          budgetLeft(),
+        );
+
+        // Каждый непроизнесённый элемент — строка в grammar_errors, и
+        // message у неё это объяснение модели. Пустой message означает,
+        // что модель до этого элемента не дошла (лимит на число разборов
+        // или сбой), и клиент подставит пояснение из датасета.
+        errors = missed.map(({ verdict, index }) => ({
+          offset: verdict.offset,
+          length: verdict.text.length,
+          message: explained.byIndex.get(index) ?? "",
+          replacement: verdict.text,
+          category: "element",
+        }));
+        // ok даже когда модель не ответила, и это не оптимизм. Для клиента
+        // judge_status = degraded означает «списку ошибок верить нельзя», и
+        // разбор он тогда прячет целиком. Здесь же список ошибок посчитан
+        // БЕЗ модели и верен полностью — не хватает только текста
+        // объяснений, а на этот случай есть пояснения из датасета. Сбой
+        // модели виден в отладочной панели и в пустом message.
+        judgeStatus = "ok";
         feedback = `Произнесено ${byElements.correctCount} из ${byElements.totalCount} частей фразы.`;
         pipelineDebug.judge = {
-          status: "skipped",
-          reason: "судья выключен (JUDGE_ENABLED=0) — оценка поэлементная",
+          mode: "элементы + разбор ошибок моделью",
+          scoring: "поэлементная, без модели",
           correct_elements: byElements.correctCount,
           total_elements: byElements.totalCount,
+          explain: explained.debug,
         };
       } else if (!JUDGE_ENABLED) {
         // Судья выключен, а фраза пришла без «|» — это старый раунд,

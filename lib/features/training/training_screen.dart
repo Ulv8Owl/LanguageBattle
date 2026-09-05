@@ -1130,17 +1130,18 @@ class _ErrorReport extends StatelessWidget {
   List<PhraseElement> get _elements =>
       phraseIndex < 0 ? const [] : PhraseBank.elementsFor(phraseIndex, targetLanguage);
 
-  /// Пояснение к каждому элементу — НА РОДНОМ ЯЗЫКЕ игрока.
+  /// ЗАПАСНЫЕ пояснения из датасета — на родном языке игрока.
   ///
-  /// Пояснение на изучаемом языке в датасете тоже есть, и оно разбирает
-  /// именно ту форму, которую игрок должен произнести. Но прочитать его
-  /// может только тот, кто язык уже знает: объяснять A1-игроку
-  /// английскую грамматику по-английски — значит не объяснять ничего.
-  /// Поэтому берётся версия на языке, которым игрок ВЛАДЕЕТ.
+  /// Основные объяснения теперь пишет модель (она разбирает именно то, что
+  /// игрок сказал не так, и объясняет ПОЧЕМУ правильно иначе). Датасет
+  /// остаётся на случай, когда модель не ответила: готовый текст хуже
+  /// живого разбора, но лучше пустоты.
   ///
-  /// Элемент N во всех языках покрывает один и тот же кусок смысла
-  /// (инвариант датасета), поэтому пояснение N с родного языка относится
-  /// к тому же месту фразы, что и элемент N эталона.
+  /// Берётся версия на языке, которым игрок ВЛАДЕЕТ: объяснять
+  /// A1-игроку английскую грамматику по-английски — значит не объяснять
+  /// ничего. Элемент N во всех языках покрывает один и тот же кусок
+  /// смысла (инвариант датасета), поэтому пояснение N с родного языка
+  /// относится к тому же месту фразы, что и элемент N эталона.
   List<String> get _explanations {
     final entry = phraseIndex < 0 ? null : PhraseBank.entry(phraseIndex);
     if (entry == null) return const [];
@@ -1152,25 +1153,32 @@ class _ErrorReport extends StatelessWidget {
   List<PhraseElement> get _nativeElements =>
       phraseIndex < 0 ? const [] : PhraseBank.elementsFor(phraseIndex, nativeLanguage);
 
-  /// Номера элементов, которые игрок не произнёс.
+  /// Номер элемента -> объяснение ошибки от модели.
   ///
-  /// Какие именно — решает СЕРВЕР: он присылает их строками grammar_errors
-  /// категории element со смещением в чистой фразе. Клиент только
-  /// переводит смещение в номер элемента (elementOffsets считает его той
-  /// же формулой, что и сервер) и ничего не пересчитывает сам — иначе
-  /// подсветка могла бы разойтись с выставленным баллом.
-  Set<int> get _missedIndices {
+  /// КЛЮЧИ этой карты и есть потерянные элементы, и какие именно — решает
+  /// СЕРВЕР: он присылает их строками grammar_errors категории element со
+  /// смещением в чистой фразе. Клиент только переводит смещение в номер
+  /// элемента (elementOffsets считает его той же формулой, что и сервер) и
+  /// ничего не пересчитывает сам — иначе подсветка могла бы разойтись с
+  /// выставленным баллом.
+  ///
+  /// Пустая строка в значении означает, что модель до этого элемента не
+  /// дошла (лимит на число разборов за раунд или сбой провайдера). Ключ
+  /// при этом есть: элемент всё равно потерян и подсветить его надо.
+  Map<int, String> get _messagesByIndex {
     final entry = phraseIndex < 0 ? null : PhraseBank.entry(phraseIndex);
     if (entry == null) return const {};
     final offsets = entry.elementOffsets(targetLanguage);
-    final missedOffsets = {
-      for (final e in errors)
-        if ((e['category'] as String?) == 'element')
-          (e['offset_start'] as num?)?.toInt() ?? -1,
-    };
+    final byOffset = <int, String>{};
+    for (final e in errors) {
+      if ((e['category'] as String?) != 'element') continue;
+      final offset = (e['offset_start'] as num?)?.toInt();
+      if (offset == null) continue;
+      byOffset[offset] = (e['message'] as String?)?.trim() ?? '';
+    }
     return {
       for (var i = 0; i < offsets.length; i++)
-        if (missedOffsets.contains(offsets[i])) i,
+        if (byOffset.containsKey(offsets[i])) i: byOffset[offsets[i]]!,
     };
   }
 
@@ -1266,8 +1274,8 @@ class _ErrorReport extends StatelessWidget {
               _ElementBreakdown(
                 elements: _elements,
                 nativeElements: _nativeElements,
-                missedIndices: _missedIndices,
-                explanations: _explanations,
+                messagesByIndex: _messagesByIndex,
+                fallbackExplanations: _explanations,
               )
             else if (errors.isEmpty)
               Text(hint, style: const TextStyle(color: AppColors.muted, fontSize: 12, height: 1.4))
@@ -1315,24 +1323,42 @@ class _ErrorReport extends StatelessWidget {
 class _ElementBreakdown extends StatelessWidget {
   final List<PhraseElement> elements;
 
-  /// Те же куски на родном языке. Показываются в пояснении подзаголовком:
-  /// пояснение написано про родную формулировку, и без неё непонятно, к
-  /// чему оно относится.
+  /// Те же куски на родном языке. Показываются подзаголовком, когда
+  /// объяснение пришло из датасета: оно написано про родную формулировку,
+  /// и без неё непонятно, к чему относится.
   final List<PhraseElement> nativeElements;
 
-  final Set<int> missedIndices;
-  final List<String> explanations;
+  /// Номер элемента -> разбор от модели. Ключи этой карты и есть
+  /// потерянные элементы: сервер прислал строку об ошибке ровно на них.
+  final Map<int, String> messagesByIndex;
+
+  /// Пояснения из датасета — на случай, когда модель не ответила.
+  final List<String> fallbackExplanations;
 
   const _ElementBreakdown({
     required this.elements,
     required this.nativeElements,
-    required this.missedIndices,
-    required this.explanations,
+    required this.messagesByIndex,
+    required this.fallbackExplanations,
   });
 
+  Set<int> get _missedIndices => messagesByIndex.keys.toSet();
+
   void _showExplanation(BuildContext context, int index) {
-    final explanation = index < explanations.length ? explanations[index] : null;
-    final native = index < nativeElements.length ? nativeElements[index].text : null;
+    // Разбор модели — основной текст; она объясняет именно ту ошибку,
+    // которую игрок только что сделал. Пусто (модель не ответила или
+    // элемент не попал в лимит разборов за раунд) — берём готовое
+    // пояснение из датасета.
+    final fromModel = messagesByIndex[index] ?? '';
+    final fromDataset =
+        index < fallbackExplanations.length ? fallbackExplanations[index] : null;
+    final explanation = fromModel.isNotEmpty ? fromModel : fromDataset;
+    // Родная формулировка нужна только датасетному пояснению — оно про
+    // неё и написано. Разбор модели говорит про эталон напрямую, и вторая
+    // строка там была бы шумом.
+    final native = fromModel.isEmpty && index < nativeElements.length
+        ? nativeElements[index].text
+        : null;
     showModalBottomSheet<void>(
       context: context,
       backgroundColor: AppColors.navy2,
@@ -1384,9 +1410,9 @@ class _ElementBreakdown extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text(
-          missedIndices.isEmpty
-              ? 'Сказано всё. Нажми на часть фразы, чтобы разобрать её подробнее'
-              : 'Нажми на часть фразы, чтобы понять, как она устроена',
+          _missedIndices.isEmpty
+              ? 'Сказано всё — разбирать нечего'
+              : 'Нажми на подсвеченную часть, чтобы понять, почему правильно так',
           style: AppFonts.ui(fontSize: 11, color: AppColors.muted),
         ),
         const SizedBox(height: 10),
@@ -1397,8 +1423,14 @@ class _ElementBreakdown extends StatelessWidget {
             for (var i = 0; i < elements.length; i++)
               _ElementChip(
                 text: elements[i].text,
-                missed: missedIndices.contains(i),
-                onTap: () => _showExplanation(context, i),
+                missed: _missedIndices.contains(i),
+                // Нажимаются только потерянные куски. Разбор пишется
+                // потому, что игрок ошибся; у сказанного верно объяснять
+                // нечего, и делать его нажимаемым значило бы обещать
+                // текст, которого нет.
+                onTap: _missedIndices.contains(i)
+                    ? () => _showExplanation(context, i)
+                    : null,
               ),
           ],
         ),
@@ -1410,7 +1442,9 @@ class _ElementBreakdown extends StatelessWidget {
 class _ElementChip extends StatelessWidget {
   final String text;
   final bool missed;
-  final VoidCallback onTap;
+
+  /// null — по этому куску разбора нет, и нажимать не на что.
+  final VoidCallback? onTap;
 
   const _ElementChip({required this.text, required this.missed, required this.onTap});
 
@@ -1438,8 +1472,10 @@ class _ElementChip extends StatelessWidget {
                 height: 1.2,
               ),
             ),
-            const SizedBox(width: 5),
-            Icon(Icons.help_outline, size: 12, color: AppColors.muted.withValues(alpha: 0.8)),
+            if (onTap != null) ...[
+              const SizedBox(width: 5),
+              Icon(Icons.help_outline, size: 12, color: AppColors.muted.withValues(alpha: 0.8)),
+            ],
           ],
         ),
       ),
