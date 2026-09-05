@@ -1,0 +1,210 @@
+1.1 «La reorganización se anunció» — "Se anunció" — безличная конструкция с "se", соответствующая русскому «объявили» без подлежащего. Действующее лицо не называется, потому что оно неважно.
+1.2 «un martes» — "Un martes" с неопределённым артиклем значит «в какой-то вторник». С "el martes" это был бы конкретный день, и вся ирония фразы держится именно на "un".
+1.3 «que es cuando nunca se anuncia nada bueno» — "Que es cuando" — придаточное ко всей предыдущей мысли. "Nunca" перед глаголом не требует дополнительного "no", а "nada bueno" ставит прилагательное после местоимения.
+1.4 «Nos prometieron» — "Nos prometieron" — глагол во множественном числе без подлежащего, точно как русское «нам обещали».
+1.5 «menos niveles» — "Menos niveles" — одно слово и для исчисляемых, и для неисчисляемых, как и русское «меньше».
+1.6 «y decisiones más rápidas» — "Decisiones más rápidas" строит сравнительную степень словом "más" и ставит её после существительного вместе с прилагательным. Русский ставит и то и другое перед словом.
+1.7 «Seis meses después» — "Seis meses después" обходится без предлога, и "después" идёт после отрезка времени.
+1.8 «tenemos ambas cosas» — "Ambas cosas" звучит официальнее, чем "las dos". Обрати внимание: "ambas" артикля не требует, а "las dos" — требует.
+1.9 «y además dos comités nuevos» — "Y además" добавляет с лёгким сдвигом. "Dos comités nuevos" ставит прилагательное после существительного; перед ним — "nuevos comités" — оно значило бы «очередные».
+1.10 «Mi propio puesto» — "Mi propio puesto" удваивает притяжательное ради выделения, как и русское «моя собственная». "Propio" согласуется с существительным и обязано стоять после притяжательного, а не вместо него.
+1.11 «no ha cambiado formalmente» — Перфект для того, чей результат в силе. "Formalmente" значит «официально», и наречие стоит после причастия.
+1.12 «cosa que nadie termina de creerse» — "Cosa que" относится ко всему предложению и звучит разговорнее, чем "lo cual". "Terminar de" плюс инфинитив значит «до конца сделать» — тот самый оттенок, что у русского «до конца не верит».
+1.13 «Ahora dependo» — "Depender de" всегда требует "de" и служит обычным глаголом для «подчиняться».
+1.14 «de alguien» — "De alguien" несёт предлог, которого требует глагол. "Alguien" неизменяемо.
+1.15 «que depende de mi anterior jefa» — "Que depende de" повторяет глагол вместе с предлогом. "Mi anterior jefa" ставит "anterior" перед существительным, где оно значит «прежняя»; после существительного смысл был бы ближе к «предыдущая по списку».
+1.16 «Para ser justos» — "Para ser justos" — устойчивый вводный оборот с инфинитивом.
+1.17 «ella es muy buena» — "Ella es muy buena" добавляет местоимение ради противопоставления — испанский ставит его только осознанно. "Ser" стоит потому, что это постоянное качество.
+1.18 «y las reuniones son más cortas» — "Más cortas" согласуется в женском роде множественного числа с "reuniones". Снова "ser", потому что речь о нынешнем положении дел как о свойстве.
+1.19 «Si todo esto» — "Si" вводит здесь придаточное в роли подлежащего, а не условие. Графического ударения это "si" не несёт.
+1.20 «cuenta como menos niveles» — "Contar como" требует "como". Формулировка повторяет вторую строку, и повтор сделан намеренно.
+1.21 «depende de cómo se cuente» — "Depende de cómo se cuente" ставит сослагательное после "cómo", потому что способ остаётся открытым. Ударение на "cómo" сохраняется и в косвенном вопросе.
+2.1 «Lo más difícil» — "Lo más difícil" — средний артикль с превосходной степенью, «самое трудное». Испанскому не нужно никакого слова вроде «вещь».
+2.2 «de hablar bien un idioma extranjero» — "De hablar" несёт предлог, которого требует "lo más difícil". "Bien" стоит между глаголом и дополнением, что испанский допускает, а английский нет.
+2.3 «es que la gente deja de hacerte concesiones» — "Dejar de" плюс инфинитив значит «перестать». "Hacerte concesiones" приклеивает местоимение к инфинитиву.
+2.4 «En el B1» — "En el B1" сохраняет артикль перед уровнем, которого в русском нет.
+2.5 «todos se emocionaban» — "Emocionarse de" возвратный и требует "de" перед придаточным. "Todos" множественного числа, и глагол при нём тоже — как и русское «все».
+2.6 «de que supiera pedir un café» — "De que supiera" требует сослагательного наклонения, потому что это реакция, а не сообщение факта. "Un café" с артиклем значит «одна чашка», в отличие от неисчисляемого кофе.
+2.7 «En algún punto después» — "En algún punto después" использует "punto" для точки во времени. "Algún" — усечённая форма перед мужским существительным.
+2.8 «se acabaron los halagos» — "Se acabaron" возвратный и ставит глагол перед подлежащим — так испанский вводит нечто новое.
+2.9 «y empezaron las correcciones» — "Empezaron las correcciones" повторяет тот же порядок ради симметрии. Именно параллелизм и даёт эффект.
+2.10 «Eso es progreso» — "Eso es progreso" оставляет "progreso" без артикля: так испанский поступает с голым предикатом.
+2.11 «aunque rara vez lo parezca» — "Aunque ... lo parezca" требует сослагательного, потому что уступка именно уступается, а не утверждается. "Lo" — среднее местоимение, заменяющее всю мысль.
+2.12 «en el momento» — "En el momento" сохраняет артикль и значит «в тот момент». Без него, "en momentos", смысл изменился бы полностью.
+2.13 «El último diez por ciento» — "El último diez por ciento" сохраняет артикль перед "último", и глагол дальше идёт в единственном числе.
+2.14 «no es vocabulario» — "No es vocabulario" отрицает связку и открывает конструкцию "no ... sino ...".
+2.15 «sino saber cuándo no pasarse de listo» — "Sino" закрывает конструкцию и заменить его на "pero" нельзя: это «а», а не «но». "Saber cuándo no pasarse de listo" нанизывает инфинитив, косвенный вопрос и отрицаемый возвратный инфинитив.
+2.16 «Todavía me paso» — "Pasarse" возвратный и значит «перебарщивать». "Todavía" стоит перед глаголом.
+2.17 «normalmente con una palabra» — "Con una palabra" использует "con" для средства.
+2.18 «que aprendí esa misma mañana» — Относительное "que" опустить нельзя, как и русское «которое». "Esa misma mañana" ставит "misma" после указательного ради выделения.
+2.19 «La fluidez» — "La fluidez" сохраняет артикль, как всякое подлежащее.
+2.20 «por lo que voy viendo» — "Por lo que voy viendo" — устойчивый вводный оборот с "ir" и герундием, передающий постепенность там, где русский говорит «насколько я могу судить».
+2.21 «es sobre todo contención» — "Contención" артикля не требует как голый предикат. "Sobre todo" смягчает утверждение.
+3.1 «Ya he pasado» — "Ya he pasado" сочетает перфект с "ya". В Испании это естественное время для счёта, доходящего до настоящего момента.
+3.2 «más horas en esa oficina de Hacienda» — "Más horas ... que" имеет своё "que" дальше по фразе. "Esa oficina de Hacienda" использует указательное и связывает существительные через "de"; "Hacienda" пишется с большой буквы как название учреждения.
+3.3 «que en casa de la mayoría de mis amigos» — "En casa de" — устойчивый способ сказать «дома у кого-то». "La mayoría de" требует "de".
+3.4 «Cada visita» — "Cada visita" берёт существительное в единственном числе, как всегда с "cada".
+3.5 «exige un documento» — "Exigir" сильнее, чем "necesitar", и лучше ложится в бюрократический тон.
+3.6 «que solo existe después de la visita anterior» — "Solo" в роли наречия ударения не несёт. "Después de" требует обоих слов, а "la visita anterior" ставит прилагательное после существительного.
+3.7 «La señora de la ventanilla cuatro» — "La señora de la ventanilla cuatro" связывает существительные через "de", и номер идёт после существительного без артикля, как в "la habitación cinco".
+3.8 «ha desarrollado» — Перфект "ha desarrollado" — для того, что сложилось и остаётся в силе.
+3.9 «cierta simpatía por mí» — "Cierta simpatía" без артикля значит «некоторое». С "una cierta" фраза стала бы тяжелее и здесь звучала бы странно. "Simpatía por" требует "por".
+3.10 «Ya no me pregunta» — "Ya no" вместе значит «больше не». "Me pregunta" ставит местоимение перед глаголом.
+3.11 «a qué vengo» — "A qué vengo" сохраняет предлог "a", которого требует "venir a", и ударение на "qué" остаётся и в косвенном вопросе.
+3.12 «simplemente alarga la mano hacia el sello correcto» — Точка с запятой соединяет две независимые части. "Alargar la mano hacia" — естественный оборот там, где русский говорит «тянуться за».
+3.13 «La semana pasada» — "La semana pasada" сохраняет артикль и обходится без предлога.
+3.14 «me dijo» — "Me dijo" ставит местоимение косвенного дополнения перед глаголом.
+3.15 «que ya casi había terminado» — "Ya casi había terminado" использует плюсквамперфект, потому что завершение отнесено к моменту раньше речи. "Ya casi" ставит рядом два наречия, и это идиоматично.
+3.16 «Eso ya lo había oído antes» — "Eso ya lo había oído antes" удваивает дополнение: "eso" вынесено вперёд, а "lo" его повторяет. Испанский требует такого удвоения всегда, когда дополнение стоит впереди.
+3.17 «y he aprendido» — Снова перфект, "he aprendido", и вспомогательный глагол повторяется. Испанский повторяет его охотнее, чем русский повторил бы подлежащее.
+3.18 «a no celebrarlo demasiado pronto» — "Aprender a" требует "a", и отрицание стоит перед инфинитивом: "a no celebrarlo".
+3.19 «Aun así» — "Aun así" значит «и всё же», и "aun" здесь без графического ударения.
+3.20 «hay algo curiosamente reconfortante» — "Algo curiosamente reconfortante" ставит прилагательное после "algo", как испанский всегда делает с этим местоимением.
+3.21 «en una burocracia que al menos te reconoce la cara» — "Te reconoce la cara" использует артикль там, где русский ставит притяжательное «твоё»: владельца испанский помечает местоимением "te".
+4.1 «El mejor jefe que he tenido» — "El mejor jefe que he tenido" соединяет превосходную степень с придаточным, и "que" опустить нельзя.
+4.2 «no decía casi nada» — "No decía casi nada" требует и "no", и "nada" — двойное отрицание, обязательное и в испанском, и в русском.
+4.3 «en las reuniones» — "En las reuniones" сохраняет артикль, которого в русском нет.
+4.4 «Dejaba» — Имперфект "dejaba" описывает повторявшуюся привычку — так испанский передаёт русское «давал».
+4.5 «que los ruidosos» — "Los ruidosos" — прилагательное в роли существительного с артиклем, «громкие».
+4.6 «terminaran» — После "dejar que" глагол уходит в сослагательное наклонение: "terminaran". Русское «давал договорить» обходится инфинитивом, так что конструкцию приходится строить заново.
+4.7 «Luego hacía» — "Luego hacía" сохраняет имперфект для той же повторявшейся привычки. "Hacer una pregunta" — правильное сочетание, а не "preguntar una pregunta".
+4.8 «una pregunta» — "Una pregunta" с неопределённым артиклем, и "una" здесь несёт смысл «один-единственный».
+4.9 «que recolocaba la sala sin ruido» — "Que recolocaba la sala" открывает придаточное в имперфекте. "Sin ruido" — существительное там, где русский ставит наречие «тихо».
+4.10 «Tardé años» — "Tardar años" значит «потратить годы», и человек здесь подлежащее. Русское «мне понадобились годы» делает подлежащим сами годы.
+4.11 «en darme cuenta» — "Tardar en" плюс инфинитив требует "en". "Darme cuenta" приклеивает местоимение к инфинитиву.
+4.12 «de que aquello era una técnica, no un carácter» — "De que" несёт предлог, которого требует "darse cuenta". "Aquello" — дальнее указательное, отодвигающее воспоминание.
+4.13 «Lo he intentado» — "Lo he intentado" использует среднее "lo" для всего приёма целиком, с перфектом.
+4.14 «unas cuatro veces» — "Unas cuatro veces" использует "unas" для приблизительности — женское множественное от "uno", согласованное с "veces".
+4.15 «y en tres ocasiones funcionó» — "En tres ocasiones" требует "en", как и русское «в трёх случаях».
+4.16 «La cuarta» — "La cuarta" опускает существительное "vez", которое подразумевается, и сохраняет женский род.
+4.17 «hice la pregunta demasiado pronto» — "Demasiado pronto" ставит "demasiado" перед наречием, и там оно неизменяемо.
+4.18 «y sonó simplemente maleducado» — "Sonó maleducado" ставит прилагательное после связочного глагола, согласованное с подразумеваемым мужским родом. Русский на этом месте ставит наречие «грубо».
+4.19 «El momento oportuno» — "El momento oportuno" ставит прилагательное после существительного. Одного слова для «чувства момента» в испанском нет.
+4.20 «por lo visto» — "Por lo visto" — устойчивый вводный оборот, «видимо».
+4.21 «es lo único que nadie puede enseñarte» — "Lo único que nadie puede enseñarte" использует средний артикль с прилагательным, и "nadie" после глагола дополнительного "no" не требует.
+5.1 «Mi madre» — "Mi madre" — притяжательное вместо артикля. В русском на этом месте стоит просто «мама».
+5.2 «ha empezado a contarme historias» — "Empezar a" сохраняет обязательное "a", а "contarme" приклеивает местоимение к инфинитиву.
+5.3 «que ya me sé» — "Que ya me sé" использует "saberse" возвратно, что добавляет оттенок «знаю наизусть». Простое "sé" звучало бы площе.
+5.4 «Durante un tiempo» — "Durante un tiempo" использует "durante" для длительности.
+5.5 «la corregía» — "La corregía" — имперфект для повторявшегося действия, с местоимением перед глаголом.
+5.6 «lo cual no ayudaba a nadie» — "Lo cual" относится ко всему предложению, а "no ayudaba a nadie" несёт обязательное двойное отрицание.
+5.7 «Ahora escucho» — "Ahora escucho" открывает противопоставление прошлому.
+5.8 «buscando las pequeñas diferencias» — Герундий "buscando" выражает цель — там, где русский ставит предлог «ради».
+5.9 «y siempre las hay» — "Siempre las hay" соединяет безличное "hay" с местоимением-дополнением впереди: сочетание выглядит странно, но совершенно нормативно.
+5.10 «La versión que contó la primavera pasada» — "La versión que contó" требует своего "que". "La primavera pasada" сохраняет артикль и обходится без предлога.
+5.11 «tenía un final distinto» — "Un final distinto" ставит прилагательное после существительного.
+5.12 «del que yo conocí de niño» — "Distinto del que" требует "de", а "el que" — относительное с артиклем, согласованное с "final". "De niño" значит «в детстве», вообще без артикля.
+5.13 «He decidido» — Перфект "he decidido" — для решения, которое остаётся в силе.
+5.14 «que las dos son ciertas» — "Las dos" сохраняет артикль, в отличие от "ambas" в первой фразе. "Ciertas" согласуется в женском роде множественного числа.
+5.15 «en el sentido que importa» — "En el sentido que importa" использует "que" как подлежащее своего придаточного, где опустить его нельзя.
+5.16 «No está perdiendo la historia» — "No está perdiendo" — длительная форма с "estar", употреблённая именно потому, что процесс не завершён.
+5.17 «sigue decidiendo» — "Seguir" плюс герундий значит «по-прежнему делать». Подлежащее не называется, а точка с запятой отмечает поворот.
+5.18 «lo que significa» — "Lo que significa" использует среднее "lo que" для целой мысли.
+5.19 «Sospecho» — "Sospechar" открывает придаточное союзом "que", который обязателен.
+5.20 «que dentro de unos treinta años» — "Dentro de unos treinta años" — устойчивое «лет через тридцать», где приблизительность несёт "unos".
+5.21 «estaré haciendo exactamente lo mismo» — "Estaré haciendo" — длительное будущее с "estar". "Exactamente lo mismo" использует среднее "lo" с "mismo".
+6.1 «La caída duró» — "La caída" — обычное слово для сбоя. "Durar" непереходный.
+6.2 «once minutos» — "Once minutos" — дополнение длительности без предлога.
+6.3 «que vamos a comentar durante once meses» — "Vamos a comentar" использует "ir a" для будущего, а "durante once meses" даёт срок. Контраст минут и месяцев и есть шутка.
+6.4 «La causa» — "La causa" сохраняет артикль как подлежащее.
+6.5 «fue un cambio de configuración» — "Un cambio de configuración" связывает существительные через "de", как и русское «изменение конфигурации» — через родительный падеж.
+6.6 «que nadie recuerda haber aprobado» — "Recordar haber aprobado" ставит после глагола перфектный инфинитив — компактная конструкция, которой в русском соответствует целое придаточное с «чтобы».
+6.7 «El post mortem» — "El post mortem" — латинское заимствование в два слова, с мужским артиклем.
+6.8 «fue «sin culpables»» — Цитата берётся в угловые кавычки. "Sin culpables" использует "sin" плюс голое множественное число.
+6.9 «en el sentido de que todos sabían de quién era» — "En el sentido de que" требует и "de", и "que". "De quién era" сохраняет ударение на "quién" внутри косвенного вопроса.
+6.10 «Redactamos» — "Redactar" — точный глагол для составления документа, определённее, чем "hacer".
+6.11 «catorce puntos de acción» — "Puntos de acción" связывает существительные через "de".
+6.12 «de los cuales cerramos los dos fáciles» — "De los cuales" ставит предлог перед относительным словом, согласованным в роде и числе. "Los dos fáciles" опускает существительное, но сохраняет артикль.
+6.13 «En nuestro descargo» — "En nuestro descargo" — устойчивый юридический оборот, «в своё оправдание».
+6.14 «los otros doce» — "Los otros doce" сохраняет артикль перед "otros", когда речь об остатке известного множества.
+6.15 «habrían exigido admitir algo estructural» — "Habrían exigido" — сложное условное о том, чего не произошло. "Admitir algo estructural" ставит прилагательное после "algo".
+6.16 «El sistema» — "El sistema" мужского рода, несмотря на окончание "-a", как "el tema" и "el problema".
+6.17 «es ahora un poco más seguro» — "Un poco más seguro" ставит рядом ослабляющее слово и сравнительную степень.
+6.18 «y bastante más complicado» — "Bastante más complicado" повторяет предыдущий элемент с более сильным усилителем. Симметрия сделана намеренно.
+6.19 «Yo diría que eso» — "Yo diría que eso" добавляет местоимение ради выделения и смягчает оценку условным наклонением.
+6.20 «es una descripción honesta» — "Una descripción honesta" ставит прилагательное после существительного.
+6.21 «de casi toda la ingeniería» — "De casi toda la ingeniería" сохраняет артикль после "toda", и это обязательно.
+7.1 «Antes terminaba» — "Antes" плюс имперфект — так испанский говорит «раньше делал». Отдельной конструкции нет, всё несёт время глагола.
+7.2 «todos los libros que empezaba» — "Todos los libros" сохраняет артикль после "todos". Относительное "que" обязательно.
+7.3 «por principio» — "Por principio" использует "por" для мотива и артикля не берёт.
+7.4 «El principio» — "El principio" сохраняет артикль, отсылая к только что названному.
+7.5 «resultó ser» — "Resultar ser" требует после себя инфинитива "ser".
+7.6 «sobre todo vanidad» — "Vanidad" артикля не требует как голый предикат. "Sobre todo" смягчает утверждение.
+7.7 «Ahora los abandono» — "Los abandono" ставит местоимение-дополнение перед глаголом.
+7.8 «sin remordimiento» — "Sin remordimiento" использует "sin" плюс голое существительное в единственном числе; множественное тоже возможно, но тяжелее.
+7.9 «y leo bastante más» — "Bastante más" усиливает сравнение, относящееся к глаголу, а не к прилагательному.
+7.10 «Hay un placer particular» — "Hay un placer particular" использует неизменяемое "hay". "Particular" после существительного значит «особое».
+7.11 «en cerrar un libro» — "En cerrar" ставит инфинитив после предлога — там, где русский строит оборот «в том, чтобы закрыть».
+7.12 «que se suponía que debías admirar» — "Que se suponía que debías admirar" нанизывает два "que" и безличное "se". Опустить ни один союз нельзя, и фраза сохраняет форму, которую русский свернул бы в одно причастие.
+7.13 «Es el mismo placer» — "El mismo placer que" требует после "el mismo" союза "que", а не "como". Для англоговорящих это ловушка, для русскоговорящих совпадает с «то же, что».
+7.14 «que irse de una fiesta» — "Irse de una fiesta" возвратный и требует "de". Инфинитив повторяет форму предыдущего элемента.
+7.15 «en el momento exacto» — "En el momento exacto" ставит прилагательное после существительного.
+7.16 «Mis estanterías» — "Mis estanterías" — притяжательное во множественном числе, меняющееся только по числу.
+7.17 «han quedado menos impresionantes» — "Quedar" плюс прилагательное значит «стать в итоге», а "menos impresionantes" строит сравнение вниз.
+7.18 «y mucho más honestas» — "Mucho más honestas" повторяет предыдущий элемент и согласуется в женском роде множественного числа. Симметрия намеренная.
+7.19 «Nadie viene» — "Nadie viene" ставит отрицательное местоимение перед глаголом, так что дополнительного "no" не нужно.
+7.20 «a preguntar por ellas» — "A preguntar por ellas" использует "a" для цели и "por" для темы. "Preguntar por" — спрашивать о чём-то, а "preguntar a" — спрашивать у кого-то.
+7.21 «que era justo lo que yo temía» — "Que era justo lo que yo temía" относится ко всему предыдущему. "Justo" здесь значит «ровно», а местоимение "yo" добавлено ради выделения.
+8.1 «Me puse a nadar» — "Ponerse a" плюс инфинитив значит «взяться за», и возвратное местоимение — часть конструкции.
+8.2 «a una edad» — "A una edad" использует "a" для возраста, тогда как русский ставит «в».
+8.3 «en la que la gente se pone a quejarse» — "En la que" ставит предлог перед относительным словом, как требует аккуратный испанский. "Ponerse a" повторяется из первого элемента, и в этом повторе шутка.
+8.4 «El primer mes» — "El primer mes" использует усечённое "primer" перед мужским существительным.
+8.5 «fue humillante» — "Fue humillante" использует простое прошедшее от "ser" для закрытого периода, с причастием настоящего времени в роли прилагательного.
+8.6 «de una manera que había olvidado que existía» — "De una manera que había olvidado que existía" вкладывает два придаточных, каждое со своим "que". Опустить нельзя ни одно.
+8.7 «Los adultos» — "Los adultos" сохраняет артикль в обобщающем утверждении.
+8.8 «no solemos ser» — "No solemos ser" ставит "soler" в первое лицо множественного числа, тихо включая говорящего в группу. Русскому пришлось бы сказать это отдельной фразой.
+8.9 «visiblemente malos en algo delante de otros» — "Malos en algo" требует "en", а не "de". "Delante de otros" — естественный эквивалент русского «на людях».
+8.10 «Hay un monitor» — "Hay un monitor" использует неизменяемое "hay". "Monitor" — слово для спортивного инструктора.
+8.11 «que lleva desde marzo viéndome» — "Llevar desde marzo viéndome" соединяет "llevar" с герундием и точкой отсчёта, а местоимение приклеивается к герундию. Всё это стоит в настоящем времени, как и русское «с марта наблюдает».
+8.12 «no respirar correctamente» — "No respirar correctamente" — отрицаемый инфинитив, зависящий от "viéndome". Отрицание стоит перед инфинитивом.
+8.13 «Nunca ha insinuado» — "Nunca ha insinuado" ставит "nunca" перед глаголом, и второго отрицательного слова там не требуется.
+8.14 «ni una sola vez» — "Ni una sola vez" усиливает уже имеющееся отрицание. Два отрицательных выражения в одной фразе для испанского нормальны, как и для русского.
+8.15 «que quizá sea mayor para esto» — "Que quizá sea" требует сослагательного после "quizá", потому что предположение гипотетично. "Mayor para esto" использует "para" для назначения.
+8.16 «Esa contención» — "Esa contención" использует указательное вместо артикля.
+8.17 «vale más para mí» — "Vale más para mí" использует "valer" с предлогом "para" перед человеком.
+8.18 «que la propia técnica» — "Que la propia técnica" требует после сравнительной степени "que", а "propia" перед существительным значит «сама техника».
+8.19 «Ahora soy lento» — "Ahora soy lento" использует "ser" для постоянного свойства, а не "estar".
+8.20 «en una distancia mucho más larga» — "En una distancia mucho más larga" ставит рядом усилитель и сравнительную степень.
+8.21 «y he decidido llamar a eso progreso» — "Llamar a eso progreso" требует "a" перед "eso" и оставляет "progreso" без артикля. Перфект показывает, что решение остаётся в силе.
+9.1 «La mitad de mi trabajo» — "La mitad de mi trabajo" требует "de" перед притяжательным, и глагол после "la mitad" идёт в единственном числе.
+9.2 «consiste en decirle a la gente cosas» — "Consistir en" всегда требует "en". "Decirle a la gente" удваивает косвенное дополнение: есть и местоимение "le", и названный человек, и испанский этого требует.
+9.3 «que ya sabe» — "Que ya sabe" согласуется с "la gente" в единственном числе, хотя речь о многих.
+9.4 «La otra mitad» — "La otra mitad" сохраняет артикль перед "otra".
+9.5 «es ser» — "Es ser" ставит инфинитив после связки. Выглядит странно и совершенно правильно.
+9.6 «la persona a la que se le permite decirlas» — "A la que se le permite" соединяет относительное слово с предлогом, безличное "se" и удвоенное косвенное дополнение "le". Испанский нанизывает всё это без напряжения.
+9.7 «Nadie paga» — "Nadie paga" ставит отрицательное местоимение перед глаголом.
+9.8 «por el análisis» — "Por el análisis" использует "por" для того, за что платят, и сохраняет артикль.
+9.9 «pagan por el permiso» — Точка с запятой соединяет противопоставление. "Pagan" — множественное без подлежащего, и весь смысл держится на этом сдвиге.
+9.10 «Suena cínico» — "Sonar" — связочный глагол, поэтому "cínico" стоит в форме прилагательного, согласованного с подразумеваемым мужским родом.
+9.11 «y durante casi un año» — "Durante casi un año" использует "durante" для срока и "casi" для приблизительности.
+9.12 «me hizo sentir fatal» — "Hacer sentir" — каузативная конструкция из двух глаголов подряд. "Fatal" здесь наречие и неизменяемо.
+9.13 «Luego me di cuenta» — "Darse cuenta" возвратный, а простое прошедшее отмечает момент осознания.
+9.14 «de que las decisiones cambiaban de verdad» — "De que" несёт предлог, которого требует "darse cuenta". "De verdad" стоит после глагола.
+9.15 «que es más de lo que consigue la mayoría de los informes» — "Más de lo que consigue" требует "de lo que" перед целым предложением, а не "que". "La mayoría de los informes" берёт глагол в единственном числе.
+9.16 «He dejado de fingir» — "Dejar de fingir" соединяет два глагола обязательным "de".
+9.17 «que el valor» — "El valor" сохраняет артикль как подлежащее придаточного.
+9.18 «está en las diapositivas» — "Está en las diapositivas" использует "estar" для местоположения — единственно верный выбор здесь.
+9.19 «Está en la sala» — "Está en la sala" повторяет тот же глагол, а подлежащее не называется.
+9.20 «y las diapositivas» — "Y las diapositivas" сохраняет артикль, как всякое подлежащее.
+9.21 «son solo lo que hacemos con las manos» — "Lo que hacemos con las manos" использует среднее "lo que" и артикль там, где русский ставит притяжательное: "con las manos", а не "con nuestras manos".
+10.1 «Hace poco me preguntaron» — "Hace poco" значит «недавно» и построено на безличном "hacer". "Me preguntaron" — множественное без подлежащего.
+10.2 «qué me diría a mí mismo» — "Qué me diría a mí mismo" сохраняет ударение на "qué" и удваивает местоимение: есть и "me", и "a mí mismo", и так испанский выделяет.
+10.3 «a los veinticinco» — "A los veinticinco" использует "a los" для возраста, и артикль — часть конструкции.
+10.4 «La respuesta honesta» — "La respuesta honesta" ставит прилагательное после существительного.
+10.5 «es que no me habría hecho caso» — "No me habría hecho caso" — сложное условное о том, чего не произошло. "Hacer caso" — устойчивое сочетание, требующее косвенного дополнения.
+10.6 «y habría hecho bien» — "Habría hecho bien" сохраняет сложное условное и опускает подлежащее, которое подразумевается.
+10.7 «Casi todo lo que sé ahora» — "Casi todo lo que sé ahora" использует среднее "lo que" после "todo".
+10.8 «lo sé porque ignoré» — "Lo sé porque ignoré" удваивает дополнение через "lo", потому что вынесенное вперёд "todo lo que sé" повторяется местоимением. Испанский требует такого удвоения.
+10.9 «justamente ese tipo de consejos» — "Ese tipo de consejos" связывает существительные через "de", а "justamente" усиливает указательное слово.
+10.10 «Los errores» — "Los errores" сохраняет артикль в обобщающем утверждении.
+10.11 «no fueron desvíos» — "No fueron desvíos" использует простое прошедшее для закрытого суждения.
+10.12 «eran el camino» — "Eran el camino" переключается на имперфект, и переключение здесь и есть смысл: простое прошедшее закрыло первую половину, а имперфект разворачивает ошибки в то, что длилось.
+10.13 «Dicho esto» — "Dicho esto" — абсолютный причастный оборот, «при этом».
+10.14 «probablemente sí mencionaría» — "Probablemente sí mencionaría" использует "sí" как усилительную частицу, а не как «да». Русского эквивалента у неё нет, она просто подкрепляет глагол.
+10.15 «lo del sueño» — "Lo del sueño" использует средний артикль с "de" и значит «историю про сон». Это компактная конструкция, к которой испанский прибегает постоянно.
+10.16 «Se habría reído» — "Se habría reído" — сложное условное возвратного глагола, с местоимением перед вспомогательным.
+10.17 «habría tomado nota» — "Habría tomado nota" повторяет вспомогательный глагол, что испанский делает охотнее русского. "Tomar nota" артикля не требует.
+10.18 «y lo habría olvidado para el jueves» — "Lo habría olvidado para el jueves" использует "para" для срока и "lo" для всего дела целиком.
+10.19 «Que es, más o menos» — "Que es, más o menos" начинает фразу с относительного слова, отсылающего ко всему сказанному, а вводный оборот выделен запятыми.
+10.20 «lo que hice yo» — "Lo que hice yo" ставит местоимение после глагола ради выделения, что испанский допускает свободно.
+10.21 «con todo lo que me dijeron» — "Con todo lo que me dijeron" заканчивается глаголом во множественном числе без подлежащего — ровно как русское «что мне говорили».

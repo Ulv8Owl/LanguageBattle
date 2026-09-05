@@ -1,0 +1,210 @@
+1.1 «Реорганизацию объявили» — A subjectless plural verb: "объявили" means "they announced it", with no "they" named. The object comes first, which Russian word order allows because the ending, not the position, marks its role. English needs the passive here.
+1.2 «во вторник» — "Во вторник" uses "в" plus the accusative, and the preposition becomes "во" before a consonant cluster. Russian says it for any Tuesday and for one particular Tuesday alike, so the joke rests on context, not on an article.
+1.3 «а во вторник ничего хорошего не объявляют» — "А" contrasts with what precedes and is not the same as "и". "Ничего хорошего не объявляют" stacks two negatives and puts the object in the genitive, both of which are compulsory.
+1.4 «Нам обещали» — Another subjectless plural, with the person in the dative: "нам обещали". This is the standard Russian answer to the English passive "we were promised".
+1.5 «меньше уровней» — "Меньше" always takes the genitive: "уровней". Russian makes no distinction between countable and uncountable here, so the English "fewer" and "less" split has no equivalent.
+1.6 «и более быстрые решения» — "Более быстрые" builds the comparative analytically, with "более" plus the adjective. The synthetic "быстрее" exists but cannot stand before a noun like this.
+1.7 «Полгода спустя» — "Полгода спустя" is written as one word plus a postposed "спустя". The word "спустя" can also come first, and both are correct.
+1.8 «у нас есть и то и другое» — "У нас есть" is the Russian "have". "И то и другое" is a fixed pair meaning "both", and neither half can be dropped.
+1.9 «а ещё два новых комитета» — "А ещё" adds something with a slight contrast. "Два новых комитета" puts the noun in the genitive singular after "два", and the adjective in the genitive plural — a mismatch that looks wrong but is correct.
+1.10 «Моя собственная должность» — "Моя собственная" doubles the possessive for emphasis, exactly as English does with "my own".
+1.11 «формально не изменилась» — "Формально" means "officially, on paper", not "formally" in the sense of politeness. "Не изменилась" puts the negation before the verb, and "-сь" makes it intransitive.
+1.12 «во что никто до конца не верит» — "Во что" places the preposition before the relative pronoun, which takes the accusative after "верить в". "Никто до конца не верит" again needs both negative words.
+1.13 «Теперь я подчиняюсь» — "Подчиняться" always takes the dative, which is why the next element is in that case.
+1.14 «человеку» — "Человеку" is the dative demanded by the verb. Russian has no article, so nothing marks it as "someone" rather than "the person".
+1.15 «который подчиняется моему прежнему руководителю» — "Который подчиняется" repeats the verb and its dative government: "моему прежнему руководителю". The relative pronoun is in the nominative, because it is the subject of its own clause.
+1.16 «Справедливости ради» — "Справедливости ради" is a fixed phrase with the genitive and a postposed "ради", set off by a comma.
+1.17 «она отличный менеджер» — "Она отличный менеджер" has no verb: the present of "быть" is not used. Note that "менеджер" stays masculine even about a woman — Russian has no established feminine form here.
+1.18 «и совещания стали короче» — "Стали короче" uses "стать" plus a comparative. The short comparative "короче" cannot stand before a noun but works perfectly as a predicate.
+1.19 «Считать ли всё это» — "Считать ли" builds an indirect yes-or-no question with the particle "ли", and the whole clause is the subject of what follows.
+1.20 «уменьшением числа уровней» — "Уменьшением числа уровней" is the instrumental required by "считать чем-то", followed by two genitives in a chain.
+1.21 «зависит от того, как считать» — "Зависит от того, как" needs the pointing word "того" before the clause, and the comma is compulsory. English manages with "depends on how" and no equivalent of "того".
+2.1 «Самое трудное» — "Самое трудное" is a superlative adjective used as a noun, in the neuter. Russian needs no word for "thing".
+2.2 «в хорошем владении иностранным языком» — "В хорошем владении" uses "в" plus the prepositional, and "владение" is a verbal noun. "Иностранным языком" is the instrumental that "владение" governs.
+2.3 «то, что тебе перестают делать скидку» — The dash replaces the missing "is". "Тебе перестают делать скидку" is a subjectless plural with the person in the dative, and "делать скидку" is the fixed collocation.
+2.4 «На уровне B1» — "На уровне B1" uses "на" plus the prepositional. Russian needs the word "уровне" here, where English gets by with "at B1".
+2.5 «все умилялись» — "Умилялись" has "-ся" and means "were touched, were charmed" — gently ironic in this context.
+2.6 «что я умею заказать кофе» — "Умею" is about a learned skill, as opposed to "могу", which is about possibility. The distinction matters, and English "could" covers both.
+2.7 «Где-то потом» — "Где-то потом" uses "где-то" of time rather than place, "at some point later". The figurative use is ordinary.
+2.8 «комплименты закончились» — "Закончились" has "-ся" and is intransitive: the compliments ended by themselves.
+2.9 «и начались исправления» — "Начались" repeats the same pattern, and the parallel is deliberate. The subject follows the verb, which Russian uses to introduce something new.
+2.10 «Это и есть прогресс» — "Это и есть" uses the particle "и" for emphasis and the rare present-tense "есть", which survives only in such fixed turns.
+2.11 «хотя в моменте» — "В моменте" is recent business jargon for "at the time" and is still felt as a borrowing. The older equivalent is "в тот момент".
+2.12 «он редко так ощущается» — "Так ощущается" has "-ся" and is impersonal in feel. "Редко" stands before the verb.
+2.13 «Последние десять процентов» — "Последние десять процентов" puts the noun in the genitive plural after the numeral, while the adjective agrees in the nominative plural.
+2.14 «это не словарный запас» — The dash replaces the missing "is" once more. "Не словарный запас" negates the noun, opening the "не ... а ..." frame.
+2.15 «а умение вовремя не умничать» — "А" closes the frame. "Умение вовремя не умничать" chains a verbal noun, an adverb and a negated infinitive, and the negation attaches to the infinitive, not to "умение".
+2.16 «Я до сих пор перебарщиваю» — "До сих пор" means "still, to this day". "Перебарщивать" is colloquial, "to overdo it".
+2.17 «обычно словом» — "Словом" is the instrumental of means, with no preposition.
+2.18 «которое выучил тем же утром» — The relative pronoun is in the accusative, matching its role in its own clause. "Тем же утром" is an instrumental of time with the emphatic particle "же".
+2.19 «Свободное владение» — "Свободное владение" is the standard term for fluency, and it is a verbal noun with an adjective.
+2.20 «насколько я могу судить» — "Насколько я могу судить" is a fixed parenthetical clause with commas on both sides.
+2.21 «это в основном сдержанность» — The dash again, and "в основном" means "mostly". "Сдержанность" is an abstract noun formed with the suffix "-ость".
+3.1 «Я уже провёл» — "Уже провёл" pairs the perfective past with "уже": Russian has no perfect tense, so the adverb does that work.
+3.2 «в той налоговой» — "В той налоговой" uses an adjective as a noun — "налоговая" is short for "налоговая инспекция". Russian drops the noun and keeps the adjective, which English cannot do.
+3.3 «больше часов, чем в домах у большинства друзей» — "Больше часов, чем" takes the genitive after "больше" and needs a comma before "чем". "В домах у большинства друзей" chains a preposition, a quantity word and two genitives.
+3.4 «Каждый визит» — "Каждый визит" takes a singular noun, as "каждый" always does.
+3.5 «требует справки» — "Требовать" takes the genitive when the object is abstract: "требует справки". With the accusative, "требует справку", it would sound like a demand rather than a requirement.
+3.6 «которая появляется только после предыдущего визита» — "Появляется" has "-ся". "Только" stands before what it limits, and "после" takes the genitive.
+3.7 «Женщина за четвёртым окном» — "За четвёртым окном" uses "за" plus the instrumental. Russian says "окно" of a service window, where English says "desk".
+3.8 «прониклась» — "Прониклась" has "-сь" and means "came to feel". It is a strong, slightly literary verb, and the irony depends on that.
+3.9 «ко мне определённым сочувствием» — "Ко мне" becomes "ко" before a consonant cluster. "Определённым сочувствием" is the instrumental that "проникнуться" governs.
+3.10 «Она больше не спрашивает» — "Больше не спрашивает" places "больше не" together as a unit meaning "no longer".
+3.11 «зачем я пришёл» — "Зачем" asks about purpose, while "почему" would ask about cause. English "why" covers both, and here only "зачем" fits.
+3.12 «просто тянется за нужным штампом» — The dash before "просто" replaces a conjunction and marks a sharp turn — a punctuation mark Russian uses far more freely than English. "Тянется за" takes the instrumental.
+3.13 «На прошлой неделе» — "На прошлой неделе" takes "на", not "в": weeks are the exception.
+3.14 «она сказала» — "Сказала" is perfective and opens a clause with "что" and a compulsory comma.
+3.15 «что я почти закончил» — "Почти закончил" uses the perfective past with "почти" — the action is presented as complete, and "почти" pulls it back.
+3.16 «Я это уже слышал» — "Я это уже слышал" places the object before the verb. The word order is free, and this arrangement puts the weight on "уже".
+3.17 «и я научился» — "Научился" has "-ся" and takes an infinitive.
+3.18 «не радоваться заранее» — The negation goes before the infinitive: "не радоваться". "Заранее" means "in advance".
+3.19 «И всё же» — "И всё же" means "and yet", not "still" in the sense of continuing. It is a fixed three-word phrase.
+3.20 «есть что-то странно утешительное» — "Что-то странно утешительное" places the adjective after the pronoun, as Russian does with "что-то" and "кто-то".
+3.21 «в бюрократии, которая хотя бы помнит твоё лицо» — "В бюрократии, которая" opens a relative clause with a compulsory comma. "Твоё лицо" uses the informal possessive in a generalising sense, not about the listener.
+4.1 «Лучший руководитель в моей жизни» — "Лучший руководитель в моей жизни" uses a superlative adjective with no article — Russian marks the superlative on the word itself.
+4.2 «почти ничего не говорил» — "Почти ничего не говорил" combines "почти" with a negative pronoun in the genitive and a negated verb. All three parts are needed.
+4.3 «на совещаниях» — "На совещаниях" takes "на" plus the prepositional plural.
+4.4 «Он давал» — "Давал" is imperfective past for a repeated habit, which is how Russian renders the English "would let".
+4.5 «громким людям» — "Громким людям" is the dative demanded by "давать" in the sense of "to allow".
+4.6 «договорить» — "Договорить" is perfective, "to finish speaking". The prefix "до-" carries the meaning of completion, and the plain "говорить" would lose it.
+4.7 «А потом задавал» — "А потом" marks the turn. "Задавал" is imperfective, matching the repeated habit.
+4.8 «один вопрос» — "Один вопрос" uses "один" for "a single one" rather than as a number.
+4.9 «который тихо переставлял всю комнату» — The relative pronoun is in the nominative as the subject of its clause. "Переставлял всю комнату" is a figurative use, and "тихо" stands before the verb.
+4.10 «Мне понадобились годы» — "Мне понадобились годы" puts the person in the dative and makes "годы" the grammatical subject, so the verb agrees with it in the plural.
+4.11 «чтобы понять» — "Чтобы" plus an infinitive expresses purpose, with a compulsory comma before it.
+4.12 «что это приём, а не характер» — "Приём, а не характер" contrasts through "а не", and the comma before it is compulsory.
+4.13 «Я пробовал так» — "Пробовал так" uses "так" to stand in for the whole action, which saves repeating it.
+4.14 «раза четыре» — "Раза четыре" reverses the usual order to mean "about four times". The inversion is the standard colloquial way of showing approximation.
+4.15 «и в трёх случаях это сработало» — "В трёх случаях" uses "в" plus the prepositional, and the numeral declines: "три" becomes "трёх".
+4.16 «На четвёртый» — "На четвёртый" leaves out the noun "раз", which is understood. Russian allows this kind of ellipsis freely.
+4.17 «я задал вопрос слишком рано» — "Слишком рано" places "слишком" before the adverb.
+4.18 «и прозвучало это просто грубо» — "Прозвучало это" puts the verb first, which throws the weight onto it. "Грубо" is an adverb, where English uses the adjective "rude" after a linking verb.
+4.19 «Чувство момента» — "Чувство момента" links the nouns with the genitive.
+4.20 «как выяснилось» — "Как выяснилось" is a parenthetical clause with commas on both sides.
+4.21 «единственное, чему невозможно научить» — The dash replaces the missing "is". "Чему невозможно научить" puts the relative pronoun in the dative, because "научить" governs that case, and "невозможно" is impersonal.
+5.1 «Мама» — "Мама" with no possessive: Russian drops it where English needs "my mother", because family words are understood as one's own.
+5.2 «начала рассказывать мне истории» — After "начать" the verb stays in the infinitive, and the imperfective "рассказывать" describes a repeated action. "Мне истории" gives the dative and the accusative in a row.
+5.3 «которые я и так знаю» — "И так" means "anyway, as it is" and is written as two words. The one-word "итак" means "so, thus" and would be wrong here.
+5.4 «Какое-то время» — "Какое-то время" is the accusative of duration with no preposition.
+5.5 «я её поправлял» — "Её поправлял" puts the object before the verb, and the imperfective marks it as repeated.
+5.6 «и от этого не было пользы никому» — "От этого не было пользы никому" stacks a genitive after the negated "было", plus a second negative word. Word order is free enough to end on "никому", which is where the weight falls.
+5.7 «Теперь я слушаю» — "Теперь" opens the contrast with the past.
+5.8 «ради мелких расхождений» — "Ради" takes the genitive: "ради мелких расхождений". It expresses purpose, "in order to catch".
+5.9 «и они находятся всегда» — "Находятся" has "-ся" and means "turn up" here, not "are located".
+5.10 «У версии, рассказанной прошлой весной» — "У версии, рассказанной прошлой весной" uses the "у" construction with a passive past participle in the instrumental phrase. Participles like this belong to written Russian.
+5.11 «был другой финал» — "Был другой финал" is the "have" construction: the thing owned is the subject and the verb agrees with it.
+5.12 «чем у той, с которой я вырос» — "Чем у той" repeats the preposition "у" in the second half of the comparison, because the construction demands the same shape on both sides.
+5.13 «Я решил» — "Решил" is perfective and opens a clause with "что".
+5.14 «что верны обе» — "Верны обе" uses a short-form adjective as the predicate, with the numeral-like "обе" in the feminine.
+5.15 «в том смысле, который здесь важен» — "В том смысле, который" needs the pointing word "том" and a compulsory comma before the relative pronoun.
+5.16 «Она не теряет историю» — "Не теряет" is imperfective present with the negation before the verb.
+5.17 «она всё ещё решает» — "Всё ещё" means "still" in the sense of continuing, unlike "и всё же" in the third phrase.
+5.18 «что эта история значит» — An indirect question keeps the same word order as a direct one: "что эта история значит", with no inversion of any kind.
+5.19 «Подозреваю» — "Подозреваю" drops the pronoun "я": the ending already says who, and dropping it here speeds up the sentence.
+5.20 «что лет через тридцать» — "Лет через тридцать" reverses the order for approximation, the same device as "раза четыре" earlier.
+5.21 «буду делать ровно то же самое» — "Буду делать" is the compound future with an imperfective infinitive. "Ровно то же самое" stacks three intensifying words, and all three are idiomatic together.
+6.1 «Сбой длился» — "Сбой" is the standard word for an outage. "Длился" has "-ся" and is intransitive.
+6.2 «одиннадцать минут» — "Одиннадцать минут" is the accusative of duration with the noun in the genitive plural.
+6.3 «которые мы будем обсуждать одиннадцать месяцев» — "Которые мы будем обсуждать" puts the relative pronoun in the accusative plural. The compound future with an imperfective marks a long process, and the contrast of minutes with months is the joke.
+6.4 «Причиной» — "Причиной" is in the instrumental because "стать" governs that case. Putting it first is what makes the sentence land.
+6.5 «стало изменение конфигурации» — "Стало изменение конфигурации" makes "изменение" the grammatical subject, with the verb agreeing with it in the neuter.
+6.6 «которое никто не помнит, чтобы согласовывал» — "Никто не помнит, чтобы согласовывал" needs the double negation and then a "чтобы" clause with a past-tense verb. This construction has no English equivalent and is worth learning whole.
+6.7 «Разбор» — "Разбор" is the ordinary word for a post-mortem in Russian engineering usage.
+6.8 «был «без поиска виноватых»» — Guillemets mark the quoted term. "Без поиска виноватых" chains a preposition, a verbal noun and a substantivised adjective in the genitive plural.
+6.9 «в том смысле, что виноватого знали все» — "В том смысле, что" needs the pointing word and a compulsory comma, as in the fifth phrase.
+6.10 «Мы составили» — "Составили" is perfective: the list was produced and finished.
+6.11 «четырнадцать пунктов» — "Четырнадцать пунктов" puts the noun in the genitive plural after the numeral.
+6.12 «из которых закрыли два самых лёгких» — "Из которых" places the preposition before the relative pronoun, which takes the genitive. "Два самых лёгких" combines a numeral with a superlative.
+6.13 «В своё оправдание» — "В своё оправдание" uses "свой", which refers back to the subject of the sentence.
+6.14 «остальные двенадцать» — "Остальные двенадцать" leaves the noun out; it is understood from the previous clause.
+6.15 «потребовали бы признать нечто структурное» — "Потребовали бы" is the conditional, built from the past plus "бы". "Признать нечто структурное" uses "нечто", a bookish equivalent of "что-то".
+6.16 «Система» — "Система" is the subject in the nominative.
+6.17 «теперь чуть безопаснее» — "Чуть безопаснее" uses "чуть" to weaken the comparative, and the comparative itself needs no verb.
+6.18 «и заметно сложнее» — "Заметно сложнее" mirrors the previous element with a stronger intensifier. The symmetry is deliberate.
+6.19 «Я бы назвал это» — "Я бы назвал это" is the conditional again, softening the verdict.
+6.20 «честным описанием» — "Честным описанием" is the instrumental that "назвать" governs.
+6.21 «большей части инженерной работы» — "Большей части инженерной работы" chains a comparative used as a quantity word with two genitives.
+7.1 «Раньше я дочитывал» — "Раньше" plus the imperfective is how Russian says "used to": there is no separate construction, and the tense carries the whole meaning.
+7.2 «каждую начатую книгу» — "Каждую начатую книгу" combines "каждый" with a passive past participle, both in the accusative feminine.
+7.3 «из принципа» — "Из принципа" uses "из" plus the genitive to express motivation.
+7.4 «Принцип» — The subject in the nominative, already known from the previous line: "принцип" needs no article to be understood as definite.
+7.5 «оказался» — "Оказался" has "-ся" and means "turned out to be". What follows must go into the instrumental.
+7.6 «в основном тщеславием» — "Тщеславием" is the instrumental required by "оказаться". "В основном" softens the claim.
+7.7 «Теперь я бросаю их» — "Бросаю их" is imperfective present for a habit, with the object after the verb.
+7.8 «спокойно» — "Спокойно" is an adverb meaning "without qualms" here, not "calmly" in the literal sense.
+7.9 «и читаю заметно больше» — "Заметно больше" intensifies a comparative that modifies the verb rather than an adjective.
+7.10 «Есть особое удовольствие» — "Есть особое удовольствие" states existence, with the subject following.
+7.11 «в том, чтобы закрыть книгу» — "В том, чтобы закрыть книгу" needs the pointing word "том", a compulsory comma and then "чтобы" with an infinitive. English gets by with "in closing".
+7.12 «которой полагалось восхищаться» — "Которой полагалось восхищаться" puts the relative pronoun in the instrumental, because "восхищаться" governs that case, and "полагалось" is impersonal.
+7.13 «Это то же удовольствие» — "То же удовольствие" uses "тот же" for "the same", and both words agree with the noun.
+7.14 «что уйти с вечеринки» — "Что уйти" continues the comparison with an infinitive. Russian uses "что" here where English uses "as".
+7.15 «ровно в нужный момент» — "Ровно в нужный момент" places "ровно" before the preposition, and "в" takes the accusative.
+7.16 «Мои полки» — "Мои полки" is the subject in the nominative plural.
+7.17 «стали менее внушительными» — "Стали менее внушительными" uses "стать" plus the instrumental, with "менее" building the comparative downwards.
+7.18 «и намного более честными» — "Намного более честными" keeps the instrumental for symmetry and stacks two intensifiers. Both halves had to match, and they do.
+7.19 «Никто не приходит» — "Никто не приходит" needs both negative words.
+7.20 «и не спрашивает про них» — "И не спрашивает" repeats the negation for the second verb: unlike English, Russian cannot let one negation cover both.
+7.21 «чего я, собственно, всегда и боялся» — "Чего я всегда и боялся" puts the relative pronoun in the genitive, because "бояться" governs that case. "Собственно" is parenthetical and takes commas.
+8.1 «Я занялся плаванием» — "Заняться" has "-ся" and takes the instrumental: "плаванием". This is the case the verb demands, not something you could guess.
+8.2 «в том возрасте» — "В том возрасте" uses "в" plus the prepositional with a pointing word, which the relative clause then picks up.
+8.3 «когда люди обычно занимаются ворчанием» — "Занимаются ворчанием" repeats the verb and its instrumental from the first element, and the repetition is the joke.
+8.4 «Первый месяц» — "Первый месяц" is the subject in the nominative.
+8.5 «был унизительным» — After the past of "быть" the predicate adjective goes into the instrumental: "унизительным".
+8.6 «так, как я уже забыл, что бывает» — "Так, как я уже забыл, что бывает" nests three clauses, each with its own comma. "Бывает" means "happens sometimes" and has no one-word English equivalent.
+8.7 «Взрослые люди» — "Взрослые люди" is the subject in the nominative plural.
+8.8 «нечасто оказываются» — "Нечасто" is written as one word when it means "seldom". Written separately, "не часто", it would negate "часто" more pointedly.
+8.9 «откровенно плохи в чём-то на людях» — "Плохи в чём-то" uses a short-form adjective plus "в" with the prepositional. "На людях" is a fixed phrase meaning "in public".
+8.10 «Есть тренер» — "Есть тренер" states existence, with the subject after the verb.
+8.11 «который с марта наблюдает» — "С марта" marks the starting point with the genitive. The present tense covers a period reaching into the present, which English would render with a perfect.
+8.12 «как я не умею правильно дышать» — "Как я не умею" opens an indirect clause with "как". "Уметь" is about skill, and the negation goes before it.
+8.13 «Он ни разу» — "Ни разу" needs "не" with the verb further on, and "ни" cannot stand alone.
+8.14 «не намекнул» — "Не намекнул" completes the double negation. "Намекнуть" is perfective and opens a clause with "что".
+8.15 «что мне для этого поздновато» — "Мне для этого поздновато" is impersonal: dative, then "для" with the genitive, then a diminutive adverb that softens the judgement.
+8.16 «Эта сдержанность» — "Эта сдержанность" uses a demonstrative in place of an article.
+8.17 «для меня ценнее» — "Для меня ценнее" is a comparative predicate with no verb, and "для" takes the genitive.
+8.18 «самой техники» — "Самой техники" is the genitive after a comparative, which lets Russian drop "чем". "Самой" here means "itself".
+8.19 «Теперь я медленный» — "Теперь я медленный" has no verb, and the full adjective agrees with the subject.
+8.20 «на гораздо большей дистанции» — "На гораздо большей дистанции" uses "на" plus the prepositional with an intensified comparative adjective.
+8.21 «и я предпочитаю называть это прогрессом» — "Называть это прогрессом" takes the instrumental, and "предпочитаю" plus an infinitive shows it is a deliberate choice.
+9.1 «Половина моей работы» — "Половина моей работы" puts the possessed noun in the genitive after "половина".
+9.2 «говорить людям то» — The dash replaces the missing "is", and an infinitive serves as the predicate. "Людям то" gives the dative and then the pointing word that the next clause needs.
+9.3 «что они и так знают» — "Что они и так знают" picks up "то" from the previous element. The comma is compulsory.
+9.4 «Вторая половина» — "Вторая половина" is the subject in the nominative.
+9.5 «быть тем человеком» — The dash again, and "тем человеком" is the instrumental required by "быть" in the infinitive.
+9.6 «которому это позволено произнести вслух» — "Которому это позволено произнести вслух" puts the relative pronoun in the dative and uses a short-form passive participle. The construction is compact in a way English cannot match.
+9.7 «Никто» — "Никто" as a negative pronoun, which pulls "не" to the verb in the next element.
+9.8 «не платит за анализ» — "Не платит за анализ" completes the double negation, and "за" takes the accusative.
+9.9 «платят за разрешение» — "Платят за разрешение" is a subjectless plural, and the contrast with the previous element rests on that shift alone.
+9.10 «Звучит цинично» — "Звучит цинично" takes an adverb after the verb, where English uses the adjective "cynical" after a linking verb.
+9.11 «и примерно год» — "Примерно год" is the accusative of duration with no preposition.
+9.12 «мне от этого было тошно» — "Мне от этого было тошно" is impersonal: dative for the person, "от" with the genitive for the cause, and a short-form adverb with no subject at all.
+9.13 «Потом я заметил» — "Потом я заметил" opens the turn, and "заметить" is perfective.
+9.14 «что решения действительно менялись» — "Действительно менялись" uses the imperfective for a repeated change, with "-сь" making it intransitive.
+9.15 «а это больше, чем достигает большинство отчётов» — "А это больше, чем достигает" contrasts with "а", needs a comma before "чем", and puts the verb before its subject in the final clause.
+9.16 «Я перестал делать вид» — "Делать вид" is a fixed collocation meaning "to pretend". After "перестал" the verb must be imperfective.
+9.17 «что ценность» — "Ценность" is an abstract noun with the suffix "-ость", and it is the subject of the clause.
+9.18 «находится в слайдах» — "Находится в слайдах" uses "в" plus the prepositional plural. "Находиться" is the neutral verb for being located.
+9.19 «Она в комнате» — "Она в комнате" has no verb at all: the present of "быть" is absent, and the preposition carries everything.
+9.20 «а слайды» — "А слайды" contrasts with "а" and introduces the second half.
+9.21 «это просто то, чем заняты наши руки» — "То, чем заняты наши руки" uses the pointing word plus a relative pronoun in the instrumental, because "заняты" governs that case.
+10.1 «Недавно меня спросили» — "Недавно меня спросили" is a subjectless plural with the adverb first. The object precedes the verb, which the free word order allows.
+10.2 «что бы я сказал себе» — "Что бы я сказал себе" is a conditional inside an indirect question, and "себе" is the reflexive pronoun in the dative.
+10.3 «в двадцать пять» — "В двадцать пять" uses "в" plus the accusative for age, and the noun "лет" is left out as understood.
+10.4 «Честный ответ» — "Честный ответ" is the subject in the nominative.
+10.5 «что он бы не послушал» — The dash replaces the missing "is". "Он бы не послушал" is the conditional with the negation, and the past tense plus "бы" is the only way Russian forms it.
+10.6 «и правильно бы сделал» — "Правильно бы сделал" keeps the conditional and drops the subject, which is understood from the previous clause.
+10.7 «Почти всё, что я знаю сейчас» — "Почти всё, что я знаю сейчас" needs a comma before "что", and "всё" takes a singular verb.
+10.8 «я знаю потому, что проигнорировал» — "Я знаю потому, что" splits the two-part conjunction with a comma, which shifts the emphasis onto the reason. Writing "потому что" without the comma would be flatter.
+10.9 «ровно такие советы» — "Ровно такие советы" is the accusative plural, and "ровно" intensifies "такие".
+10.10 «Ошибки» — "Ошибки" is the subject in the nominative plural.
+10.11 «не были обходными путями» — "Не были обходными путями" puts the predicate in the instrumental after the past of "быть", with the negation before the verb.
+10.12 «они и были дорогой» — "Они и были дорогой" uses the particle "и" for emphasis and keeps the instrumental. The symmetry with the previous element is the point.
+10.13 «При этом» — "При этом" means "that said, at the same time", with "при" plus the prepositional.
+10.14 «я, наверное, всё-таки упомянул бы» — "Я, наверное, всё-таки упомянул бы" packs a parenthetical word in commas, an emphatic "всё-таки" and the conditional particle. The particle can stand almost anywhere in the clause.
+10.15 «историю про сон» — "Историю про сон" uses the colloquial "про" plus the accusative.
+10.16 «Он бы посмеялся» — "Он бы посмеялся" is the conditional again, and "посмеяться" is perfective with "-ся".
+10.17 «что-то записал» — "Что-то записал" continues the same conditional: "бы" is not repeated, because one particle covers the whole series.
+10.18 «и забыл к четвергу» — "И забыл к четвергу" is the third verb under the same "бы". "К" takes the dative for a deadline.
+10.19 «Что, в общем-то» — "Что, в общем-то" starts a sentence with a relative pronoun referring back to everything said, and "в общем-то" is parenthetical with a hyphen.
+10.20 «я и сделал» — "Я и сделал" uses the particle "и" for emphasis, "that is exactly what I did".
+10.21 «со всем, что мне тогда говорили» — "Со всем, что мне тогда говорили" uses "со" before a consonant cluster, then a relative clause with a subjectless plural verb and the person in the dative.
