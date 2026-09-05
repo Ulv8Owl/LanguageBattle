@@ -1,24 +1,33 @@
 # CEFR phrase dataset (EN / RU / ES)
 
-36 files + validator.
+18 files + validator.
 
 ## Naming
 
 - `phrases_<LEVEL>_<lang>.txt` — 10 phrases, one per line
-- `explanations_<LEVEL>_<lang>.txt` — one explanation per line, prefixed `line.element`
 
 `LEVEL` ∈ A1 A2 B1 B2 C1 C2 · `lang` ∈ en ru es
 
+## No explanation files any more
+
+The dataset used to ship `explanations_<LEVEL>_<lang>.txt` with a
+pre-written note per element. They were removed: such a note is written
+about the *native* wording («в семь», not "at seven") and knows nothing
+about what the learner actually said. The per-element commentary is now
+written by the language model at answer time, and only for the elements
+the learner got wrong — see
+`supabase/functions/_shared/explainElements.ts`.
+
 ## Structure
 
-| Level | Sentences per phrase | Elements per phrase | Explanation lines per file |
-|---|---|---|---|
-| A1 | 2 | 6 | 60 |
-| A2 | 3 | 9 | 90 |
-| B1 | 4 | 12 | 120 |
-| B2 | 5 | 15 | 150 |
-| C1 | 6 | 18 | 180 |
-| C2 | 7 | 21 | 210 |
+| Level | Sentences per phrase | Elements per phrase |
+|---|---|---|
+| A1 | 2 | 6 |
+| A2 | 3 | 9 |
+| B1 | 4 | 12 |
+| B2 | 5 | 15 |
+| C1 | 6 | 18 |
+| C2 | 7 | 21 |
 
 Rule: exactly 3 elements per sentence at every level.
 
@@ -39,23 +48,11 @@ Element counts are identical across `en` / `ru` / `es` for every line, and eleme
 of line *M* covers the same semantic chunk in all three languages. Element boundaries are
 placed at clause level so the alignment survives the differences in word order.
 
-## Explanations
-
-Written in the language of the phrases they annotate, and calibrated to the level:
-
-- **A1–A2** — basic forms: articles, cases, prepositions of time and place, verb endings
-- **B1** — aspect/perfect tenses, phrasal verbs, conditionals, relative clauses, collocations
-- **B2** — register, hedging, passive/impersonal constructions, understatement
-- **C1** — irony, scare quotes, corporate euphemism, cleft and fronting, connotation
-- **C2** — discourse structure, why a specific punctuation mark or word order carries the joke,
-  litotes, ellipsis, register shifts
-
 ## Validation
 
 ```
 python3 validate.py
 ```
 
-Checks: 36 files present · 10 lines per phrase file · sentence count per level ·
-element count per level · en/ru/es element parity per line ·
-every element has exactly one explanation, numbered in order, no gaps or duplicates.
+Checks: 18 files present · 10 lines per phrase file · sentence count per level ·
+element count per level · en/ru/es element parity per line.

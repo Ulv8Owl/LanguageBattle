@@ -55,18 +55,15 @@ void main() {
     }
   });
 
-  test('к каждому элементу есть пояснение', () {
+  test('готовых пояснений в банке нет', () {
+    // Разбор ошибок пишет модель по факту ответа игрока
+    // (_shared/explainElements.ts). Заранее написанный текст сюда
+    // вернуться не должен: он про РОДНУЮ формулировку и не знает, что
+    // игрок сказал, — а выглядит на экране точно так же, из-за чего
+    // молчание модели однажды уже прошло незамеченным.
     for (final level in levels) {
-      final phrases = read('assets/phrases/cefr_$level.json');
-      for (var i = 0; i < phrases.length; i++) {
-        for (final lang in languages) {
-          final explanations = (phrases[i]['explanations'] as Map)[lang] as List;
-          expect(explanations.length, elementsPerLevel[level],
-              reason: '$level, фраза ${i + 1}, $lang');
-          for (final e in explanations) {
-            expect((e as String).trim(), isNotEmpty, reason: '$level/$lang');
-          }
-        }
+      for (final p in read('assets/phrases/cefr_$level.json')) {
+        expect(p.containsKey('explanations'), isFalse, reason: level);
       }
     }
   });

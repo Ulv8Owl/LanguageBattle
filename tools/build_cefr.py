@@ -1,10 +1,16 @@
 #!/usr/bin/env python3
 """Собирает assets/phrases/cefr_<уровень>.json из assets/cefr/*.txt.
 
-ИСТОЧНИК — 36 текстовых файлов в assets/cefr: по шесть уровней (A1..C2) на
-каждый из трёх языков, отдельно фразы и отдельно пояснения. Формат описан
-в assets/cefr/README.md и проверяется assets/cefr/validate.py; здесь он
-только читается.
+ИСТОЧНИК — 18 текстовых файлов в assets/cefr: по шесть уровней (A1..C2) на
+каждый из трёх языков. Формат описан в assets/cefr/README.md и проверяется
+assets/cefr/validate.py; здесь он только читается.
+
+ГОТОВЫХ ПОЯСНЕНИЙ БОЛЬШЕ НЕТ. Раньше рядом лежали файлы explanations_* с
+заранее написанным разбором каждого элемента, и он попадал в этот JSON.
+От них отказались: пояснение писалось про РОДНУЮ формулировку («в семь», а
+не «at seven») и ничего не знало о том, что игрок сказал на самом деле.
+Разбор ошибок теперь пишет языковая модель по факту ответа — см.
+supabase/functions/_shared/explainElements.ts.
 
 ЧТО СОБИРАЕТСЯ. Один JSON на уровень — то, что реально нужно приложению в
 раунде, без разбора текста на клиенте:
@@ -16,9 +22,8 @@
                  {"lead": " ", "text": "at seven"}, ...],
           ...
         },
-        "tail": {"en": ".", ...},           // хвост строки после последнего
+        "tail": {"en": ".", ...}            // хвост строки после последнего
                                             // элемента: точка, «!», «?»
-        "explanations": {"en": ["...", ...], ...}
       },
       ...
     ]
@@ -63,9 +68,6 @@ PHRASES_PER_LEVEL = 10
 # предложения плюс пробелы. Класс \w здесь не годится — он не знает про
 # апострофы в «don't» и про кириллицу в некоторых сборках Python.
 LEAD_RE = re.compile(r"^[\s.,;:!?…—–-]*")
-
-# «1.1 » в начале строки пояснения.
-EXPLANATION_RE = re.compile(r"^(\d+)\.(\d+)\s+(.*)$")
 
 
 class SourceError(Exception):
@@ -135,48 +137,12 @@ def load_phrases(level: str, lang: str) -> tuple[list[list[dict[str, str]]], lis
     return all_elements, tails
 
 
-def load_explanations(level: str, lang: str) -> list[list[str]]:
-    """Пояснения уровня: [номер фразы][номер элемента] → текст.
-
-    Нумерация в файле сквозная («1.1», «1.2», ... «10.6») и проверяется на
-    полноту: пропуск или дубль означает, что пояснение уедет к чужому
-    элементу, а заметить это в игре почти невозможно.
-    """
-    path = SOURCE_DIR / f"explanations_{level}_{lang}.txt"
-    lines = read_lines(path)
-    elements = ELEMENTS_PER_LEVEL[level]
-    table = [[None] * elements for _ in range(PHRASES_PER_LEVEL)]
-
-    for i, line in enumerate(lines, start=1):
-        m = EXPLANATION_RE.match(line)
-        if not m:
-            raise SourceError(f"{path.name}:{i}: строка не начинается с «строка.элемент»")
-        phrase_no, element_no, text = int(m.group(1)), int(m.group(2)), m.group(3).strip()
-        if not (1 <= phrase_no <= PHRASES_PER_LEVEL):
-            raise SourceError(f"{path.name}:{i}: номер фразы {phrase_no} вне 1..{PHRASES_PER_LEVEL}")
-        if not (1 <= element_no <= elements):
-            raise SourceError(f"{path.name}:{i}: номер элемента {element_no} вне 1..{elements}")
-        if table[phrase_no - 1][element_no - 1] is not None:
-            raise SourceError(f"{path.name}:{i}: пояснение {phrase_no}.{element_no} уже было")
-        if not text:
-            raise SourceError(f"{path.name}:{i}: пустое пояснение")
-        table[phrase_no - 1][element_no - 1] = text
-
-    for p in range(PHRASES_PER_LEVEL):
-        for e in range(elements):
-            if table[p][e] is None:
-                raise SourceError(f"{path.name}: нет пояснения {p + 1}.{e + 1}")
-    return table  # type: ignore[return-value]
-
-
 def build_level(level: str) -> list[dict]:
     elements_by_lang: dict[str, list[list[dict[str, str]]]] = {}
     tails_by_lang: dict[str, list[str]] = {}
-    explanations_by_lang: dict[str, list[list[str]]] = {}
 
     for lang in LANGUAGES:
         elements_by_lang[lang], tails_by_lang[lang] = load_phrases(level, lang)
-        explanations_by_lang[lang] = load_explanations(level, lang)
 
     # Паритет между языками: элемент N фразы M обязан существовать во всех
     # трёх языках, иначе подсказка «переверни элемент» покажет чужой кусок.
@@ -190,7 +156,6 @@ def build_level(level: str) -> list[dict]:
         phrases.append({
             "elements": {lang: elements_by_lang[lang][i] for lang in LANGUAGES},
             "tail": {lang: tails_by_lang[lang][i] for lang in LANGUAGES},
-            "explanations": {lang: explanations_by_lang[lang][i] for lang in LANGUAGES},
         })
     return phrases
 

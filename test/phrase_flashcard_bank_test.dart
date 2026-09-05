@@ -3,11 +3,13 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:language_battle/data/flashcard_bank.dart';
 import 'package:language_battle/data/phrase_bank.dart';
 
-/// Фраза раунда теперь приходит разбитой на элементы (датасет
-/// assets/cefr), и на этом разбиении держатся сразу три вещи: подсказки
-/// («переверни элемент»), поэлементная оценка на сервере и пояснения в
-/// разборе. Проверяем именно склейку и смещения — то, чем клиент и сервер
-/// обязаны совпасть.
+/// Фраза раунда приходит разбитой на элементы (датасет assets/cefr), и на
+/// этом разбиении держатся две вещи: подсказки («переверни элемент») и
+/// поэлементная оценка на сервере. Проверяем именно склейку и смещения —
+/// то, чем клиент и сервер обязаны совпасть.
+///
+/// Готовых пояснений в банке больше нет: разбор ошибок пишет модель по
+/// факту ответа и присылает его в grammar_errors.message.
 void main() {
   /// Кусок реального банка: первая фраза A1 в трёх языках.
   PhraseEntry sample() => PhraseEntry.fromJson(const {
@@ -24,10 +26,6 @@ void main() {
           ],
         },
         'tail': {'en': '.', 'ru': '.'},
-        'explanations': {
-          'en': ['Present Simple.', 'We use "at" with clock time.', '"Then" = after that.'],
-          'ru': ['Настоящее время.', 'Время всегда с предлогом «в».', '«Потом» = после этого.'],
-        },
       });
 
   test('фраза для показа собирается без разделителей', () {
@@ -65,28 +63,6 @@ void main() {
   test('число элементов одинаково во всех языках — на этом стоят подсказки', () {
     final entry = sample();
     expect(entry.elementCount('en'), entry.elementCount('ru'));
-  });
-
-  test('пояснение берётся по номеру элемента', () {
-    final entry = sample();
-    expect(entry.explanationFor('en', 1), 'We use "at" with clock time.');
-    expect(entry.explanationFor('ru', 2), '«Потом» = после этого.');
-    // За границами списка — null, а не исключение посреди разбора.
-    expect(entry.explanationFor('en', 99), isNull);
-    expect(entry.explanationFor('zh', 0), isNull);
-  });
-
-  test('пояснение к элементу есть на КАЖДОМ языке фразы', () {
-    // Разбор показывает пояснение на РОДНОМ языке игрока, а не на
-    // изучаемом: прочитать объяснение английской грамматики по-английски
-    // может только тот, кто английский уже знает. Значит, пояснения
-    // обязаны существовать на всех языках, а не только на языке эталона.
-    final entry = sample();
-    for (final lang in ['en', 'ru']) {
-      final explanations = entry.explanationsByLanguage[lang];
-      expect(explanations, isNotNull, reason: lang);
-      expect(explanations!.length, entry.elementCount(lang), reason: lang);
-    }
   });
 
   test('FlashcardEntry.forLanguage — прежнее поведение', () {

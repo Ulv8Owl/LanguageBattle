@@ -1130,29 +1130,6 @@ class _ErrorReport extends StatelessWidget {
   List<PhraseElement> get _elements =>
       phraseIndex < 0 ? const [] : PhraseBank.elementsFor(phraseIndex, targetLanguage);
 
-  /// ЗАПАСНЫЕ пояснения из датасета — на родном языке игрока.
-  ///
-  /// Основные объяснения теперь пишет модель (она разбирает именно то, что
-  /// игрок сказал не так, и объясняет ПОЧЕМУ правильно иначе). Датасет
-  /// остаётся на случай, когда модель не ответила: готовый текст хуже
-  /// живого разбора, но лучше пустоты.
-  ///
-  /// Берётся версия на языке, которым игрок ВЛАДЕЕТ: объяснять
-  /// A1-игроку английскую грамматику по-английски — значит не объяснять
-  /// ничего. Элемент N во всех языках покрывает один и тот же кусок
-  /// смысла (инвариант датасета), поэтому пояснение N с родного языка
-  /// относится к тому же месту фразы, что и элемент N эталона.
-  List<String> get _explanations {
-    final entry = phraseIndex < 0 ? null : PhraseBank.entry(phraseIndex);
-    if (entry == null) return const [];
-    return entry.explanationsByLanguage[nativeLanguage] ?? const [];
-  }
-
-  /// Те же элементы на родном языке — показываются в пояснении рядом с
-  /// эталонным, чтобы было видно, о каком куске фразы идёт речь.
-  List<PhraseElement> get _nativeElements =>
-      phraseIndex < 0 ? const [] : PhraseBank.elementsFor(phraseIndex, nativeLanguage);
-
   /// Номер элемента -> объяснение ошибки от модели.
   ///
   /// КЛЮЧИ этой карты и есть потерянные элементы, и какие именно — решает
@@ -1273,9 +1250,7 @@ class _ErrorReport extends StatelessWidget {
             else if (_elements.isNotEmpty)
               _ElementBreakdown(
                 elements: _elements,
-                nativeElements: _nativeElements,
                 messagesByIndex: _messagesByIndex,
-                fallbackExplanations: _explanations,
               )
             else if (errors.isEmpty)
               Text(hint, style: const TextStyle(color: AppColors.muted, fontSize: 12, height: 1.4))
@@ -1323,42 +1298,26 @@ class _ErrorReport extends StatelessWidget {
 class _ElementBreakdown extends StatelessWidget {
   final List<PhraseElement> elements;
 
-  /// Те же куски на родном языке. Показываются подзаголовком, когда
-  /// объяснение пришло из датасета: оно написано про родную формулировку,
-  /// и без неё непонятно, к чему относится.
-  final List<PhraseElement> nativeElements;
-
   /// Номер элемента -> разбор от модели. Ключи этой карты и есть
   /// потерянные элементы: сервер прислал строку об ошибке ровно на них.
+  ///
+  /// ЗАПАСНОГО ТЕКСТА БОЛЬШЕ НЕТ. Раньше при пустом значении показывалось
+  /// готовое пояснение из датасета — и это оказалось хуже пустоты: игрок
+  /// видел текст про РОДНУЮ формулировку («на улице» вместо «it is») и
+  /// считал его ответом модели, а настоящая причина (модель не ответила)
+  /// оставалась незамеченной. Теперь пусто — значит честно сказано, что
+  /// разбора нет.
   final Map<int, String> messagesByIndex;
-
-  /// Пояснения из датасета — на случай, когда модель не ответила.
-  final List<String> fallbackExplanations;
 
   const _ElementBreakdown({
     required this.elements,
-    required this.nativeElements,
     required this.messagesByIndex,
-    required this.fallbackExplanations,
   });
 
   Set<int> get _missedIndices => messagesByIndex.keys.toSet();
 
   void _showExplanation(BuildContext context, int index) {
-    // Разбор модели — основной текст; она объясняет именно ту ошибку,
-    // которую игрок только что сделал. Пусто (модель не ответила или
-    // элемент не попал в лимит разборов за раунд) — берём готовое
-    // пояснение из датасета.
-    final fromModel = messagesByIndex[index] ?? '';
-    final fromDataset =
-        index < fallbackExplanations.length ? fallbackExplanations[index] : null;
-    final explanation = fromModel.isNotEmpty ? fromModel : fromDataset;
-    // Родная формулировка нужна только датасетному пояснению — оно про
-    // неё и написано. Разбор модели говорит про эталон напрямую, и вторая
-    // строка там была бы шумом.
-    final native = fromModel.isEmpty && index < nativeElements.length
-        ? nativeElements[index].text
-        : null;
+    final explanation = (messagesByIndex[index] ?? '').trim();
     showModalBottomSheet<void>(
       context: context,
       backgroundColor: AppColors.navy2,
@@ -1385,17 +1344,17 @@ class _ElementBreakdown extends StatelessWidget {
                 elements[index].text,
                 style: AppFonts.ui(fontSize: 16, weight: FontWeight.w800, color: AppColors.gold),
               ),
-              if (native != null) ...[
-                const SizedBox(height: 4),
-                Text(
-                  native,
-                  style: const TextStyle(color: AppColors.muted, fontSize: 13),
-                ),
-              ],
               const SizedBox(height: 12),
               Text(
-                explanation ?? 'Пояснения к этой части фразы пока нет.',
-                style: const TextStyle(color: AppColors.cream, fontSize: 13, height: 1.5),
+                explanation.isNotEmpty
+                    ? explanation
+                    : 'Разбор этой части не пришёл — ИИ не ответил. '
+                        'Подробности в отладочной панели под раундом.',
+                style: TextStyle(
+                  color: explanation.isNotEmpty ? AppColors.cream : AppColors.muted,
+                  fontSize: 13,
+                  height: 1.5,
+                ),
               ),
             ],
           ),
@@ -1648,9 +1607,19 @@ class _PipelineDebug extends StatelessWidget {
                 if (judge?['elapsed_ms'] != null) '${judge!['elapsed_ms']} мс',
                 if (judge?['attempts'] != null) 'попыток ${judge!['attempts']}',
                 if (judge?['errors_count'] != null) 'ошибок ${judge!['errors_count']}',
+                if (judge?['correct_elements'] != null)
+                  'элементов ${judge!['correct_elements']}/${judge['total_elements']}',
                 'статус ${outcome.judgeStatus.name}',
               ]),
-              judge?['reason']?.toString(),
+              // Разбор ошибок и оценка делаются РАЗНЫМИ вещами: балл
+              // считает подсчёт без модели, объяснения пишет модель.
+              // Поэтому её состояние идёт в той же строке причины — иначе
+              // молчание модели выглядит как «всё в порядке», что уже
+              // однажды осталось незамеченным.
+              [
+                _explainText(judge?['explain']),
+                judge?['reason']?.toString(),
+              ].whereType<String>().join('\n'),
             ),
           ],
         ),
@@ -1666,6 +1635,20 @@ class _PipelineDebug extends StatelessWidget {
 
   /// Для судьи важнее всего СЫРОЙ ответ модели: именно по нему видно,
   /// прислала ли она JSON не той формы, markdown-обёртку или вообще ничего.
+  /// Состояние разбора ошибок моделью — отдельно от балла.
+  String? _explainText(Object? explain) {
+    if (explain is! Map) return null;
+    final status = explain['status']?.toString() ?? '?';
+    final parts = <String>[
+      'разбор ошибок: $status',
+      if (explain['asked'] != null) 'спрошено ${explain['asked']}',
+      if (explain['answered'] != null) 'отвечено ${explain['answered']}',
+      if (explain['elapsed_ms'] != null) '${explain['elapsed_ms']} мс',
+    ];
+    final reason = explain['reason']?.toString();
+    return [parts.join(' · '), if (reason != null && reason.isNotEmpty) reason].join('\n');
+  }
+
   String _judgeText(Map<String, dynamic>? judge) {
     final raw = judge?['raw']?.toString();
     if (raw != null && raw.isNotEmpty) return raw;
@@ -1673,7 +1656,7 @@ class _PipelineDebug extends StatelessWidget {
       JudgeStatus.skipped => '(не вызывался — ${judge?['reason'] ?? 'нечего разбирать'})',
       JudgeStatus.degraded => '(ответа нет, см. причину ниже)',
       JudgeStatus.pending => '(ещё не отработал)',
-      JudgeStatus.ok => '(ответ разобран, сырьё не сохранено)',
+      JudgeStatus.ok => '(балл посчитан по элементам, без модели)',
     };
   }
 

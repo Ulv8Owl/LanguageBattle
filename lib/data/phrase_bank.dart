@@ -26,7 +26,14 @@ class PhraseElement {
 }
 
 /// Одна фраза раунда: одна и та же мысль на всех языках, разбитая на
-/// элементы, плюс пояснение к каждому элементу.
+/// элементы.
+///
+/// ГОТОВЫХ ПОЯСНЕНИЙ ЗДЕСЬ НЕТ. Раньше к каждому элементу лежал заранее
+/// написанный разбор (файлы assets/cefr/explanations_*), и он приезжал
+/// вместе с фразой. От них отказались: такой текст написан про РОДНУЮ
+/// формулировку («в семь», а не «at seven») и ничего не знает о том, что
+/// игрок сказал на самом деле. Разбор ошибок теперь пишет языковая модель
+/// по факту ответа и присылает его в grammar_errors.message.
 ///
 /// ИНВАРИАНТ, который держит сборщик (tools/build_cefr.py) и проверяет
 /// assets/cefr/validate.py: число элементов в строке ОДИНАКОВО во всех
@@ -39,12 +46,9 @@ class PhraseEntry {
   /// Хвост строки после последнего элемента — обычно точка.
   final Map<String, String> tailByLanguage;
 
-  final Map<String, List<String>> explanationsByLanguage;
-
   const PhraseEntry({
     required this.elementsByLanguage,
     required this.tailByLanguage,
-    required this.explanationsByLanguage,
   });
 
   factory PhraseEntry.fromJson(Map<String, dynamic> json) {
@@ -61,7 +65,6 @@ class PhraseEntry {
       ),
       tailByLanguage: (json['tail'] as Map<String, dynamic>? ?? const {})
           .map((lang, value) => MapEntry(lang, value as String)),
-      explanationsByLanguage: byLang('explanations', (e) => e as String),
     );
   }
 
@@ -72,13 +75,6 @@ class PhraseEntry {
       elementsByLanguage[languageCode] ?? const [];
 
   String tailFor(String languageCode) => tailByLanguage[languageCode] ?? '';
-
-  /// Пояснение к элементу [index] (с нуля) на языке [languageCode].
-  String? explanationFor(String languageCode, int index) {
-    final list = explanationsByLanguage[languageCode];
-    if (list == null || index < 0 || index >= list.length) return null;
-    return list[index];
-  }
 
   /// Фраза целиком, как её видит игрок: без «|» и без служебных пометок.
   String? forLanguage(String languageCode) {
@@ -139,11 +135,8 @@ class PhraseEntry {
 /// assets/phrases/cefr_<уровень>.json скриптом tools/build_cefr.py.
 /// Формат исходника и правила его расширения — в assets/cefr/README.md.
 ///
-/// ФРАЗ НА УРОВЕНЬ — ДЕСЯТЬ, а не сто, как было у прежнего банка. Это
-/// сознательный размен: каждая фраза теперь несёт разбиение на элементы и
-/// пояснение к КАЖДОМУ элементу на трёх языках, то есть на порядок больше
-/// вычитанного вручную текста. Десять фраз × 21 элемент на C2 — это 210
-/// пояснений на язык только для одного уровня.
+/// ФРАЗ НА УРОВЕНЬ — ДЕСЯТЬ, а не сто, как было у прежнего банка: каждая
+/// несёт разбиение на элементы, вычитанное вручную на трёх языках.
 ///
 /// ФРАЗЫ НЕ ГЕНЕРИРУЮТСЯ НЕЙРОСЕТЬЮ В РАНТАЙМЕ: выбор фразы раунда —
 /// случайный выбор по этому фиксированному списку.

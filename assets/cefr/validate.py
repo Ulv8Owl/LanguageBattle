@@ -1,6 +1,11 @@
 #!/usr/bin/env python3
-"""Validation of the 36 CEFR files: line counts, sentence counts,
-element counts, 1:1 alignment across languages, explanation indexing."""
+"""Validation of the 18 CEFR phrase files: line counts, sentence counts,
+element counts, 1:1 alignment across languages.
+
+Explanation files are gone: the per-element commentary is now written by
+the language model at answer time (see
+supabase/functions/_shared/explainElements.ts), because a pre-written text
+cannot know what the learner actually said."""
 import os, re, sys
 
 DIR = os.path.dirname(os.path.abspath(__file__))
@@ -23,11 +28,8 @@ for level in LEVELS:
     per_lang = {}
     for lang in LANGS:
         pf = os.path.join(DIR, f"phrases_{level}_{lang}.txt")
-        ef = os.path.join(DIR, f"explanations_{level}_{lang}.txt")
-        for f in (pf, ef):
-            if not os.path.exists(f):
-                errors.append(f"MISSING FILE: {os.path.basename(f)}")
-        if not (os.path.exists(pf) and os.path.exists(ef)):
+        if not os.path.exists(pf):
+            errors.append(f"MISSING FILE: {os.path.basename(pf)}")
             continue
 
         lines = [l for l in open(pf, encoding="utf-8").read().split("\n") if l.strip()]
@@ -45,26 +47,7 @@ for level in LEVELS:
                 errors.append(f"{os.path.basename(pf)} line {i}: {n_el} elements, expected {expected_elem}")
         per_lang[lang] = elems
 
-        # explanations
-        exp = [l for l in open(ef, encoding="utf-8").read().split("\n") if l.strip()]
-        expected_keys = [(i, j) for i in range(1, 11) for j in range(1, expected_elem + 1)]
-        got_keys = []
-        for l in exp:
-            m = re.match(r"^(\d+)\.(\d+)\s", l)
-            if not m:
-                errors.append(f"{os.path.basename(ef)}: bad index line -> {l[:60]}")
-            else:
-                got_keys.append((int(m.group(1)), int(m.group(2))))
-        if got_keys != expected_keys:
-            missing = set(expected_keys) - set(got_keys)
-            extra = set(got_keys) - set(expected_keys)
-            if missing:
-                errors.append(f"{os.path.basename(ef)}: missing {sorted(missing)[:10]}")
-            if extra:
-                errors.append(f"{os.path.basename(ef)}: unexpected {sorted(extra)[:10]}")
-            if not missing and not extra:
-                errors.append(f"{os.path.basename(ef)}: indices out of order")
-        report.append(f"{level} {lang}: phrases={len(lines)} elements/line={set(elems)} explanations={len(exp)}")
+        report.append(f"{level} {lang}: phrases={len(lines)} elements/line={set(elems)}")
 
     # cross-language alignment
     if len(per_lang) == 3:
@@ -80,5 +63,5 @@ if errors:
     for e in errors:
         print("  -", e)
     sys.exit(1)
-print("ALL CHECKS PASSED: 36 files, 10 phrases each, sentence/element counts correct,")
-print("en/ru/es aligned 1:1, every element has exactly one explanation.")
+print("ALL CHECKS PASSED: 18 files, 10 phrases each, sentence/element counts correct,")
+print("en/ru/es aligned 1:1.")
