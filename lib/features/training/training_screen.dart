@@ -59,16 +59,25 @@ enum _Stage {
 /// финальный балл 1-10 (рейтинг не меняется).
 ///
 /// ПРОВЕРКА УРОВНЯ. Тот же экран работает проверкой при регистрации, если
-/// передан [placementLevel] (миграция 0028). Отличий три, и все они
-/// сознательно НЕ вынесены в отдельный экран: механика раунда, запись
-/// голоса, серверная оценка и лента — те же самые, а копия этого экрана
-/// разошлась бы с оригиналом на первой же правке.
+/// передан [placementLevel] (миграция 0028). Отличия перечислены ниже, и
+/// все они сознательно НЕ вынесены в отдельный экран: механика раунда,
+/// запись голоса, серверная оценка и лента — те же самые, а копия этого
+/// экрана разошлась бы с оригиналом на первой же правке.
 ///  * фразы берутся с уровня, который игрок заявил, а не с его лиги
 ///    (лиги у него ещё нет — рейтинг проверка и назначает);
-///  * сессия заводится с p_is_placement, то есть не тратит энергию;
+///  * сессия заводится с p_is_placement: она не тратит энергию ни на вход,
+///    ни на вызовы провайдеров (миграция 0032);
+///  * ПОПЫТКА ОДНА. Вторая попытка в соло существует ради обучения: после
+///    первой игрок получает разбор и, по сути, готовый ответ. На экзамене
+///    это отменяет сам экзамен, поэтому здесь голосовое одно, и сразу
+///    результат;
+///  * подсказки по элементам выключены — подсмотрев фразу, игрок
+///    подтвердил бы любой уровень;
+///  * итог показывается вердиктом «Экзамен сдан / не сдан», а не баллом:
+///    игрок пришёл за ответом «пустили или нет»;
 ///  * в конце экран не «завершается», а ВОЗВРАЩАЕТ долю правильных
 ///    ответов вызвавшему экрану — решение о том, сдана проверка или нет,
-///    принимает он.
+///    формально принимает он, по тому же порогу.
 class TrainingScreen extends StatefulWidget {
   /// Код уровня CEFR (a0..c2), если экран открыт как проверка уровня.
   /// null — обычная Одиночная Игра.
@@ -150,6 +159,14 @@ class _TrainingScreenState extends State<TrainingScreen> {
   /// обычной Одиночной Игры.
   int get _totalRounds =>
       widget.isPlacement ? _roundsPerPlacement : _roundsPerSession;
+
+  /// Сдан ли экзамен по уже выставленному баллу.
+  ///
+  /// Считается ТОЙ ЖЕ формулой, что и доля в _finishSession, которую
+  /// принимает экран выбора уровня: балл судьи 1..10, порог 60%. Две
+  /// разные формулы здесь означали бы, что карточка и следующий экран
+  /// однажды скажут игроку разное.
+  bool get _examPassed => (_finalScore ?? 0) / 10 >= placementPassRatio;
 
   /// Порядок фраз на всю сессию, перемешанный один раз при старте — раунды
   /// соло идут строго локально (одна сессия = один клиент), поэтому, в
@@ -312,6 +329,66 @@ class _TrainingScreenState extends State<TrainingScreen> {
     _scrollToBottomSoon();
   }
 
+  /// Можно ли сейчас потянуть ленту вниз и получить другую фразу.
+  ///
+  /// Условий три, и каждое отсекает свой способ сломать раунд:
+  ///  * НЕ на проверке уровня. Там фраза — часть экзамена, и перебор фраз
+  ///    до удобной обесценил бы его целиком;
+  ///  * ТОЛЬКО первый раунд. Дальше в ленте уже лежат сыгранные раунды, и
+  ///    подмена задания под ними превратила бы историю сессии в бессмыслицу;
+  ///  * ТОЛЬКО пока голосовое не отправлено. После отправки фраза уже ушла
+  ///    на сервер эталоном, и менять её значит выбрасывать оплаченный
+  ///    вызов распознавания.
+  bool get _canRerollPhrase =>
+      !widget.isPlacement &&
+      _roundNumber == 1 &&
+      _stage == _Stage.awaitingFirst &&
+      _phraseOrder.length > 1;
+
+  /// Другая фраза в том же раунде — жест «потянуть вниз», как перезагрузка
+  /// страницы в браузере.
+  ///
+  /// Раунд НЕ пересоздаётся: меняется эталон в уже существующей строке
+  /// training_rounds. Новая строка означала бы второй раунд с номером 1, а
+  /// номер раунда — часть ключа, по которому сессия потом читается.
+  ///
+  /// Порядок фраз при этом не тасуется заново, а прокручивается на одну:
+  /// так фраза точно окажется другой, и внутри сессии по-прежнему не будет
+  /// повторов.
+  Future<void> _rerollPhrase() async {
+    if (!_canRerollPhrase) return;
+    final roundId = _roundId;
+    if (roundId == null) return;
+
+    final rotated = [..._phraseOrder.skip(1), _phraseOrder.first];
+    final phraseIndex = rotated.first;
+    final expected = PhraseBank.markedTextFor(phraseIndex, _targetLanguage);
+    try {
+      await supabase
+          .from('training_rounds')
+          .update({'generated_phrase': expected})
+          .eq('id', roundId);
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Не удалось сменить фразу: $e')),
+      );
+      return;
+    }
+    if (!mounted) return;
+    setState(() {
+      _phraseOrder = rotated;
+      _phraseIndex = phraseIndex;
+      _phrase = PhraseBank.textFor(phraseIndex, _nativeLanguage);
+      _nativeElements = PhraseBank.elementsFor(phraseIndex, _nativeLanguage);
+      _targetElements = PhraseBank.elementsFor(phraseIndex, _targetLanguage);
+      _nativeTail = PhraseBank.entry(phraseIndex)?.tailFor(_nativeLanguage) ?? '';
+      // Подсказки прошлой фразы к новой отношения не имеют — и награду за
+      // неё занижать не за что.
+      _revealed.clear();
+    });
+  }
+
   void _scrollToBottomSoon() {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted || !_feedController.hasClients) return;
@@ -329,7 +406,14 @@ class _TrainingScreenState extends State<TrainingScreen> {
     final roundId = _roundId;
     final sessionId = _sessionId;
     if (roundId == null || sessionId == null) return;
-    final attempt = _stage == _Stage.awaitingFirst ? 1 : 2;
+    // На проверке уровня попытка ОДНА, и она же зачётная. Номер 2 здесь не
+    // «вторая по счёту», а роль: именно по нему воркер ставит final_score и
+    // не тратит время на подробный разбор, который экзамену не нужен.
+    // Заводить ради этого отдельный флаг в пайплайне значило бы описывать
+    // одно и то же двумя способами.
+    final attempt = widget.isPlacement
+        ? 2
+        : (_stage == _Stage.awaitingFirst ? 1 : 2);
 
     final storagePath = trainingRecordingPath(
       sessionId: sessionId,
@@ -736,10 +820,20 @@ class _TrainingScreenState extends State<TrainingScreen> {
           Expanded(
             child: Stack(
               children: [
-                ListView(
-                  controller: _feedController,
-                  padding: EdgeInsets.fromLTRB(12, 8, 12, showsMic ? 108 : 12),
-                  children: _buildFeed(),
+                _RefreshableFeed(
+                  enabled: _canRerollPhrase,
+                  onRefresh: _rerollPhrase,
+                  child: ListView(
+                    controller: _feedController,
+                    // Пока перевыбор доступен, лента обязана тянуться даже
+                    // когда содержимое умещается на экран: без этого жест
+                    // не с чего начать.
+                    physics: _canRerollPhrase
+                        ? const AlwaysScrollableScrollPhysics()
+                        : null,
+                    padding: EdgeInsets.fromLTRB(12, 8, 12, showsMic ? 108 : 12),
+                    children: _buildFeed(),
+                  ),
                 ),
                 if (showsMic)
                   Positioned(
@@ -818,14 +912,17 @@ class _TrainingScreenState extends State<TrainingScreen> {
       ));
       // Сыгранный раунд показывается тем же набором блоков, что и текущий:
       // иначе, шагнув «Дальше», игрок терял и свои голосовые, и разбор.
-      items.addAll(_voiceBubble(done.firstAudio));
-      items.add(_ErrorReport(
-          errors: done.errors,
-          attempt: done.firstAttempt,
-          phraseIndex: done.phraseIndex,
-          targetLanguage: _targetLanguage,
-          nativeLanguage: _nativeLanguage));
-      items.addAll(_debugPanels('Раунд ${done.roundNumber}, попытка 1', done.firstAttempt));
+      // На экзамене первой попытки не было вовсе — её блоки пропускаем.
+      if (!widget.isPlacement) {
+        items.addAll(_voiceBubble(done.firstAudio));
+        items.add(_ErrorReport(
+            errors: done.errors,
+            attempt: done.firstAttempt,
+            phraseIndex: done.phraseIndex,
+            targetLanguage: _targetLanguage,
+            nativeLanguage: _nativeLanguage));
+        items.addAll(_debugPanels('Раунд ${done.roundNumber}, попытка 1', done.firstAttempt));
+      }
       items.addAll(_voiceBubble(done.secondAudio, score: done.score));
       items.add(_ErrorReport(
           errors: const [],
@@ -833,8 +930,13 @@ class _TrainingScreenState extends State<TrainingScreen> {
           phraseIndex: done.phraseIndex,
           targetLanguage: _targetLanguage,
           nativeLanguage: _nativeLanguage,
-          isSecondAttempt: true));
-      items.add(_ScoreCard(score: done.score, coins: null, attempt: done.secondAttempt));
+          isSecondAttempt: true,
+          isExam: widget.isPlacement));
+      items.add(_ScoreCard(
+          score: done.score,
+          coins: null,
+          attempt: done.secondAttempt,
+          examPassed: widget.isPlacement ? done.score / 10 >= placementPassRatio : null));
       items.addAll(_debugPanels('Раунд ${done.roundNumber}, попытка 2', done.secondAttempt));
     }
 
@@ -842,21 +944,31 @@ class _TrainingScreenState extends State<TrainingScreen> {
       final avg = _history.isEmpty
           ? 0
           : (_history.map((r) => r.score).reduce((a, b) => a + b) / _history.length).round();
+      // На экзамене итог — вердикт, а не средний балл: игрок пришёл сюда
+      // не за оценкой, а за ответом «пустили или нет».
+      final passed = avg / 10 >= placementPassRatio;
+      final examColor = passed ? AppColors.ok : AppColors.danger;
       items.add(Padding(
         padding: const EdgeInsets.symmetric(vertical: 16),
         child: ChPanel(
-          borderColor: AppColors.gold,
+          borderColor: widget.isPlacement ? examColor : AppColors.gold,
           padding: const EdgeInsets.symmetric(vertical: 18),
           child: Column(
-            children: [
-              Text('Сессия пройдена', style: AppFonts.ui(fontSize: 16, weight: FontWeight.w800, color: AppColors.gold)),
-              const SizedBox(height: 6),
-              Text('Средний балл: $avg из 10',
-                  style: AppFonts.mono(fontSize: 12, weight: FontWeight.w700, color: AppColors.cream)),
-              const SizedBox(height: 4),
-              const Text('Рейтинг в этом режиме не меняется',
-                  style: TextStyle(color: AppColors.muted, fontSize: 11)),
-            ],
+            children: widget.isPlacement
+                ? [
+                    Text(passed ? 'Экзамен сдан' : 'Экзамен не сдан',
+                        style: AppFonts.ui(fontSize: 16, weight: FontWeight.w800, color: examColor)),
+                  ]
+                : [
+                    Text('Сессия пройдена',
+                        style: AppFonts.ui(fontSize: 16, weight: FontWeight.w800, color: AppColors.gold)),
+                    const SizedBox(height: 6),
+                    Text('Средний балл: $avg из 10',
+                        style: AppFonts.mono(fontSize: 12, weight: FontWeight.w700, color: AppColors.cream)),
+                    const SizedBox(height: 4),
+                    const Text('Рейтинг в этом режиме не меняется',
+                        style: TextStyle(color: AppColors.muted, fontSize: 11)),
+                  ],
           ),
         ),
       ));
@@ -903,14 +1015,16 @@ class _TrainingScreenState extends State<TrainingScreen> {
         items.addAll(_debugPanels('Попытка 1', _firstAttempt));
         break;
       case _Stage.gradingSecond:
-        items.addAll(_voiceBubble(_firstAttemptAudio));
-        items.add(_ErrorReport(
-            errors: _firstAttemptErrors,
-            attempt: _firstAttempt,
-            phraseIndex: _phraseIndex,
-            targetLanguage: _targetLanguage,
-            nativeLanguage: _nativeLanguage));
-        items.addAll(_debugPanels('Попытка 1', _firstAttempt));
+        if (!widget.isPlacement) {
+          items.addAll(_voiceBubble(_firstAttemptAudio));
+          items.add(_ErrorReport(
+              errors: _firstAttemptErrors,
+              attempt: _firstAttempt,
+              phraseIndex: _phraseIndex,
+              targetLanguage: _targetLanguage,
+              nativeLanguage: _nativeLanguage));
+          items.addAll(_debugPanels('Попытка 1', _firstAttempt));
+        }
         items.addAll(_voiceBubble(_secondAttemptAudio));
         // На второй попытке судья не объясняет ошибки, а ставит балл —
         // поэтому и надпись другая.
@@ -921,14 +1035,16 @@ class _TrainingScreenState extends State<TrainingScreen> {
         ));
         break;
       case _Stage.roundDone:
-        items.addAll(_voiceBubble(_firstAttemptAudio));
-        items.add(_ErrorReport(
-            errors: _firstAttemptErrors,
-            attempt: _firstAttempt,
-            phraseIndex: _phraseIndex,
-            targetLanguage: _targetLanguage,
-            nativeLanguage: _nativeLanguage));
-        items.addAll(_debugPanels('Попытка 1', _firstAttempt));
+        if (!widget.isPlacement) {
+          items.addAll(_voiceBubble(_firstAttemptAudio));
+          items.add(_ErrorReport(
+              errors: _firstAttemptErrors,
+              attempt: _firstAttempt,
+              phraseIndex: _phraseIndex,
+              targetLanguage: _targetLanguage,
+              nativeLanguage: _nativeLanguage));
+          items.addAll(_debugPanels('Попытка 1', _firstAttempt));
+        }
         items.addAll(_voiceBubble(_secondAttemptAudio, score: _finalScore));
         items.add(_ErrorReport(
             errors: const [],
@@ -936,8 +1052,13 @@ class _TrainingScreenState extends State<TrainingScreen> {
             phraseIndex: _phraseIndex,
             targetLanguage: _targetLanguage,
             nativeLanguage: _nativeLanguage,
-            isSecondAttempt: true));
-        items.add(_ScoreCard(score: _finalScore ?? 0, coins: _earnedCoins, attempt: _secondAttempt));
+            isSecondAttempt: true,
+            isExam: widget.isPlacement));
+        items.add(_ScoreCard(
+            score: _finalScore ?? 0,
+            coins: _earnedCoins,
+            attempt: _secondAttempt,
+            examPassed: widget.isPlacement ? _examPassed : null));
         items.addAll(_debugPanels('Попытка 2', _secondAttempt));
         break;
       default:
@@ -945,6 +1066,39 @@ class _TrainingScreenState extends State<TrainingScreen> {
     }
 
     return items;
+  }
+}
+
+/// Лента с жестом «потянуть вниз» — там, где он разрешён.
+///
+/// ОБЁРТКА СТОИТ ВСЕГДА, а выключается предикатом. Убирать RefreshIndicator
+/// из дерева нельзя: лента ниже держит общий ScrollController, и на смене
+/// глубины он на один кадр оказался бы привязан сразу к двум спискам —
+/// падение вида «ScrollController attached to multiple scroll views» ровно
+/// в момент отправки голосового. Предикат, возвращающий false, гасит и
+/// сам жест, и кружок, ничего не двигая в дереве.
+class _RefreshableFeed extends StatelessWidget {
+  final bool enabled;
+  final Future<void> Function() onRefresh;
+  final Widget child;
+
+  const _RefreshableFeed({
+    required this.enabled,
+    required this.onRefresh,
+    required this.child,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return RefreshIndicator(
+      onRefresh: onRefresh,
+      notificationPredicate: (_) => enabled,
+      // Жёлтый — акцентный цвет игры; на тёмной подложке кружка он читается
+      // как «наш» элемент, а не как системный виджет.
+      color: AppColors.gold,
+      backgroundColor: AppColors.navy2,
+      child: child,
+    );
   }
 }
 
@@ -1114,6 +1268,11 @@ class _ErrorReport extends StatelessWidget {
   /// marksOnly в evaluateGrammar.ts), чтобы не тратить время ответа.
   final bool isSecondAttempt;
 
+  /// Проверка уровня. Попытка там одна, и называть её «второй» бессмысленно:
+  /// первой не было. Меняется только заголовок и подпись — содержимое то же,
+  /// потому что показывать надо ровно то же самое.
+  final bool isExam;
+
   /// Язык, на который надо было перевести: на нём показывается эталон.
   final String targetLanguage;
 
@@ -1127,6 +1286,7 @@ class _ErrorReport extends StatelessWidget {
     required this.nativeLanguage,
     required this.phraseIndex,
     this.isSecondAttempt = false,
+    this.isExam = false,
   });
 
   /// Элементы эталона на изучаемом языке — то, что игрок должен был
@@ -1204,7 +1364,7 @@ class _ErrorReport extends StatelessWidget {
       _ when judgeBroken && (attempt?.judgeHitProviderLimit ?? false) =>
         ('ЛИМИТ ПРОВАЙДЕРА ИИ', AppColors.danger),
       _ when judgeBroken => ('РАЗБОР НЕ ПОЛУЧЕН', AppColors.muted),
-      _ when isSecondAttempt => ('РАЗБОР ВТОРОЙ ПОПЫТКИ', AppColors.gold),
+      _ when isSecondAttempt => (isExam ? 'РЕЗУЛЬТАТ' : 'РАЗБОР ВТОРОЙ ПОПЫТКИ', AppColors.gold),
       _ => errors.isEmpty ? ('ОШИБОК НЕ НАЙДЕНО', AppColors.ok) : ('РАЗБОР ПЕРВОЙ ПОПЫТКИ', AppColors.gold),
     };
 
@@ -1221,7 +1381,7 @@ class _ErrorReport extends StatelessWidget {
             'и это не признак того, что ошибок не было. Балл не снижается. Лимит снимается на стороне провайдера.',
       _ when judgeBroken =>
         'ИИ-судья не ответил, поэтому разбора ошибок нет — это сбой на нашей стороне, а не признак того, что ошибок не было. Балл за него не снижается.',
-      _ when isSecondAttempt => 'Вторая попытка засчитана.',
+      _ when isSecondAttempt => isExam ? 'Ответ засчитан.' : 'Вторая попытка засчитана.',
       _ => 'Скажи фразу ещё раз — вторая попытка идёт в зачёт.',
     };
 
@@ -1487,14 +1647,33 @@ class _ScoreCard extends StatelessWidget {
   /// или сбоя распознавания.
   final RecordingOutcome? attempt;
 
-  const _ScoreCard({required this.score, required this.coins, this.attempt});
+  /// Экзамен: true — сдан, false — не сдан, null — это не экзамен.
+  ///
+  /// На проверке уровня игрок пришёл не за оценкой, а за ответом «пустили
+  /// или нет». Балл в кружке остаётся: это то, из чего вердикт получен, и
+  /// прятать основание за словом «не сдан» — значит не дать понять, почему.
+  final bool? examPassed;
+
+  const _ScoreCard({
+    required this.score,
+    required this.coins,
+    this.attempt,
+    this.examPassed,
+  });
+
+  /// Цвет карточки: на экзамене он несёт вердикт, в игре — обычный акцент.
+  Color get _accent => switch (examPassed) {
+        true => AppColors.ok,
+        false => AppColors.danger,
+        null => AppColors.gold,
+      };
 
   @override
   Widget build(BuildContext context) {
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 8),
       child: ChPanel(
-        borderColor: AppColors.gold,
+        borderColor: _accent,
         padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 16),
         child: Row(
           children: [
@@ -1504,10 +1683,10 @@ class _ScoreCard extends StatelessWidget {
               decoration: BoxDecoration(
                 shape: BoxShape.circle,
                 color: AppColors.navy3,
-                border: Border.all(color: AppColors.gold, width: 2.5),
+                border: Border.all(color: _accent, width: 2.5),
               ),
               child: Center(
-                child: Text('$score', style: AppFonts.ui(fontSize: 17, weight: FontWeight.w800, color: AppColors.gold)),
+                child: Text('$score', style: AppFonts.ui(fontSize: 17, weight: FontWeight.w800, color: _accent)),
               ),
             ),
             const SizedBox(width: 14),
@@ -1515,12 +1694,20 @@ class _ScoreCard extends StatelessWidget {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text('Балл за раунд', style: AppFonts.ui(fontSize: 13)),
-                  const SizedBox(height: 2),
-                  Text(
-                    coins == null ? 'Рейтинг не меняется' : '+$coins монет · рейтинг не меняется',
-                    style: const TextStyle(color: AppColors.muted, fontSize: 11),
-                  ),
+                  // На экзамене это единственная строка: ни «балла за
+                  // раунд», ни разговора про рейтинг и монеты — их там
+                  // просто нет.
+                  if (examPassed != null)
+                    Text(examPassed! ? 'Экзамен сдан' : 'Экзамен не сдан',
+                        style: AppFonts.ui(fontSize: 13, weight: FontWeight.w800, color: _accent))
+                  else ...[
+                    Text('Балл за раунд', style: AppFonts.ui(fontSize: 13)),
+                    const SizedBox(height: 2),
+                    Text(
+                      coins == null ? 'Рейтинг не меняется' : '+$coins монет · рейтинг не меняется',
+                      style: const TextStyle(color: AppColors.muted, fontSize: 11),
+                    ),
+                  ],
                   if (attempt?.judgeStatus == JudgeStatus.degraded)
                     const Padding(
                       padding: EdgeInsets.only(top: 4),

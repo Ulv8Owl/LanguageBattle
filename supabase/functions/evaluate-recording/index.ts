@@ -101,6 +101,100 @@ const JOB_BUDGET_MS = Number(Deno.env.get("JOB_BUDGET_MS") ?? 125_000);
 /** Запас на запись результатов в базу — тратить его на модель нельзя. */
 const WRITE_RESERVE_MS = 15_000;
 
+/**
+ * Цена платных вызовов в энергии (миграция 0032).
+ *
+ * Энергия платит не за вход в режим, а за то, что стоит денег: одно
+ * распознавание речи и один ответ модели. Разница в цене отражает разницу
+ * в стоимости: ответ модели дороже и дольше.
+ */
+const ENERGY_COST_ASR = Number(Deno.env.get("ENERGY_COST_ASR") ?? 1);
+const ENERGY_COST_LLM = Number(Deno.env.get("ENERGY_COST_LLM") ?? 2);
+
+/**
+ * Счётчик энергии одной задачи.
+ *
+ * ЧЕГО ОН НЕ ДЕЛАЕТ: не решает, звать ли провайдера. Списание идёт ПОСЛЕ
+ * ответа, потому что «есть ответ» — единственный момент, когда точно
+ * известно, что деньги потрачены. Игрок с пустым запасом может успеть
+ * получить ещё один ответ, и это осознанный размен: не пустить его в
+ * следующую сессию — задача start_training_session, а обрывать уже
+ * оплаченный вызов на полпути было бы хуже для всех.
+ *
+ * ЧТО БЕСПЛАТНО: Дуэль и Спарринг (энергия — механика Одиночной Игры) и
+ * проверка уровня при регистрации. Признак проверки лежит в
+ * training_sessions.is_placement и читается ЛЕНИВО, на первом списании:
+ * у большинства задач списаний нет вовсе, и лишний запрос к базе им ни к
+ * чему.
+ *
+ * НИКОГДА НЕ БРОСАЕТ. Балл к этому моменту посчитан, ответ провайдера
+ * получен, и уронить запись результата из-за бухгалтерии значило бы
+ * наказать игрока за нашу же ошибку.
+ */
+function createEnergyMeter(supabase: SupabaseClient, recording: VoiceRecordingRow) {
+  const spent: { reason: string; amount: number }[] = [];
+  let skipReason: string | null = recording.training_round_id
+    ? null
+    : "энергию тратит только Одиночная Игра";
+  let placementChecked = false;
+
+  async function isFree(): Promise<string | null> {
+    if (skipReason) return skipReason;
+    if (placementChecked) return null;
+    placementChecked = true;
+    const { data, error } = await supabase
+      .from("training_rounds")
+      .select("training_sessions(is_placement)")
+      .eq("id", recording.training_round_id!)
+      .maybeSingle();
+    if (error) {
+      // Не знаем, проверка это или нет. Списываем: не взять с игры хуже,
+      // чем взять с проверки, — второе он заметит и скажет, первое не
+      // заметит никто.
+      console.error("energy: не удалось прочитать is_placement", error);
+      return null;
+    }
+    const session = (data as { training_sessions?: { is_placement?: boolean } } | null)
+      ?.training_sessions;
+    if (session?.is_placement === true) {
+      skipReason = "проверка уровня бесплатна";
+      return skipReason;
+    }
+    return null;
+  }
+
+  return {
+    async charge(amount: number, reason: string): Promise<void> {
+      if (!(amount > 0)) return;
+      const free = await isFree();
+      if (free) {
+        spent.push({ reason: `${reason}: не списано (${free})`, amount: 0 });
+        return;
+      }
+      // Клиент Supabase не бросает на ошибке RPC, а возвращает её полем —
+      // без этой проверки неудачное списание записалось бы в отладку как
+      // удачное, и «энергия не уходит» пришлось бы ловить вручную.
+      const { error } = await supabase.rpc("spend_energy", {
+        p_user_id: recording.user_id,
+        p_amount: amount,
+        p_reason: reason,
+      });
+      if (error) {
+        console.error("energy: списание не прошло", { reason, amount, error });
+        spent.push({ reason: `${reason}: списать не удалось (${error.message})`, amount: 0 });
+        return;
+      }
+      spent.push({ reason, amount });
+    },
+    debug(): Record<string, unknown> {
+      return {
+        total: spent.reduce((sum, s) => sum + s.amount, 0),
+        items: spent,
+      };
+    },
+  };
+}
+
 interface VoiceRecordingRow {
   id: string;
   user_id: string;
@@ -249,6 +343,10 @@ async function processJob(job_id: string): Promise<void> {
       nativeLanguage = speaker?.native_language ?? "en";
     }
 
+    // Кто платит за платные вызовы этой задачи. Заводится до первого из
+    // них, но в базу не ходит, пока списывать нечего.
+    const energy = createEnergyMeter(supabase, recording);
+
     // Шаг 1 — распознавание речи.
     const { transcript, status, debug: asrDebug, uncertainWords } =
       await resolveTranscript(
@@ -260,6 +358,14 @@ async function processJob(job_id: string): Promise<void> {
       );
     // Диагностика пайплайна для отладочной панели в игре (миграция 0016).
     const pipelineDebug: Record<string, unknown> = { asr: asrDebug };
+
+    // Распознавание состоялось — списываем за него. Условий два, и оба
+    // важны: "ok" отсекает тишину и сбой (за них игрок не платит), а
+    // cached — повторный прогон по уже сохранённому транскрипту, где
+    // провайдера не звали вовсе.
+    if (status === "ok" && asrDebug.cached !== true) {
+      await energy.charge(ENERGY_COST_ASR, "распознавание речи");
+    }
 
     // Номер попытки в соло нужен ДО вызова судьи: на второй попытке
     // текстовые объяснения не показываются, а значит и генерировать их не
@@ -360,6 +466,12 @@ async function processJob(job_id: string): Promise<void> {
           replacement: verdict.text,
           category: "element",
         }));
+        // Модель ответила — за это платят. Молчание, отказ провайдера и
+        // путь, где к нему не ходили вовсе (пара покрыта датасетом),
+        // бесплатны: energy платит за ответ, а не за попытку.
+        if (!explained.degraded && explained.byIndex.size > 0) {
+          await energy.charge(ENERGY_COST_LLM, "разбор ошибок моделью");
+        }
         // ok даже когда модель не ответила, и это не оптимизм. Для клиента
         // judge_status = degraded означает «списку ошибок верить нельзя», и
         // разбор он тогда прячет целиком. Здесь же список ошибок посчитан
@@ -398,6 +510,13 @@ async function processJob(job_id: string): Promise<void> {
           uncertainWords,
         );
 
+        // Судья — тот же платный вызов модели, что и разбор ошибок, и
+        // цена у него та же. Отказ бесплатен: балл в этом случае
+        // нейтральный, то есть игрок ничего и не получил.
+        if (!result.degraded) {
+          await energy.charge(ENERGY_COST_LLM, "оценка судьёй");
+        }
+
         score = result.score;
         errors = result.errors;
         judgeStatus = result.degraded ? "degraded" : "ok";
@@ -425,6 +544,12 @@ async function processJob(job_id: string): Promise<void> {
         }
       }
     }
+
+    // Списания — в ту же отладочную панель, что и остальной пайплайн:
+    // «сколько ушло и за что» должно быть видно там же, где видно, что
+    // именно сработало. Ставится последней строкой перед записью, чтобы
+    // попали все списания задачи.
+    pipelineDebug.energy = energy.debug();
 
     await supabase
       .from("voice_recordings")

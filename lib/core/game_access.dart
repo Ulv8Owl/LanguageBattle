@@ -30,7 +30,10 @@ class WalletState {
   static const empty = WalletState(
     coins: 0,
     energyCurrent: 0,
-    energyMax: 10,
+    // Совпадает с потолком в схеме (миграция 0032). Это заглушка «до
+    // ответа сервера»: показать 0/10 там, где на деле 0/50, — значит
+    // соврать про запас в пять раз.
+    energyMax: 50,
     subscriptionStatus: 'expired',
     trialEndsAt: null,
     expiresAt: null,
@@ -46,7 +49,7 @@ class WalletState {
     return WalletState(
       coins: (json['soft_currency'] as num?)?.toInt() ?? 0,
       energyCurrent: (json['energy_current'] as num?)?.toInt() ?? 0,
-      energyMax: (json['energy_max'] as num?)?.toInt() ?? 10,
+      energyMax: (json['energy_max'] as num?)?.toInt() ?? 50,
       subscriptionStatus: (json['subscription_status'] as String?) ?? 'expired',
       trialEndsAt: parse('trial_ends_at'),
       expiresAt: parse('expires_at'),

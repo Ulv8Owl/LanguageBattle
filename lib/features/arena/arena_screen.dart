@@ -246,7 +246,9 @@ class _ArenaScreenState extends State<ArenaScreen> {
       stats: const [
         _Stat(value: '5', label: 'раундов', color: AppColors.gold),
         _Stat(value: '—', label: 'рейтинг', color: AppColors.cyan),
-        _Stat(value: '1', label: 'энергии', color: AppColors.cyan),
+        // Энергия платит за ответ, а не за вход: одно распознанное
+        // голосовое — одна единица (миграция 0032).
+        _Stat(value: '1', label: 'энергии за ответ', color: AppColors.cyan),
       ],
       primaryLabel: 'Начать',
       onPrimary: () async {
