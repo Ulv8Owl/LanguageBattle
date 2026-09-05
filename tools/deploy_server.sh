@@ -21,8 +21,10 @@ step "1/2 Применяю миграции"
 npx supabase db push
 
 step "2/2 Деплою Edge Functions"
-# evaluate-recording — воркер оценки; config-check — диагностика ключей.
+# evaluate-recording — воркер оценки; config-check — диагностика ключей;
+# synthesize-speech — озвучка разбора (Google Text-to-Speech).
 npx supabase functions deploy evaluate-recording
 npx supabase functions deploy config-check
+npx supabase functions deploy synthesize-speech
 
 note "Сервер обновлён до $(git rev-parse --short HEAD)."

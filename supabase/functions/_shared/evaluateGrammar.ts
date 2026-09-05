@@ -1,7 +1,10 @@
-// Провайдер-агностичный LLM-адаптер (раздел 9.2 спеки). Единственная точка
-// входа в LLM для всего проекта — base_url/api_key/model читаются из env,
-// смена провайдера (DeepSeek -> Mistral/Groq/Qwen) это правка переменных
-// окружения Edge Function, а не кода.
+// Судья: сборка промптов, разбор ответа и повторы. Сам вызов провайдера
+// живёт в _shared/llmChat.ts — он же единственная точка входа в LLM для
+// всего проекта, и смена провайдера (Gemini <-> OpenAI-совместимый) это
+// правка переменных окружения Edge Function, а не кода.
+
+import { googleKey, missingKeyMessage } from "./googleKey.ts";
+import { llmChat, llmConfigDebug } from "./llmChat.ts";
 
 export interface GrammarError {
   offset: number;
@@ -271,7 +274,10 @@ const LEVEL_SCORE_REMINDER =
  * стороне» в таком случае неверно.
  */
 export function isProviderLimit(message: string): boolean {
-  return /activity_cost_limit|quota|rate.?limit|insufficient|billing|HTTP 429/i.test(message);
+  // resource_exhausted — так это называет Google; остальное общее для
+  // OpenAI-совместимых сервисов.
+  return /activity_cost_limit|quota|rate.?limit|insufficient|billing|resource_exhausted|HTTP 429/i
+    .test(message);
 }
 
 export function trivialProbeEnabled(): boolean {
@@ -423,149 +429,38 @@ async function callLlmOnce(
   expectedPhrase: string,
   uncertainWords: string[],
   /**
-   * false — повтор без `response_format` для провайдеров, которые этого
-   * поля не знают и отвечают на него 400. Без такого отката судья у такого
+   * false — повтор без строгого JSON для провайдеров, которые такого поля
+   * не знают и отвечают на него 400. Без такого отката судья у такого
    * провайдера не работал вообще, молча деградируя в «ошибок нет».
    */
   useResponseFormat: boolean,
   /** Сколько отпущено на ЭТОТ запрос — уже с учётом бюджета всей задачи. */
   callTimeoutMs: number,
 ): Promise<string> {
-  const baseUrl = Deno.env.get("LLM_BASE_URL") ?? "https://api.b.ai/v1";
-  const apiKey = Deno.env.get("LLM_API_KEY");
-  // Значения по умолчанию у имени модели СОЗНАТЕЛЬНО нет. Раньше здесь
-  // стояло "DeepSeek-V4-Flash" — модели с таким именем у провайдера не
-  // существует, и каждый вызов судьи молча падал с model_not_found. Пусть
-  // лучше отсутствие настройки будет явной ошибкой, чем «работающим»
-  // значением, которое на самом деле не работает.
-  const model = Deno.env.get("LLM_MODEL");
+  const apiKey = googleKey("llm");
+  if (!apiKey) throw new Error(missingKeyMessage("llm"));
 
-  if (!apiKey) {
-    throw new Error("LLM_API_KEY is not configured");
-  }
-  if (!model) {
-    throw new Error(
-      "LLM_MODEL is not configured — задайте имя модели из списка провайдера: " +
-        "npx supabase secrets set LLM_MODEL=<имя>",
-    );
-  }
-
-  // Таймаут обязателен: без него зависший провайдер держит запрос до
-  // убийства всей Edge Function платформой, а это происходит ДО
-  // catch-блока — evaluation_jobs так и осталась бы в 'processing'
-  // навсегда. С таймаутом fetch сам бросает исключение, которое ловит
-  // retry-цикл evaluateGrammar.
-  //
-  // Но и слишком тесным он быть не может. Было 20 секунд — этого не
-  // хватало: разбор для Одиночной Игры просит 3-5 предложений объяснения
-  // НА КАЖДУЮ ошибку, и на нескольких ошибках модель просто не успевала
-  // договорить. Судья упирался в таймаут все три раза подряд (в базе это
-  // видно как задачи длительностью ~63 секунды = 3 x 20 c + распознавание)
-  // и деградировал, а игрок видел «ИИ-судья не отвечает».
-  // Щедрым он был ровно до тех пор, пока не выяснилось, что щедрее самого
-  // воркера: 180 секунд ожидания в процессе, который платформа убивает
-  // раньше, — это гарантия, что degraded-результат не запишется никогда.
-  // Поэтому длительность приходит снаружи: минимум из LLM_TIMEOUT_MS и
-  // остатка бюджета задачи. Подробность разбора он по-прежнему не
-  // ограничивает.
-  const timeoutMs = callTimeoutMs;
-  // 0 (значение по умолчанию) = не ограничивать длину ответа вообще.
+  // Потолка длины ответа по умолчанию НЕТ, и это важно. Любой наш потолок
+  // здесь резал ответ: рассуждающие модели тратят часть бюджета на
+  // внутренние рассуждения ДО того, как начнут писать, и при тесном лимите
+  // ответ обрывался на `{"score` — до JSON дело просто не доходило.
+  // Обрезанный JSON невалиден целиком, поэтому судья деградировал. Задать
+  // потолок обратно можно переменной LLM_MAX_TOKENS — она нужна разве что
+  // для экономии на провайдере с оплатой за токены.
   const maxTokens = Number(Deno.env.get("LLM_MAX_TOKENS") ?? 0);
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), timeoutMs);
 
-  let res: Response;
-  try {
-    res = await fetch(`${baseUrl}/chat/completions`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${apiKey}`,
-      },
-      body: JSON.stringify({
-        model,
-        messages: [
-          { role: "system", content: buildSystemPrompt(verbosity, level) },
-          {
-            role: "user",
-            content: buildUserPrompt(
-              transcript,
-              targetLanguage,
-              nativeLanguage,
-              expectedPhrase,
-              uncertainWords,
-            ),
-          },
-        ],
-        // Явно нестриминговый ответ: нам нужен один цельный JSON-объект,
-        // а не поток чанков (некоторые провайдеры включают стриминг по
-        // умолчанию, если поле вообще не передано).
-        stream: false,
-        // Structured output там, где провайдер это поддерживает (раздел 9.3).
-        ...(useResponseFormat ? { response_format: { type: "json_object" } } : {}),
-        // Потолка длины ответа НЕТ: поле не отправляется вовсе, и действует
-        // умолчание провайдера.
-        //
-        // Любой наш потолок здесь резал ответ. Рассуждающие модели (а
-        // deepseek-v4-flash из них) тратят часть бюджета на внутренние
-        // рассуждения ДО того, как начнут писать ответ: при 2000 токенов
-        // модель отвечала за 1-3 секунды, но её ответ обрывался на
-        // `{"score` — до JSON дело просто не доходило. Обрезанный JSON
-        // невалиден целиком, поэтому судья деградировал.
-        //
-        // Задать потолок обратно можно переменной LLM_MAX_TOKENS — она
-        // нужна разве что для экономии на провайдере с оплатой за токены.
-        ...(maxTokens > 0 ? { max_tokens: maxTokens } : {}),
-        temperature: 0.2,
-      }),
-      signal: controller.signal,
-    });
-  } catch (e) {
-    if (e instanceof Error && e.name === "AbortError") {
-      throw new Error(`LLM request timed out after ${Math.round(timeoutMs / 1000)}s`);
-    }
-    throw e;
-  } finally {
-    clearTimeout(timeout);
-  }
-
-  if (!res.ok) {
-    const body = await res.text().catch(() => "");
-    throw new Error(`LLM HTTP ${res.status}: ${body.slice(0, 500)}`);
-  }
-
-  const data = await res.json();
-  const choice = data?.choices?.[0];
-  const content = choice?.message?.content;
-  const finishReason = choice?.finish_reason;
-
-  // finish_reason === "length" — это не «модель ответила ерундой», а
-  // «модель не успела договорить в отведённый бюджет токенов». Разница
-  // принципиальная: первое чинится разбором ответа, второе — только
-  // увеличением max_tokens, и путать их значит чинить не то.
-  if (finishReason === "length") {
-    const shown = typeof content === "string" && content.length > 0 ? content.slice(0, 200) : "(пусто)";
-    throw new Error(
-      `ответ обрезан провайдером по длине (finish_reason=length` +
-        (maxTokens > 0 ? `, наш max_tokens=${maxTokens}` : ", наш потолок не задан") +
-        `), успело прийти: ${shown}`,
-    );
-  }
-
-  if (typeof content !== "string") {
-    throw new Error(`LLM response missing message content: ${JSON.stringify(data).slice(0, 400)}`);
-  }
-  if (content.trim().length === 0) {
-    // Пустой content при непустых рассуждениях — тот же симптом нехватки
-    // бюджета у рассуждающей модели.
-    const reasoning = choice?.message?.reasoning_content;
-    throw new Error(
-      `модель вернула пустой ответ (finish_reason=${finishReason}` +
-        (typeof reasoning === "string" ? `, рассуждений ${reasoning.length} символов` : "") +
-        ")",
-    );
-  }
-  return content;
+  return await llmChat(apiKey, {
+    system: buildSystemPrompt(verbosity, level),
+    user: buildUserPrompt(transcript, targetLanguage, nativeLanguage, expectedPhrase, uncertainWords),
+    json: useResponseFormat,
+    temperature: 0.2,
+    // Таймаут приходит снаружи: минимум из LLM_TIMEOUT_MS и остатка
+    // бюджета задачи. Своим он быть не может — воркера убивают снаружи, и
+    // ожидание дольше бюджета означает, что degraded-результат не
+    // запишется никогда.
+    timeoutMs: callTimeoutMs,
+    maxTokens,
+  });
 }
 
 /**
@@ -665,7 +560,7 @@ export async function evaluateGrammar(
           errors: parsed.errors,
           degraded: false,
           debug: {
-            model: Deno.env.get("LLM_MODEL") ?? "(не задана)",
+            ...llmConfigDebug(),
             status: "ok",
             // Признак того, что оценки на самом деле НЕТ. Без него ответ
             // диагностического режима — «балл 1, ошибок 0» — выглядит на
@@ -721,8 +616,7 @@ export async function evaluateGrammar(
     degraded: true,
     failureReason: reason,
     debug: {
-      model: Deno.env.get("LLM_MODEL") ?? "(не задана)",
-      base_url: Deno.env.get("LLM_BASE_URL") ?? "https://api.b.ai/v1",
+      ...llmConfigDebug(),
       status: "degraded",
       // Отдельный признак: клиент по нему скажет игроку, что упёрлись в
       // лимит провайдера, а не свалит вину на «сбой на нашей стороне».

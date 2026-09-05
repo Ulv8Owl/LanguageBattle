@@ -36,6 +36,7 @@
 // whisper-совместимым /audio/transcriptions (в том числе тот же base_url,
 // что у LLM-судьи), запасной путь, если основной провайдер недоступен.
 
+import { googleKey, missingKeyMessage } from "../googleKey.ts";
 import type { AsrProvider, TranscriptionResult } from "./types.ts";
 import { failed } from "./types.ts";
 import { transcribeGoogle } from "./google.ts";
@@ -83,8 +84,13 @@ export async function transcribeAudio(
   budgetMs: number = ASR_TIMEOUT_MS,
 ): Promise<TranscriptionResult> {
   const provider = (Deno.env.get("ASR_PROVIDER") ?? "google").toLowerCase();
-  const apiKey = Deno.env.get("ASR_API_KEY");
-  if (!apiKey) return failed("ASR_API_KEY is not configured");
+  // Ключ берётся общий, если своего нет: у Google все три сервиса
+  // (распознавание, синтез, модель) могут ходить под одним ключом, и
+  // держать три копии одного значения — это три места, где однажды
+  // обновят два. Свой ASR_API_KEY по-прежнему главнее: он нужен, когда
+  // провайдер не Google вовсе.
+  const apiKey = googleKey("asr");
+  if (!apiKey) return failed(missingKeyMessage("asr"));
   if (audio.byteLength === 0) return failed("audio file is empty");
   const timeoutMs = Math.max(3_000, Math.min(ASR_TIMEOUT_MS, budgetMs));
 

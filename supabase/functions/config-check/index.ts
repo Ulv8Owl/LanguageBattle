@@ -16,6 +16,9 @@
 
 import { bcp47For } from "../_shared/asr/index.ts";
 import { evaluateGrammar, trivialProbeEnabled } from "../_shared/evaluateGrammar.ts";
+import { googleKey, googleKeySource, missingKeyMessage } from "../_shared/googleKey.ts";
+import { llmBaseUrl, llmChat, llmModel, llmProvider } from "../_shared/llmChat.ts";
+import { synthesizeSpeech } from "../_shared/tts.ts";
 
 /// Заведомо ошибочная фраза: судья ОБЯЗАН найти здесь минимум одну ошибку
 /// (He go -> He went / He goes). Если он возвращает пустой список — дело не
@@ -68,13 +71,12 @@ async function withTimeout<T>(work: (signal: AbortSignal) => Promise<T>, ms = 15
 
 async function checkAsr(): Promise<CheckResult> {
   const provider = (Deno.env.get("ASR_PROVIDER") ?? "google").toLowerCase();
-  const apiKey = Deno.env.get("ASR_API_KEY");
+  const apiKey = googleKey("asr");
   if (!apiKey) {
     return {
       configured: false,
       reachable: null,
-      detail: "ASR_API_KEY не задан — распознавание речи не заработает: " +
-        "npx supabase secrets set ASR_API_KEY=<ключ>",
+      detail: `распознавание речи не заработает: ${missingKeyMessage("asr")}`,
     };
   }
   if (provider !== "google") {
@@ -124,60 +126,118 @@ async function checkAsr(): Promise<CheckResult> {
 }
 
 async function checkLlm(): Promise<CheckResult> {
-  const apiKey = Deno.env.get("LLM_API_KEY");
+  const apiKey = googleKey("llm");
   if (!apiKey) {
     return {
       configured: false,
       reachable: null,
-      detail: "LLM_API_KEY не задан — судья не заработает: " +
-        "npx supabase secrets set LLM_API_KEY=<ключ>",
+      detail: `судья и разбор ошибок не заработают: ${missingKeyMessage("llm")}`,
     };
   }
 
-  const baseUrl = Deno.env.get("LLM_BASE_URL") ?? "https://api.b.ai/v1";
-  const model = Deno.env.get("LLM_MODEL") ?? "(не задана)";
+  const provider = llmProvider();
+  const baseUrl = llmBaseUrl();
+  const model = llmModel();
+  if (!model) {
+    return {
+      configured: false,
+      reachable: null,
+      detail: "LLM_MODEL не задана — имя модели не подставляется по умолчанию намеренно: " +
+        "несуществующее имя выглядело бы как рабочая настройка. " +
+        "npx supabase secrets set LLM_MODEL=<имя>",
+    };
+  }
+
+  // Живой запрос идёт ровно тем же путём, что и настоящий вызов, — иначе
+  // проверка сообщала бы об исправности пути, которым никто не ходит.
   try {
-    const res = await withTimeout((signal) =>
-      fetch(`${baseUrl}/chat/completions`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
-        signal,
-        body: JSON.stringify({
-          model,
-          messages: [{ role: "user", content: "ping" }],
-          stream: false,
-          // Не ставить сюда 1: часть провайдеров (в том числе api.b.ai)
-          // отвечает на такое `max_tokens must be greater than 2`, и
-          // проверка ложно сообщала о недоступности эндпоинта, хотя
-          // настоящий судья на том же ключе и той же модели работал.
-          max_tokens: 16,
-        }),
-      })
-    );
-    if (res.ok) {
-      return {
-        configured: true,
-        reachable: true,
-        detail: `${baseUrl} отвечает 200 на модель ${model}, ключ принят (${fingerprint(apiKey)})`,
-      };
-    }
-    const body = await res.text().catch(() => "");
+    const answer = await withTimeout(async (signal) => {
+      // llmChat собственный таймаут ставит сам; signal здесь нужен только
+      // ради единообразия с остальными проверками.
+      void signal;
+      return await llmChat(apiKey, {
+        system: "Отвечай строго JSON вида {\"ok\":true} и ничем больше.",
+        user: "ping",
+        json: true,
+        temperature: 0,
+        timeoutMs: 15_000,
+        maxTokens: 64,
+      });
+    }, 20_000);
+    return {
+      configured: true,
+      reachable: true,
+      detail: `${provider} (${baseUrl}) отвечает на модель ${model}, ключ принят ` +
+        `(${fingerprint(apiKey)}); ответ: ${answer.slice(0, 80)}`,
+    };
+  } catch (e) {
+    const message = e instanceof Error ? e.message : String(e);
     const result: CheckResult & { available_models?: string[] } = {
       configured: true,
       reachable: false,
-      detail: `${baseUrl} вернул HTTP ${res.status}: ${body.slice(0, 300)}`,
+      detail: `${provider} (${baseUrl}), модель ${model}: ${message.slice(0, 400)}`,
     };
     // Не та модель — самая частая причина отказа, и чинится она сменой
     // одной переменной. Спрашиваем у провайдера список, чтобы не заставлять
     // угадывать имя вслепую.
-    if (/model_not_found|model.*does not exist|unknown model/i.test(body) || res.status === 404) {
-      result.available_models = await listModels(baseUrl, apiKey);
-      result.detail += ` — модель ${model} провайдер не знает. ` +
+    if (/model_not_found|model.*does not exist|unknown model|not found|NOT_FOUND|404/i.test(message)) {
+      result.available_models = provider === "gemini"
+        ? await listGeminiModels(baseUrl, apiKey)
+        : await listModels(baseUrl, apiKey);
+      result.detail += ` — похоже, модель ${model} провайдер не знает. ` +
         "Выберите имя из available_models и задайте: npx supabase secrets set LLM_MODEL=<имя>";
     }
     return result;
+  }
+}
+
+/** Список моделей Gemini — у него свой эндпоинт и своя форма ответа. */
+async function listGeminiModels(baseUrl: string, apiKey: string): Promise<string[]> {
+  try {
+    const res = await withTimeout((signal) =>
+      fetch(`${baseUrl}/models`, { headers: { "x-goog-api-key": apiKey }, signal })
+    );
+    if (!res.ok) {
+      const body = await res.text().catch(() => "");
+      return [`не удалось получить список моделей: HTTP ${res.status}: ${body.slice(0, 200)}`];
+    }
+    const data = await res.json();
+    const items = Array.isArray(data?.models) ? data.models : [];
+    // Имя приходит как "models/gemini-...", а в LLM_MODEL нужна часть без
+    // префикса — иначе подставленное из подсказки имя не сработает.
+    const names = items
+      .map((m: { name?: string }) => (m?.name ?? "").replace(/^models\//, ""))
+      .filter((n: string) => n.length > 0);
+    return names.length > 0 ? names : ["провайдер вернул пустой список моделей"];
   } catch (e) {
-    return { configured: true, reachable: false, detail: `запрос не удался: ${e}` };
+    return [`не удалось получить список моделей: ${e}`];
+  }
+}
+
+/**
+ * Синтез речи. Проверяется тем же вызовом, что и в игре, но на одном
+ * слове: нам нужен ответ сервиса, а не аудио.
+ */
+async function checkTts(): Promise<CheckResult> {
+  const apiKey = googleKey("tts");
+  if (!apiKey) {
+    return {
+      configured: false,
+      reachable: null,
+      detail: `озвучка в разборе не заработает: ${missingKeyMessage("tts")}`,
+    };
+  }
+  try {
+    const result = await synthesizeSpeech("test", "en", 15_000);
+    return {
+      configured: true,
+      reachable: true,
+      detail: `Google Text-to-Speech отвечает, ключ принят (${fingerprint(apiKey)}), ` +
+        `аудио ${result.audioContent.length} символов base64`,
+    };
+  } catch (e) {
+    const message = e instanceof Error ? e.message : String(e);
+    return { configured: true, reachable: false, detail: message.slice(0, 400) };
   }
 }
 
@@ -311,7 +371,15 @@ Deno.serve(async (req) => {
     );
   }
 
-  const [asr, llm, judge] = await Promise.all([checkAsr(), checkLlm(), checkJudge()]);
+  const [asr, llm, tts, judge] = await Promise.all([
+    checkAsr(),
+    checkLlm(),
+    checkTts(),
+    checkJudge(),
+  ]);
+  // Озвучка в готовность не входит: без неё играть можно, просто нельзя
+  // послушать образец. Валить общий ready из-за неё значило бы прятать
+  // настоящие поломки за необязательной.
   const blocks = [asr, llm, judge];
   const ready = blocks.every((b) => b.configured && b.reachable !== false);
 
@@ -319,18 +387,26 @@ Deno.serve(async (req) => {
     JSON.stringify(
       {
         ready,
-        asr: { provider: Deno.env.get("ASR_PROVIDER") ?? "google", ...asr },
+        asr: {
+          provider: Deno.env.get("ASR_PROVIDER") ?? "google",
+          key_from: googleKeySource("asr"),
+          ...asr,
+        },
         llm: {
-          base_url: Deno.env.get("LLM_BASE_URL") ?? "https://api.b.ai/v1",
-          model: Deno.env.get("LLM_MODEL") ?? "(не задана)",
+          provider: llmProvider(),
+          base_url: llmBaseUrl(),
+          model: llmModel() ?? "(не задана)",
+          key_from: googleKeySource("llm"),
           ...llm,
         },
         // llm выше проверяет только доступность эндпоинта; judge прогоняет
         // настоящий разбор — эндпоинт может отвечать 200, а судья при этом
         // не работать.
         judge,
+        tts: { key_from: googleKeySource("tts"), ...tts },
         hint: ready
-          ? "Ключи на месте, провайдеры отвечают, судья находит ошибки."
+          ? "Ключи на месте, провайдеры отвечают, судья находит ошибки." +
+            (tts.reachable === true ? "" : " Озвучка при этом не работает — смотрите блок tts.")
           : "Смотрите detail у того блока, где configured=false или reachable=false.",
       },
       null,

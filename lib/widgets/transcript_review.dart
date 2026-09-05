@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../core/theme.dart';
 import 'correction_text.dart';
+import 'speak_button.dart';
 
 /// Два блока разбора: что услышало распознавание и как это должно звучать.
 ///
@@ -20,11 +21,18 @@ class TranscriptReview extends StatelessWidget {
   /// Тот же ответ, но исправленный. Пусто — сравнивать не с чем.
   final String corrected;
 
+  /// Изучаемый язык — на нём и только на нём озвучивается исправленная
+  /// фраза. Пусто — значка динамика не будет: подставить язык «по
+  /// умолчанию» здесь нельзя, иначе английскую фразу однажды прочитают
+  /// по-русски и подадут это как образец произношения.
+  final String targetLanguage;
+
   const TranscriptReview({
     super.key,
     required this.transcript,
     required this.spoken,
     required this.corrected,
+    this.targetLanguage = '',
   });
 
   @override
@@ -42,7 +50,17 @@ class TranscriptReview extends StatelessWidget {
         ),
         if (corrected.isNotEmpty) ...[
           const SizedBox(height: 10),
-          _label('Разбор:'),
+          // Значок стоит у заголовка, а не в конце текста: фраза бывает в
+          // несколько строк, и кнопка, уехавшая под неё, читается как
+          // отдельный элемент, а не как «послушать вот это».
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.center,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              _label('Разбор:'),
+              SpeakButton(text: corrected, languageCode: targetLanguage),
+            ],
+          ),
           const SizedBox(height: 3),
           SelectableText.rich(
             TextSpan(children: correctionSpans(spoken, corrected)),

@@ -33,6 +33,8 @@
  */
 
 import { extractJson, isProviderLimit } from "./evaluateGrammar.ts";
+import { googleKey, missingKeyMessage } from "./googleKey.ts";
+import { llmChat, llmConfigDebug } from "./llmChat.ts";
 
 /** Одно объяснение: к какому элементу и что сказать игроку. */
 export interface ElementExplanation {
@@ -192,67 +194,16 @@ async function callOnce(
   useResponseFormat: boolean,
   timeoutMs: number,
 ): Promise<string> {
-  const baseUrl = Deno.env.get("LLM_BASE_URL") ?? "https://api.b.ai/v1";
-  const apiKey = Deno.env.get("LLM_API_KEY");
-  const model = Deno.env.get("LLM_MODEL");
-  if (!apiKey) throw new Error("LLM_API_KEY is not configured");
-  if (!model) throw new Error("LLM_MODEL is not configured");
+  const apiKey = googleKey("llm");
+  if (!apiKey) throw new Error(missingKeyMessage("llm"));
 
-  // Таймаут обязателен: без него зависший провайдер держит запрос до
-  // убийства всей Edge Function платформой, а это происходит ДО
-  // catch-блока — и задача осталась бы в 'processing' навсегда.
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), timeoutMs);
-
-  let res: Response;
-  try {
-    res = await fetch(`${baseUrl}/chat/completions`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${apiKey}`,
-      },
-      body: JSON.stringify({
-        model,
-        messages: [
-          { role: "system", content: SYSTEM_PROMPT },
-          {
-            role: "user",
-            content: buildUserPrompt(
-              targetLanguage,
-              nativeLanguage,
-              expectedPhrase,
-              transcript,
-              missed,
-            ),
-          },
-        ],
-        stream: false,
-        ...(useResponseFormat ? { response_format: { type: "json_object" } } : {}),
-        temperature: 0.3,
-      }),
-      signal: controller.signal,
-    });
-  } catch (e) {
-    if (e instanceof Error && e.name === "AbortError") {
-      throw new Error(`LLM request timed out after ${Math.round(timeoutMs / 1000)}s`);
-    }
-    throw e;
-  } finally {
-    clearTimeout(timeout);
-  }
-
-  if (!res.ok) {
-    const body = await res.text().catch(() => "");
-    throw new Error(`LLM HTTP ${res.status}: ${body.slice(0, 500)}`);
-  }
-
-  const data = await res.json();
-  const content = data?.choices?.[0]?.message?.content;
-  if (typeof content !== "string" || content.trim().length === 0) {
-    throw new Error("LLM вернул пустой ответ");
-  }
-  return content;
+  return await llmChat(apiKey, {
+    system: SYSTEM_PROMPT,
+    user: buildUserPrompt(targetLanguage, nativeLanguage, expectedPhrase, transcript, missed),
+    json: useResponseFormat,
+    temperature: 0.3,
+    timeoutMs,
+  });
 }
 
 /**
@@ -337,7 +288,7 @@ export async function explainMissedElements(
           degraded: false,
           debug: {
             status: "ok",
-            model: Deno.env.get("LLM_MODEL") ?? "(не задана)",
+            ...llmConfigDebug(),
             asked: asked.length,
             answered: parsed.length,
             response_format: useResponseFormat,

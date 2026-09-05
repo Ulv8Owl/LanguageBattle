@@ -1412,6 +1412,7 @@ class _ErrorReport extends StatelessWidget {
               transcript: transcript,
               spoken: spoken,
               corrected: correction,
+              targetLanguage: targetLanguage,
             ),
             if (transcript.isNotEmpty) const SizedBox(height: 10),
 

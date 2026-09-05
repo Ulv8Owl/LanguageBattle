@@ -686,6 +686,7 @@ class _BattleScreenState extends State<BattleScreen> {
           name: isMine ? _myName : _opponentName,
           recording: rec,
           verdict: _verdictFor(round.id, rec.userId),
+          isMine: isMine,
         ));
       }
     }
@@ -757,7 +758,19 @@ class _AiVerdict extends StatelessWidget {
   /// null — оценки ещё нет, судья считает.
   final RoundScoreData? verdict;
 
-  const _AiVerdict({super.key, required this.name, required this.recording, required this.verdict});
+  /// Своё ли это голосовое. От этого зависит только одно: предлагать ли
+  /// послушать исправленную фразу. В Дуэли соперник переводит на СВОЙ
+  /// изучаемый язык, и озвучка его фразы была бы образцом произношения на
+  /// языке, которого этот игрок не учит.
+  final bool isMine;
+
+  const _AiVerdict({
+    super.key,
+    required this.name,
+    required this.recording,
+    required this.verdict,
+    required this.isMine,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -832,6 +845,8 @@ class _AiVerdict extends StatelessWidget {
                             transcript: recording.transcript,
                             spoken: recording.spokenForDiff,
                             corrected: recording.correctedText,
+                            targetLanguage:
+                                isMine ? (recording.languageCode ?? '') : '',
                           ),
                       ],
                     ),
