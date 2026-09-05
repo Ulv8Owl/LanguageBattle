@@ -1,0 +1,150 @@
+1.1 «We've been trying» — Present Perfect Continuous: los intentos empezaron antes y siguen ahora. El español lo dice con "llevamos intentando", en presente, así que el inglés obliga a construir una forma que allí no existe.
+1.2 «to hire a second designer» — Tras "try" en el sentido de «intentar» va el infinitivo con "to": "trying to hire". Y el ordinal "second" lleva "a" y no "the": se busca «uno más», no el segundo de una lista.
+1.3 «since February» — "Since" marca el punto de partida y "for" la duración: "since February", pero "for three months". El español "desde febrero" se traduce solo con "since".
+1.4 «Every candidate» — "Every" va siempre con sustantivo en singular: "every candidate", y el verbo también en singular.
+1.5 «we actually liked» — Oración de relativo sin "who": el inglés lo omite cuando el relativo es complemento. "Actually" significa «de verdad», no «actualmente»: es un falso amigo clásico.
+1.6 «had already accepted something else» — Past Perfect: "had accepted" sitúa la aceptación antes que el otro momento pasado. El español usa el pluscuamperfecto igual, así que la estructura coincide.
+1.7 «HR keeps telling us» — "Keep" más gerundio significa «seguir haciendo»: "keeps telling". Y tras "tell" la persona va sin preposición: "tell us", frente a "say to us".
+1.8 «the market is difficult» — La subordinada tras "tell us" va sin "that": en la lengua hablada la conjunción se omite. El verbo "is" es obligatorio delante del adjetivo.
+1.9 «which is probably true» — "Which" se refiere a toda la frase anterior, y la coma delante es obligatoria. "Probably" va entre la cópula y el adjetivo.
+1.10 «Still» — "Still" al principio significa «aun así», no «todavía». La posición cambia el significado por completo.
+1.11 «I suspect» — "Suspect" no lleva preposición y abre la subordinada directamente: "I suspect our process is...". El español pondría "que"; el inglés puede prescindir de él.
+1.12 «our process is too slow» — "Too" delante del adjetivo significa «demasiado», frente a "very". El posesivo "our" sustituye al artículo.
+1.13 «If we can't decide in under two weeks» — En la subordinada con "if" no se usa el futuro, de ahí "can't" y no "won't be able to". "In under two weeks" usa "under" con el sentido de «en menos de».
+1.14 «we shouldn't be surprised» — "Shouldn't be surprised" combina un modal con la voz pasiva. Tras "should" el verbo va sin "to".
+1.15 «when people move on» — "When" abre una subordinada temporal, y tampoco admite futuro: "when people move on". "Move on" es un verbo con partícula, «irse a otra cosa».
+2.1 «The report» — "The" porque el informe es concreto y de él se habla. El español también pone artículo aquí, así que el paralelo es directo.
+2.2 «was supposed to be ready» — "Be supposed to" significa «tener que» según lo previsto, e insinúa que no se cumplió. Detrás va el infinitivo, aquí de sentido pasivo: "to be ready".
+2.3 «on Monday» — Los días de la semana llevan "on": "on Monday", con mayúscula y sin artículo, mientras que el español dice "el lunes".
+2.4 «Nobody had mentioned» — Past Perfect tras "nobody": nadie lo había mencionado antes de que se supiera lo demás. "Nobody" ya niega, y no cabe una segunda negación como en español.
+2.5 «that the data» — "Data" en inglés corriente es incontable y lleva verbo en singular, aunque formalmente sea el plural de "datum". El español "los datos" es plural sin discusión.
+2.6 «came from three different systems» — "Come from" es «venir de». El pasado se debe a la concordancia de tiempos con "had mentioned", una regla que el inglés aplica con mucha más rigidez que el español.
+2.7 «Merging them» — Gerundio como sujeto: "merging them". El español usaría un infinitivo, "unificarlos", y esa es la diferencia que hay que recordar.
+2.8 «took most of the week» — "Take" en el sentido de «llevar tiempo». "Most of the week" necesita "of" delante de un sustantivo determinado; sin "of" sería "most weeks".
+2.9 «and half the numbers still disagreed» — "Half the numbers": tras "half" se mantiene el artículo y se puede omitir "of". "Disagree" dicho de cifras significa «no cuadrar».
+2.10 «In the end» — "In the end" significa «al final», frente a "at the end", que señala el final de algo concreto.
+2.11 «we sent it out» — "Send out" es un verbo con partícula, «enviar». El pronombre complemento tiene que ir en medio: "sent it out", nunca "sent out it".
+2.12 «with a note about the discrepancies» — "A note about" usa "about" para el tema. "The discrepancies" con artículo: son las ya mencionadas.
+2.13 «To my surprise» — "To my surprise" es una expresión fija con "to". Se antepone y se separa con coma.
+2.14 «nobody asked» — "Nobody" vuelve a negar por sí solo, así que el verbo va en forma afirmativa: "nobody asked".
+2.15 «a single question about them» — "A single question" refuerza la negación: «ni una sola». "About them" usa "about" para el tema de la pregunta.
+3.1 «I've never been» — Present Perfect con "never" para hablar de la experiencia de toda una vida: "I've never been". El español dice "nunca se me ha dado", también en perfecto, así que aquí coinciden.
+3.2 «particularly good» — "Particularly" suaviza la negación: «no especialmente». El adverbio va delante del adjetivo.
+3.3 «at small talk» — "Be good at something" es una combinación fija con "at". Detrás va un gerundio o un sustantivo, nunca un infinitivo.
+3.4 «At conferences» — "At conferences" va en plural y sin artículo: los congresos en general. "At" es la preposición de los eventos.
+3.5 «I tend to end up» — "Tend to" más infinitivo significa «soler». "End up" es un verbo con partícula, «acabar».
+3.6 «near the coffee machine» — "Near" sin "to". "Coffee machine" son dos sustantivos seguidos: el primero determina al segundo y no hay ninguna preposición entre ellos.
+3.7 «Occasionally someone else» — "Someone else" pone siempre "else" detrás del pronombre. "Occasionally" significa «de vez en cuando» y abre la frase.
+3.8 «starts the conversation» — "The conversation" con artículo: es la conversación que empieza. El verbo lleva "-s" por la tercera persona.
+3.9 «and I meet someone genuinely interesting» — "Meet" aquí significa «conocer a alguien». El adjetivo va detrás de "someone": los compuestos en "-one" y "-body" exigen ese orden.
+3.10 «More often» — "More often" es el comparativo de "often", formado con "more". Los adverbios de una sílaba llevarían "-er".
+3.11 «I just drink» — "Just" significa «simplemente» y va delante del verbo principal.
+3.12 «a lot of bad coffee» — "A lot of" delante de un incontable. El adjetivo va antes del sustantivo, y el conjunto no lleva artículo.
+3.13 «It's a strategy» — "It's" es la contracción de "it is". "A" porque la estrategia se nombra por primera vez.
+3.14 «with obvious flaws» — "With" indica la característica. "Flaws" sin artículo: defectos en general.
+3.15 «but it's the one I have» — "The one I have" usa "one" en lugar de "strategy", y la relativa va sin "that": en la lengua hablada se omite.
+4.1 «Our team» — "Our team" con posesivo en lugar de artículo. En inglés americano "team" pide verbo en singular.
+4.2 «switched to remote work» — "Switch to" es un verbo con partícula que exige "to". "Remote work" es incontable y va sin artículo.
+4.3 «almost overnight» — "Overnight" aquí significa «de la noche a la mañana», no literalmente durante una noche. "Almost" lo matiza.
+4.4 «At first» — "At first" significa «al principio» y contrasta con lo que pasó después. No es lo mismo que "first of all", que enumera.
+4.5 «everyone said» — "Everyone" es singular, y el verbo también: "everyone said".
+4.6 «it was temporary» — Concordancia de tiempos: la subordinada va en pasado, "was", aunque en su momento fuera un presente. El español mantendría el imperfecto igual, así que aquí no hay conflicto.
+4.7 «Two years later» — "Later" tras un periodo va sin preposición: "two years later". El español dice «dos años después», con la misma estructura.
+4.8 «the office is mostly used» — Voz pasiva: importa que la oficina se use, no quién la usa. "Mostly" se coloca entre el auxiliar y el participio.
+4.9 «for meetings and free biscuits» — "For" indica la finalidad. "Biscuits" y "meetings" van en plural y sin artículo: ambas cosas en general.
+4.10 «The work itself» — "Itself" refuerza al sustantivo y va justo detrás: "the work itself" es «el trabajo en sí».
+4.11 «hasn't really changed» — Present Perfect con "really" en negativa: «no ha cambiado mucho». El adverbio va entre el auxiliar y el participio.
+4.12 «but the commute has disappeared» — "Commute" es un sustantivo que significa el trayecto diario al trabajo; el español necesita varias palabras. El Present Perfect señala que el resultado se nota ahora.
+4.13 «Nobody» — "Nobody" es un pronombre negativo, y el verbo va en forma afirmativa.
+4.14 «I know» — La relativa "I know" va sin "that" y sin comas: determina a "nobody" y en la lengua hablada se construye así.
+4.15 «wants to go back» — "Wants" lleva "-s" porque "nobody" es singular. "Go back" es un verbo con partícula, «volver».
+5.1 «My landlord» — "My landlord" con posesivo en lugar de artículo. La palabra designa al dueño que alquila.
+5.2 «raised the rent» — "Raise" es transitivo, «subir algo», mientras que "rise" es intransitivo. Confundirlos es de lo más habitual.
+5.3 «by ten per cent» — "By" delante de la magnitud del cambio: "raised it by ten per cent". El español dice "un diez por ciento", sin preposición.
+5.4 «He explained» — "Explain" abre la subordinada directamente y coloca a la persona tras "to": "explained to me". Decir "explained me" es imposible.
+5.5 «that maintenance costs» — "Maintenance costs" son dos sustantivos seguidos: el primero funciona como adjetivo y va siempre en singular.
+5.6 «had gone up» — Past Perfect: los gastos habían subido antes de que él lo explicara. "Go up" es un verbo con partícula, «aumentar».
+5.7 «The lift» — "The lift" es la palabra británica; en inglés americano sería "elevator". "The" porque el ascensor del edificio es uno solo.
+5.8 «has been broken since November» — Present Perfect con "since": el estado dura desde el punto indicado hasta ahora. "Broken" es el participio usado como adjetivo.
+5.9 «which slightly weakened his argument» — "Which" se refiere a toda la frase anterior. "Slightly" matiza y va delante del verbo.
+5.10 «I asked politely» — "Politely" es un adverbio y va detrás del verbo. El inglés casi nunca lo coloca entre el verbo y su complemento.
+5.11 «whether the increase» — "Whether" introduce la pregunta indirecta y en esta posición se prefiere a "if". "The increase" con artículo: es la subida ya mencionada.
+5.12 «included fixing it» — Tras "include" va el gerundio: "included fixing it". El infinitivo detrás de este verbo no es posible.
+5.13 «He said» — "Say" no admite complemento de persona sin preposición: "he said" o "he said to me", pero nunca "he said me".
+5.14 «he would look into it» — "Would" sustituye a "will" en el estilo indirecto por concordancia de tiempos. "Look into" es un verbo con partícula, «mirarlo, estudiarlo».
+5.15 «which usually means no» — "Which" vuelve a referirse a todo lo anterior. "Usually" va delante del verbo principal.
+6.1 «I signed up» — "Sign up for" es un verbo con partícula más la preposición "for". Pasado simple, porque ocurrió en un momento dado.
+6.2 «for a marathon» — "A" porque es un maratón entre otros, no uno concreto. Con el nombre de una carrera concreta llevaría "the".
+6.3 «in a moment of enthusiasm» — "In a moment of enthusiasm" usa "in" para el estado en que se hace algo. "Enthusiasm" es incontable y no lleva artículo.
+6.4 «Training» — "Training" es un sustantivo incontable: ni artículo ni plural. El español "el entrenamiento" sí lleva artículo, y ahí está la diferencia.
+6.5 «has been going» — Present Perfect Continuous: "has been going" trae el proceso desde el pasado hasta ahora.
+6.6 «better than expected» — Tras "than" se ha omitido "I expected": es una elipsis normal en las comparaciones. "Better" es el comparativo irregular de "good".
+6.7 «The problem» — "The" porque el problema queda identificado por lo que sigue.
+6.8 «is that I now talk about running» — "Is that" introduce la subordinada atributiva. "Talk about" lleva siempre "about", y detrás va el gerundio "running".
+6.9 «constantly» — "Constantly" al final refuerza lo dicho; en el medio sonaría más débil.
+6.10 «My friends» — "My friends" con posesivo en lugar de artículo, en plural.
+6.11 «have started changing the subject» — Tras "start" cabe gerundio o infinitivo; aquí gerundio. "Change the subject" es la expresión fija, con artículo obligatorio.
+6.12 «before I even begin» — "Before" abre una subordinada temporal y no admite futuro. "Even" refuerza: «antes incluso de que empiece».
+6.13 «Apparently» — "Apparently" significa «por lo visto» y afecta a toda la frase.
+6.14 «there's a limit» — "There is" presenta la existencia de algo. "A" delante de "limit" porque se menciona por primera vez.
+6.15 «to how much anyone can hear about split times» — "To how much" arrastra el "to" de la expresión "a limit to". Luego viene una pregunta indirecta con orden directo.
+7.1 «The new system» — "The new system" lleva artículo y el adjetivo delante del sustantivo.
+7.2 «was introduced» — Voz pasiva: importa que se implantara, no quién lo hizo. El español lo resuelve con "se implantó", que es otra construcción.
+7.3 «without much warning» — "Without much warning" usa "much" ante un incontable. "Many" aquí sería un error.
+7.4 «We were told» — Voz pasiva con "tell": el inglés permite que la persona sea sujeto pasivo, "we were told". El español no puede hacer eso y tiene que decir "nos dijeron".
+7.5 «it would save» — "Would" por concordancia de tiempos en lugar de "will". Detrás, el verbo sin "to".
+7.6 «everyone about an hour a day» — "Save somebody something" admite dos complementos seguidos. "An hour a day" usa "a" con el sentido de «al día», como en "twice a week".
+7.7 «So far» — "So far" significa «de momento» y exige Present Perfect.
+7.8 «it has mostly generated» — "Mostly" va entre el auxiliar y el participio. "Generate" es más formal que "make".
+7.9 «new kinds of meetings» — "Kinds of" exige "of". El sustantivo que sigue puede ir en singular o en plural.
+7.10 «To be fair» — "To be fair" es una expresión incidental, «para ser justos», separada por comas.
+7.11 «the interface» — "The" porque es la interfaz de ese sistema concreto.
+7.12 «is a genuine improvement» — "A genuine improvement" lleva "a" por ser contable, y la cópula "is" es obligatoria.
+7.13 «Whether that justifies» — "Whether" introduce una subordinada que hace de sujeto, y por larga que sea el verbo va en singular.
+7.14 «six months of migration» — "Six months of migration" une el plazo con el proceso mediante "of". "Months" en plural tras "six".
+7.15 «is another question» — "Is another question" es el predicado de toda la subordinada con "whether". "Another" se escribe en una sola palabra.
+8.1 «My neighbour» — "My neighbour" en grafía británica; en inglés americano se escribe "neighbor".
+8.2 «decided to learn the trumpet» — Tras "decide" va el infinitivo con "to". Los instrumentos llevan "the": "learn the trumpet".
+8.3 «at fifty-two» — La edad se introduce con "at": "at fifty-two". El numeral compuesto lleva guion.
+8.4 «For the first month» — "For the first month" usa "for" para la duración y "the" delante del ordinal.
+8.5 «it was, frankly» — "Frankly" es un inciso y va entre comas por los dos lados. Afecta a toda la frase, no al verbo.
+8.6 «quite hard to listen to» — "Hard to listen to" conserva el "to" final: "listen to" lo exige siempre, aunque el complemento se haya adelantado.
+8.7 «I nearly said something» — "Nearly" significa «estuve a punto de» y va delante del verbo. "Almost" también valdría aquí.
+8.8 «and then I remembered» — "And then" enlaza dos acciones pasadas. "Remember" abre una subordinada de hecho.
+8.9 «how badly I sing» — "How badly" lleva adverbio, no adjetivo: "sing badly". En la pregunta indirecta el orden es directo, sin inversión.
+8.10 «He's improved enormously» — Present Perfect para un resultado que se nota ahora: "he's improved". "Enormously" va detrás del verbo.
+8.11 «since the summer» — "Since the summer" marca el punto de partida, así que "since" y no "for". Aquí el artículo delante de la estación es obligatorio.
+8.12 «and I'm oddly proud of him» — "Be proud of somebody" lleva "of". "Oddly" significa «curiosamente» y modifica al adjetivo.
+8.13 «Now» — "Now" abre el contraste con el pasado.
+8.14 «the silence on Sundays» — "On Sundays" en plural con "on" para un día habitual. "The silence" con artículo: es ese silencio concreto.
+8.15 «feels almost strange» — "Feel" aquí es copulativo: detrás va un adjetivo, no un adverbio. Decir "feels strangely" sería un error.
+9.1 «I don't usually» — "Don't usually": el adverbio de frecuencia va detrás del auxiliar en las negativas. Esa es su posición fija.
+9.2 «trust productivity advice» — "Advice" es incontable: no existen "advices" ni "an advice". "Productivity advice" pone un sustantivo en función de adjetivo.
+9.3 «mostly because it all contradicts itself» — "Contradict itself" lleva reflexivo porque la acción recae sobre el propio sujeto. "It all" coloca "all" detrás del pronombre.
+9.4 «One book» — "One book" aquí significa «un libro» en contraste con el siguiente, no simplemente «un libro cualquiera».
+9.5 «tells you to start» — "Tell somebody to do something": complemento sin preposición e infinitivo con "to". Eso distingue "tell" de "say".
+9.6 «with the hardest task» — El superlativo lleva siempre "the": "the hardest task". El español dice «la tarea más difícil», también con artículo.
+9.7 «The next one» — "The next one" usa "one" en lugar de "book". Con "next" en este sentido el artículo es obligatorio.
+9.8 «insists» — "Insist" abre la subordinada. En registro formal admite "should" o el subjuntivo, y ambas variantes son correctas.
+9.9 «you should build momentum first» — "Build momentum" es una combinación fija; "momentum" es incontable y no lleva artículo. "First" al final significa «primero».
+9.10 «What has actually worked for me» — "What" introduce una subordinada de sujeto, «lo que». El Present Perfect subraya que el resultado sigue vigente.
+9.11 «is much less exciting» — "Much less exciting": "much" refuerza la comparación y "less" la construye para un adjetivo largo.
+9.12 «fewer tabs and an earlier alarm» — "Fewer" con contables y "less" con incontables: "fewer tabs", pero "less time". El artículo "an" delante de "earlier" se debe al sonido vocálico.
+9.13 «Nobody» — "Nobody" es negativo por sí solo, y el verbo va en afirmativa y en singular.
+9.14 «is going to publish» — "Be going to" para una predicción basada en la situación. Detrás, el infinitivo con "to".
+9.15 «a book about that» — "A book about that" lleva "a" y la preposición "about" para el tema.
+10.1 «She'd been warning us» — Past Perfect Continuous: los avisos venían de antes de otro momento pasado. "She'd" es aquí la contracción de "she had", no de "she would".
+10.2 «about that deadline» — "Warn somebody about something": la persona sin preposición y el tema con "about".
+10.3 «for weeks» — "For weeks" usa "for" para la duración. El español "desde hacía semanas" se traduce con esta forma.
+10.4 «We nodded» — Pasado simple "we nodded", para una serie de acciones terminadas.
+10.5 «in every meeting» — "In every meeting" lleva "every" con el sustantivo en singular.
+10.6 «and changed nothing» — "Nothing" ya niega, así que el verbo va en afirmativa: "changed nothing". El español admite "no cambiábamos nada", pero el inglés no permite esa doble negación.
+10.7 «When the client» — "When" abre la subordinada temporal. "The client" con artículo: es un cliente concreto.
+10.8 «moved the date forward» — "Move forward" dicho de una fecha significa adelantarla. La dirección no es evidente y hay que memorizarla.
+10.9 «the panic was almost impressive» — "The panic" con artículo: es ese pánico. "Almost impressive" es una valoración con ironía.
+10.10 «Somehow» — "Somehow" significa «de algún modo» y afecta a toda la frase.
+10.11 «we delivered» — "Deliver" sin complemento significa «entregar el trabajo». Es un uso profesional en el que el complemento se calla.
+10.12 «on the Friday» — "On the Friday" con artículo señala un viernes concreto dentro del relato. Sin artículo, "on Friday", sería un viernes cualquiera.
+10.13 «Not once» — "Not once" al principio obliga a invertir el orden: primero el auxiliar y después el sujeto.
+10.14 «has she said "I told you so"» — La inversión tras "not once": "has she said", y no "she has said". Cualquier expresión negativa antepuesta la provoca.
+10.15 «which is why everyone listens to her now» — "Which is why" introduce la conclusión de todo lo anterior. "Listen to" conserva el "to", como en la octava frase.
