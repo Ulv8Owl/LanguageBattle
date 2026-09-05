@@ -76,6 +76,19 @@ void main() {
     expect(entry.explanationFor('zh', 0), isNull);
   });
 
+  test('пояснение к элементу есть на КАЖДОМ языке фразы', () {
+    // Разбор показывает пояснение на РОДНОМ языке игрока, а не на
+    // изучаемом: прочитать объяснение английской грамматики по-английски
+    // может только тот, кто английский уже знает. Значит, пояснения
+    // обязаны существовать на всех языках, а не только на языке эталона.
+    final entry = sample();
+    for (final lang in ['en', 'ru']) {
+      final explanations = entry.explanationsByLanguage[lang];
+      expect(explanations, isNotNull, reason: lang);
+      expect(explanations!.length, entry.elementCount(lang), reason: lang);
+    }
+  });
+
   test('FlashcardEntry.forLanguage — прежнее поведение', () {
     final entry = FlashcardEntry.fromJson(const {'en': 'dolphin', 'ru': 'дельфин', 'es': 'delfín'});
     expect(entry.forLanguage('es'), 'delfín');

@@ -817,7 +817,8 @@ class _TrainingScreenState extends State<TrainingScreen> {
           errors: done.errors,
           attempt: done.firstAttempt,
           phraseIndex: done.phraseIndex,
-          targetLanguage: _targetLanguage));
+          targetLanguage: _targetLanguage,
+          nativeLanguage: _nativeLanguage));
       items.addAll(_debugPanels('Раунд ${done.roundNumber}, попытка 1', done.firstAttempt));
       items.addAll(_voiceBubble(done.secondAudio, score: done.score));
       items.add(_ErrorReport(
@@ -825,6 +826,7 @@ class _TrainingScreenState extends State<TrainingScreen> {
           attempt: done.secondAttempt,
           phraseIndex: done.phraseIndex,
           targetLanguage: _targetLanguage,
+          nativeLanguage: _nativeLanguage,
           isSecondAttempt: true));
       items.add(_ScoreCard(score: done.score, coins: null, attempt: done.secondAttempt));
       items.addAll(_debugPanels('Раунд ${done.roundNumber}, попытка 2', done.secondAttempt));
@@ -890,7 +892,8 @@ class _TrainingScreenState extends State<TrainingScreen> {
             errors: _firstAttemptErrors,
             attempt: _firstAttempt,
             phraseIndex: _phraseIndex,
-            targetLanguage: _targetLanguage));
+            targetLanguage: _targetLanguage,
+            nativeLanguage: _nativeLanguage));
         items.addAll(_debugPanels('Попытка 1', _firstAttempt));
         break;
       case _Stage.gradingSecond:
@@ -899,7 +902,8 @@ class _TrainingScreenState extends State<TrainingScreen> {
             errors: _firstAttemptErrors,
             attempt: _firstAttempt,
             phraseIndex: _phraseIndex,
-            targetLanguage: _targetLanguage));
+            targetLanguage: _targetLanguage,
+            nativeLanguage: _nativeLanguage));
         items.addAll(_debugPanels('Попытка 1', _firstAttempt));
         items.addAll(_voiceBubble(_secondAttemptAudio));
         // На второй попытке судья не объясняет ошибки, а ставит балл —
@@ -916,7 +920,8 @@ class _TrainingScreenState extends State<TrainingScreen> {
             errors: _firstAttemptErrors,
             attempt: _firstAttempt,
             phraseIndex: _phraseIndex,
-            targetLanguage: _targetLanguage));
+            targetLanguage: _targetLanguage,
+            nativeLanguage: _nativeLanguage));
         items.addAll(_debugPanels('Попытка 1', _firstAttempt));
         items.addAll(_voiceBubble(_secondAttemptAudio, score: _finalScore));
         items.add(_ErrorReport(
@@ -924,6 +929,7 @@ class _TrainingScreenState extends State<TrainingScreen> {
             attempt: _secondAttempt,
             phraseIndex: _phraseIndex,
             targetLanguage: _targetLanguage,
+            nativeLanguage: _nativeLanguage,
             isSecondAttempt: true));
         items.add(_ScoreCard(score: _finalScore ?? 0, coins: _earnedCoins, attempt: _secondAttempt));
         items.addAll(_debugPanels('Попытка 2', _secondAttempt));
@@ -1102,14 +1108,17 @@ class _ErrorReport extends StatelessWidget {
   /// marksOnly в evaluateGrammar.ts), чтобы не тратить время ответа.
   final bool isSecondAttempt;
 
-  /// Язык, на который надо было перевести: на нём показывается эталон и
-  /// на нём же написаны пояснения к его элементам.
+  /// Язык, на который надо было перевести: на нём показывается эталон.
   final String targetLanguage;
+
+  /// Родной язык игрока — НА НЁМ показываются пояснения.
+  final String nativeLanguage;
 
   const _ErrorReport({
     required this.errors,
     required this.attempt,
     required this.targetLanguage,
+    required this.nativeLanguage,
     required this.phraseIndex,
     this.isSecondAttempt = false,
   });
@@ -1121,15 +1130,27 @@ class _ErrorReport extends StatelessWidget {
   List<PhraseElement> get _elements =>
       phraseIndex < 0 ? const [] : PhraseBank.elementsFor(phraseIndex, targetLanguage);
 
-  /// Пояснение к каждому элементу — на изучаемом языке, потому что
-  /// объясняет оно именно его грамматику («"at seven" — we use "at" with
-  /// clock time»). Пояснение на родном языке в датасете тоже есть, но оно
-  /// разбирает РОДНУЮ фразу, а игроку здесь нужна не она.
+  /// Пояснение к каждому элементу — НА РОДНОМ ЯЗЫКЕ игрока.
+  ///
+  /// Пояснение на изучаемом языке в датасете тоже есть, и оно разбирает
+  /// именно ту форму, которую игрок должен произнести. Но прочитать его
+  /// может только тот, кто язык уже знает: объяснять A1-игроку
+  /// английскую грамматику по-английски — значит не объяснять ничего.
+  /// Поэтому берётся версия на языке, которым игрок ВЛАДЕЕТ.
+  ///
+  /// Элемент N во всех языках покрывает один и тот же кусок смысла
+  /// (инвариант датасета), поэтому пояснение N с родного языка относится
+  /// к тому же месту фразы, что и элемент N эталона.
   List<String> get _explanations {
     final entry = phraseIndex < 0 ? null : PhraseBank.entry(phraseIndex);
     if (entry == null) return const [];
-    return entry.explanationsByLanguage[targetLanguage] ?? const [];
+    return entry.explanationsByLanguage[nativeLanguage] ?? const [];
   }
+
+  /// Те же элементы на родном языке — показываются в пояснении рядом с
+  /// эталонным, чтобы было видно, о каком куске фразы идёт речь.
+  List<PhraseElement> get _nativeElements =>
+      phraseIndex < 0 ? const [] : PhraseBank.elementsFor(phraseIndex, nativeLanguage);
 
   /// Номера элементов, которые игрок не произнёс.
   ///
@@ -1244,6 +1265,7 @@ class _ErrorReport extends StatelessWidget {
             else if (_elements.isNotEmpty)
               _ElementBreakdown(
                 elements: _elements,
+                nativeElements: _nativeElements,
                 missedIndices: _missedIndices,
                 explanations: _explanations,
               )
@@ -1292,17 +1314,25 @@ class _ErrorReport extends StatelessWidget {
 /// куске игрок вправе не меньше.
 class _ElementBreakdown extends StatelessWidget {
   final List<PhraseElement> elements;
+
+  /// Те же куски на родном языке. Показываются в пояснении подзаголовком:
+  /// пояснение написано про родную формулировку, и без неё непонятно, к
+  /// чему оно относится.
+  final List<PhraseElement> nativeElements;
+
   final Set<int> missedIndices;
   final List<String> explanations;
 
   const _ElementBreakdown({
     required this.elements,
+    required this.nativeElements,
     required this.missedIndices,
     required this.explanations,
   });
 
   void _showExplanation(BuildContext context, int index) {
     final explanation = index < explanations.length ? explanations[index] : null;
+    final native = index < nativeElements.length ? nativeElements[index].text : null;
     showModalBottomSheet<void>(
       context: context,
       backgroundColor: AppColors.navy2,
@@ -1329,6 +1359,13 @@ class _ElementBreakdown extends StatelessWidget {
                 elements[index].text,
                 style: AppFonts.ui(fontSize: 16, weight: FontWeight.w800, color: AppColors.gold),
               ),
+              if (native != null) ...[
+                const SizedBox(height: 4),
+                Text(
+                  native,
+                  style: const TextStyle(color: AppColors.muted, fontSize: 13),
+                ),
+              ],
               const SizedBox(height: 12),
               Text(
                 explanation ?? 'Пояснения к этой части фразы пока нет.',
