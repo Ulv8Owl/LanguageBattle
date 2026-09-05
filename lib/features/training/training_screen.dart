@@ -1235,14 +1235,20 @@ class _ErrorReport extends StatelessWidget {
             if (isSecondAttempt) ...[
               if (noResult || notRecognised || judgeBroken || correction.isEmpty)
                 Text(hint, style: const TextStyle(color: AppColors.muted, fontSize: 12, height: 1.4)),
-            ] else if (noResult || errors.isEmpty || notRecognised || judgeBroken)
+            ] else if (noResult || notRecognised || judgeBroken)
               Text(hint, style: const TextStyle(color: AppColors.muted, fontSize: 12, height: 1.4))
+            // Разбор по элементам показывается ДАЖЕ КОГДА ошибок нет.
+            // Пояснение — это не «работа над ошибками», а справка по
+            // фразе: разобраться в куске, который получился, игрок вправе
+            // не меньше, чем в потерянном.
             else if (_elements.isNotEmpty)
               _ElementBreakdown(
                 elements: _elements,
                 missedIndices: _missedIndices,
                 explanations: _explanations,
               )
+            else if (errors.isEmpty)
+              Text(hint, style: const TextStyle(color: AppColors.muted, fontSize: 12, height: 1.4))
             else
               ...errors.map((e) => Padding(
                     padding: const EdgeInsets.only(bottom: 8),
