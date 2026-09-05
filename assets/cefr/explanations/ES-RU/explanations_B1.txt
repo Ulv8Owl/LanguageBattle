@@ -1,0 +1,120 @@
+1.1 «Я работаю» — El ruso no tiene tiempos perfectos: una acción que empezó antes y sigue ahora va simplemente en presente, "я работаю". El español "llevo trabajando" tampoco usa perfecto, así que la estructura coincide; lo que cambia es que el ruso no marca la duración en el verbo.
+1.2 «в одной и той же команде» — "Один и тот же" es una expresión fija de tres palabras para «el mismo», y las dos partes se declinan: aquí el preposicional tras "в" da "в одной и той же". Dejar una sin concordar rompe la frase.
+1.3 «уже три года» — "Уже" más acusativo simple expresa duración hasta ahora: "уже три года". No hay preposición ninguna, ni la necesita.
+1.4 «В последнее время» — "В последнее время" es una expresión fija en caso preposicional, literalmente «en el último tiempo», y significa «últimamente». Es de las pocas expresiones de tiempo que conservan "в".
+1.5 «я начал» — Pasado de "начать", masculino. El ruso marca aquí el género de quien habla, no la persona: una mujer diría "начала".
+1.6 «чувствовать, что застрял» — Tras "начал" el segundo verbo se queda en infinitivo: "начал чувствовать". Y donde el español dice «sentirme estancado» con un adjetivo, el ruso abre una subordinada con "что" y un verbo completo.
+1.7 «Руководитель» — El sujeto en nominativo. El ruso suele prescindir del posesivo donde el español lo pone: "руководитель" a secas ya se entiende como «mi jefe».
+1.8 «предложил короткий курс» — "Предложить" es perfectivo, un acto único y terminado. "Короткий курс" es acusativo de masculino inanimado, así que ninguna de las dos palabras cambia.
+1.9 «и на прошлой неделе я записался» — "На прошлой неделе" lleva "на", no "в": las semanas son la excepción. "Записался" lleva la partícula "-ся", igual que el «me» de «me apunté».
+1.10 «Если всё пойдёт хорошо» — En la subordinada con "если" el ruso sí usa el futuro, al contrario que el inglés: "если всё пойдёт хорошо". El español usaría el presente, así que aquí hay que cambiar de tiempo.
+1.11 «я, возможно, подам заявку» — "Возможно" va entre comas y puede quitarse sin romper la frase; por eso las lleva. "Подам" es un futuro perfectivo: no hace falta ningún auxiliar.
+1.12 «на другую должность» — "Подать заявку на что-то" rige "на" más acusativo: "на другую должность". Las dos palabras son femeninas y cambian de terminación.
+2.1 «Мы переехали» — "Переехать" es perfectivo y significa concretamente mudarse de casa. El pasado plural "переехали" concuerda en número con "мы", sin marca de persona.
+2.2 «в новую квартиру» — Dirección con "в" más acusativo: "новая квартира" pasa a "в новую квартиру". Con preposicional, "в новой квартире", significaría vivir ya allí.
+2.3 «в апреле» — Los meses llevan "в" más preposicional: "апрель" pasa a "в апреле".
+2.4 «Дом» — El sujeto en nominativo. "Дом" aquí es el edificio, no el hogar: ese sentido lo lleva el adverbio "дома".
+2.5 «старый» — Un adjetivo pleno como predicado, sin verbo: el presente de "быть" no se usa en ruso. "Старый" concuerda con el masculino "дом".
+2.6 «поэтому что-то ломается довольно часто» — "Что-то" es un pronombre indefinido, «algo», y lleva verbo en singular. "Ломается" tiene "-ся", así que las cosas se rompen solas, igual que el «se» español. "Довольно часто" es «bastante a menudo».
+2.7 «В прошлом месяце» — Los meses llevan "в" más preposicional: "прошлый месяц" pasa a "в прошлом месяце".
+2.8 «отопление» — "Отопление" es un sustantivo neutro en nominativo, sujeto de lo que sigue. Sin artículos, nada lo marca como «la calefacción».
+2.9 «не работало целую неделю» — Pasado imperfectivo para un estado que duró: "не работало", neutro para concordar con "отопление". "Целую неделю" es un acusativo de duración, sin preposición.
+2.10 «Хозяин квартиры» — "Хозяин квартиры" une dos sustantivos con el genitivo, "квартиры", donde el español dice «el casero» con una sola palabra. Este enlace en genitivo es la forma normal del ruso de juntar sustantivos.
+2.11 «в итоге всё починил» — "В итоге" significa «al final». "Починил" es perfectivo, así que la reparación quedó hecha; "чинил" diría que estuvo arreglándolo sin afirmar que lo terminara.
+2.12 «но это заняло слишком много времени» — "Занять" es perfectivo, «llevar tiempo». "Слишком много времени" pone el sustantivo en genitivo tras "много": las palabras de cantidad siempre lo exigen.
+3.1 «Я учу испанский» — Presente sin perfecto: "я учу испанский" cubre lo que el español dice con "llevo aprendiendo". "Учить" es estudiar una materia; "изучать" es su pareja más formal.
+3.2 «примерно год» — "Примерно" significa «más o menos». La duración va en acusativo simple, sin preposición: "год".
+3.3 «в основном в телефоне» — "В основном" es una expresión fija, «sobre todo». Y el ruso dice "в телефоне", dentro del teléfono, donde el español dice «en el móvil»: aquí las dos lenguas coinciden.
+3.4 «Я могу читать» — Tras "мочь" el verbo se queda en infinitivo: "могу читать". "Читать" es imperfectivo, porque describe una capacidad y no un acto terminado.
+3.5 «меню и короткие статьи» — "Меню" es indeclinable y neutro, así que no cambia nunca. "Статьи" es acusativo plural, idéntico al nominativo por ser inanimado, con el adjetivo concordado.
+3.6 «без особых сложностей» — "Без" siempre rige genitivo: "особые сложности" pasa a "особых сложностей". Fíjate en que el genitivo plural de este sustantivo no tiene terminación propia.
+3.7 «Говорить» — Un infinitivo usado como sujeto: "говорить" equivale aquí a «hablar» como actividad. El ruso no tiene gerundio para esto, así que el infinitivo hace el trabajo.
+3.8 «вот что до сих пор трудно» — "Вот что" señala hacia adelante y añade énfasis, algo así como «esto es lo que». "Трудно" es una forma corta neutra usada impersonalmente, sin verbo alguno.
+3.9 «особенно по телефону» — "Особенно" significa «sobre todo». "По телефону" usa "по" más dativo: es una fórmula fija y no se traduce preposición por preposición.
+3.10 «Следующим летом» — El instrumental sin preposición para una estación: "следующим летом", como "весной" o "вечером". Las dos palabras reciben terminación de instrumental.
+3.11 «я хотел бы провести» — "Хотел бы" es el condicional, formado con el pasado más la partícula "бы". Suaviza "хочу" igual que el español «me gustaría» suaviza «quiero».
+3.12 «две недели в Валенсии» — "Провести" es perfectivo, «pasar un tiempo». "Две недели" es acusativo de duración, y tras "две" el sustantivo va en genitivo singular. La ciudad lleva "в" más preposicional: "в Валенсии".
+4.1 «Наш рейс» — "Наш" concuerda con el masculino "рейс". Es el complemento del verbo siguiente, aunque su forma no cambie.
+4.2 «задержали» — El ruso usa un verbo en plural sin sujeto donde el español dice "se retrasó": "задержали" es «lo retrasaron», sin decir quién. "Рейс" es el complemento directo, idéntico al nominativo.
+4.3 «на четыре часа» — "На" más acusativo expresa la magnitud de una diferencia: "на четыре часа". Tras "четыре" el sustantivo va en genitivo singular, "часа".
+4.4 «Никто» — "Никто" es un pronombre negativo, y el ruso exige negar también el verbo: "никто не смог". Esta doble negación es obligatoria, exactamente como en español.
+4.5 «на стойке» — "На стойке" usa "на" más preposicional para un punto de atención. La elección entre "в" y "на" aquí es fija y hay que aprenderla de memoria.
+4.6 «не смог объяснить почему» — "Смог" es el pasado perfectivo de "мочь", con "не" delante para concordar con "никто". Detrás, el infinitivo: "объяснить почему".
+4.7 «В итоге» — "В итоге" otra vez, «al final».
+4.8 «нам выдали» — Otro plural sin sujeto: "нам выдали" es «nos dieron». El destinatario va en dativo, "нам", y la cosa dada en acusativo.
+4.9 «талон на бутерброд» — "Талон на бутерброд" usa "на" más acusativo para decir para qué sirve el vale. Sin artículos, nada marca ninguno de los dos sustantivos como definido.
+4.10 «Я решил» — "Решить" es perfectivo, la decisión tomada de una vez. El pasado masculino depende otra vez del género de quien habla.
+4.11 «лететь другой авиакомпанией» — Tras "решил" el verbo se queda en infinitivo: "лететь". "Другой авиакомпанией" va en instrumental: es el caso que el ruso usa para el medio con el que se hace algo.
+4.12 «в следующий раз» — "В следующий раз" lleva "в" más acusativo, mientras que el español dice «la próxima vez» con artículo y sin preposición.
+5.1 «Я когда-то играл» — "Когда-то" significa «en su día». El pasado imperfectivo "играл" describe una costumbre que duró, y así expresa el ruso lo que el español dice con el imperfecto "tocaba".
+5.2 «на гитаре» — Tocar un instrumento lleva "на" más preposicional: "на гитаре", "на пианино". Jugar a un juego llevaría "в" más acusativo: "в футбол".
+5.3 «когда учился в школе» — "Учиться" lleva "-ся" y significa ser estudiante. "В школе" usa "в" más preposicional.
+5.4 «Я это бросил» — "Бросить" es perfectivo, «dejarlo». "Это" es el complemento directo y remite a tocar la guitarra.
+5.5 «когда начал работать» — Tras "начал" el verbo se queda en infinitivo: "начал работать", imperfectivo, porque el trabajo es un estado continuo.
+5.6 «и потом жалел» — "Потом" significa «luego». "Жалел" es pasado imperfectivo: el arrepentimiento duró en vez de ocurrir una sola vez.
+5.7 «Мой друг» — "Мой друг" en nominativo como sujeto. En ruso "друг" es un amigo de verdad; un simple conocido sería "знакомый".
+5.8 «одолжил мне свою старую» — "Одолжить" pide el destinatario en dativo, "мне", y la cosa en acusativo. "Свою старую" es un adjetivo femenino que va solo por «su vieja guitarra»: el ruso no necesita repetir el sustantivo.
+5.9 «в январе» — Los meses con "в" más preposicional: "январь" pasa a "в январе".
+5.10 «Теперь» — "Теперь" contrapone el presente a un estado anterior, mientras que "сейчас" sería «en este preciso instante».
+5.11 «я занимаюсь» — "Заниматься" rige instrumental cuando lleva complemento, pero aquí va solo y significa «practicar, estudiar».
+5.12 «по двадцать минут каждый вечер» — "По" más acusativo reparte una cantidad: "по двадцать минут" es «veinte minutos cada vez». "Каждый вечер" es acusativo de tiempo repetido, sin preposición.
+6.1 «Моя сестра» — "Моя" concuerda con el femenino "сестра", y el grupo es el sujeto, así que va en nominativo.
+6.2 «только что закончила» — "Только что" significa «acabar de» y acompaña a un pasado perfectivo. Como el ruso no tiene perfecto, todo el sentido lo lleva el adverbio.
+6.3 «первый курс университета» — "Первый курс университета" une dos sustantivos con el genitivo, "университета". Y "курс" es un año académico, no un cursillo: eso sería "курс лекций".
+6.4 «Она изучает» — "Изучает" es presente imperfectivo, para unos estudios en marcha. El ruso no distingue entre «estudia» y «está estudiando».
+6.5 «что-то связанное с данными» — "Что-то связанное с данными" usa un participio más "с" con instrumental. "Данные" solo existe en plural, y su instrumental es "данными".
+6.6 «чего я толком не понимаю» — "Чего" es el genitivo de "что", obligatorio porque el verbo está negado: tras un verbo negado el complemento pasa a menudo de acusativo a genitivo. "Толком" significa «del todo, bien».
+6.7 «Каждый раз, когда я спрашиваю» — "Каждый раз, когда" es la forma normal de decir «cada vez que», y la coma delante de "когда" es obligatoria.
+6.8 «она объясняет» — "Объяснять" lleva la cosa en acusativo y la persona en dativo, así que "мне" podría añadirse sin problema. Aquí el complemento se omite porque se sobreentiende.
+6.9 «очень терпеливо» — "Терпеливо" es un adverbio formado sobre "терпеливый". "Очень" lo intensifica y va justo delante.
+6.10 «Я по-прежнему» — "По-прежнему" significa «sigo sin cambiar, como antes» y se escribe con guion. Es más enfático que un simple "ещё".
+6.11 «ничего не понимаю» — "Ничего не понимаю" repite la doble negación obligatoria: hacen falta "ничего" y "не". "Ничего" es la forma de genitivo que se usa tras un verbo negado.
+6.12 «но всё равно горжусь ею» — "Всё равно" significa «aun así». "Гордиться" rige siempre instrumental: "ею" es el instrumental de "она".
+7.1 «Мы должны были запустить» — "Должны были" más infinitivo expresa una obligación pasada y da a entender que no se cumplió, igual que el español «teníamos que». "Запустить" es perfectivo.
+7.2 «новый сайт» — Acusativo de masculino inanimado, sin cambio de forma: "новый сайт".
+7.3 «в июне» — Los meses con "в" más preposicional: "июнь" pasa a "в июне".
+7.4 «Потом дизайнер» — "Потом" significa «entonces, después». "Дизайнер" es el sujeto en nominativo.
+7.5 «ушёл из компании» — "Уйти из" más genitivo significa irse de una organización: "из компании". "В" e "из" van en pareja: de donde se entra con "в" se sale con "из".
+7.6 «и всё встало на месяц» — "Всё" aquí significa «todo» y lleva verbo en singular. "Встало" es un pasado perfectivo usado en sentido figurado, «se paró». "На месяц" usa "на" más acusativo para un periodo previsto.
+7.7 «Мы наконец» — "Наконец" significa «por fin» y en esta posición no lleva comas.
+7.8 «выкатили его» — "Выкатить" es un perfectivo coloquial para publicar un producto. "Его" es el acusativo de "он" y se refiere a la web.
+7.9 «в прошлый четверг» — Los días de la semana llevan "в" más acusativo: "в прошлый четверг", con el día en minúscula.
+7.10 «Пока что» — "Пока что" significa «de momento». El ruso no tiene perfecto que emparejar con esta expresión, así que basta el pasado simple.
+7.11 «никто не пожаловался» — "Никто не пожаловался" vuelve a exigir la doble negación. "Пожаловаться" es perfectivo y rige "на" más acusativo cuando la queja tiene objeto.
+7.12 «и это уже похоже на победу» — "Похоже на" más acusativo significa «parece». "Уже" aquí es «ya» y añade la idea de que es más de lo esperado.
+8.1 «Я стараюсь» — "Стараться" es imperfectivo, un esfuerzo que continúa, y va seguido de infinitivo sin nada en medio.
+8.2 «вести бюджет» — "Вести бюджет" es la combinación fija, literalmente «llevar un presupuesto». "Бюджет" es acusativo de masculino inanimado y no cambia.
+8.3 «но получается не очень» — "Получается" es un verbo impersonal con "-ся": no hay sujeto alguno y la frase significa «no acaba de salir». "Не очень" es un eufemismo suave.
+8.4 «Проблема» — El sujeto en nominativo. Sin artículo, nada marca "проблема" como «el problema».
+8.5 «не в крупных тратах» — "Не в крупных тратах" usa "в" más preposicional tras la negación. La construcción «no en esto, sino en aquello» es fija y las dos mitades deben ir en el mismo caso.
+8.6 «а в мелких» — "А" contrapone a la mitad negada y no es lo mismo que "и" ni que "но"; equivale al «sino» español. "В мелких" mantiene el preposicional aunque el sustantivo se omita.
+8.7 «Кофе» — Nominativo como sujeto. "Кофе" es indeclinable, así que se ve igual en todas partes.
+8.8 «и такси» — "Такси" también es indeclinable y neutro: no recibe terminación de plural, y el verbo concuerda con la pareja "кофе и такси".
+8.9 «набегают быстрее, чем кажется» — "Набегают" es un uso figurado de "набегать", «acumularse». Tras "чем" viene una oración entera: "чем кажется", con un verbo impersonal.
+8.10 «В этом месяце» — "В этом месяце" lleva "в" más preposicional, igual que "в прошлом месяце".
+8.11 «я записываю» — El presente imperfectivo "записываю" cubre una costumbre que sigue en marcha. Como no hay perfecto, que el mes no haya terminado no se marca en el verbo.
+8.12 «каждый платёж» — "Каждый платёж" es el complemento directo, sin cambio de forma. "Каждый" exige siempre sustantivo en singular.
+9.1 «Я плохо сплю» — "Плохо" es un adverbio y va delante del verbo. "Сплю" es la primera persona del irregular "спать".
+9.2 «если смотрю в ноутбук» — En una subordinada con "если" de condición repetida el ruso usa el presente. "Смотреть в" más acusativo es mirar dentro de una pantalla; "смотреть на" sería mirarla desde fuera.
+9.3 «поздно вечером» — "Поздно вечером" combina un adverbio con el instrumental de tiempo. Ninguna de las dos partes lleva preposición.
+9.4 «Я пробовал» — "Пробовать" es imperfectivo, un intento repetido. Su pareja perfectiva "попробовать" señalaría un intento único.
+9.5 «оставлять его» — Tras "пробовал" el verbo se queda en infinitivo, y el imperfectivo "оставлять" indica que era una costumbre, no un acto aislado.
+9.6 «на кухне» — "На кухне" lleva "на" y no "в": es una de las elecciones fijas del ruso para ciertos lugares, junto con "на работе" y "на почте".
+9.7 «Это работает» — "Это" remite a todo el arreglo descrito. "Работает" se usa en sentido figurado, «funciona», igual que en español.
+9.8 «но только» — "Но только" restringe lo que sigue. "Только" va justo delante de aquello que limita.
+9.9 «когда я действительно так делаю» — "Действительно" significa «de verdad, realmente». "Так делаю" es literalmente «lo hago así»: "так" sustituye a toda la acción.
+9.10 «Привычки» — Nominativo plural como sujeto, sin artículo: los hábitos en general. El español necesitaría "los".
+9.11 «гораздо легче запланировать» — "Гораздо" intensifica un comparativo, como el español «mucho». "Легче" es el comparativo de "лёгкий", con cambio de consonante.
+9.12 «чем соблюдать» — Tras "чем" se repite la misma forma que antes: dos infinitivos, "запланировать" y "соблюдать". Y la diferencia entre perfectivo e imperfectivo es intencionada: planear ocurre una vez, mantener dura.
+10.1 «Моя старая машина» — "Моя старая машина" es el sujeto en nominativo, con el posesivo y el adjetivo concordados en femenino.
+10.2 «наконец» — "Наконец" significa «por fin» y aquí no lleva comas.
+10.3 «умерла в феврале» — "Умерла" es un pasado perfectivo concordado con el femenino "машина". Usarlo para un coche es una metáfora viva en ruso, igual que en español. "В феврале" es "в" más preposicional.
+10.4 «Вместо того чтобы покупать новую» — "Вместо того чтобы" es una conjunción fija seguida de infinitivo: "покупать новую". El imperfectivo presenta la compra como un proceso, no como un acto único.
+10.5 «я решил» — "Решить" es perfectivo, una decisión tomada de una vez.
+10.6 «попробовать электричку» — Tras "решил" viene el infinitivo "попробовать". "Электричка" es concretamente el tren de cercanías, no cualquier tren, que sería "поезд".
+10.7 «Дорога» — "Дорога" aquí significa el trayecto, no la carretera. Es el sujeto y va en nominativo.
+10.8 «занимает больше времени» — "Занимает" es presente imperfectivo, para algo habitualmente cierto. "Больше времени" pone el sustantivo en genitivo tras "больше", como toda palabra de cantidad.
+10.9 «но в пути можно читать» — "В пути" es una expresión fija en preposicional, «por el camino», del sustantivo "путь". "Можно" es impersonal y va con infinitivo, sin sujeto alguno.
+10.10 «Не думаю» — "Не думаю" lleva la negación en la oración principal, igual que el español «no creo que». La coincidencia facilita la traducción.
+10.11 «что я вернусь» — "Вернусь" es un futuro perfectivo con la partícula "-сь". No hace falta ningún auxiliar para el futuro.
+10.12 «к вождению» — "Вернуться к" más dativo: "к вождению". "Вождение" es un sustantivo verbal, y el ruso lo usa donde el español pone el infinitivo «conducir».
