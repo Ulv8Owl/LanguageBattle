@@ -53,9 +53,10 @@ void main() {
     // Распознавание: только успешное и только настоящее — повторный
     // прогон по уже сохранённому транскрипту провайдера не звал.
     expect(ts, contains('if (status === "ok" && asrDebug.cached !== true)'));
-    // Модель: только когда она действительно ответила. degraded — это
-    // отказ, а пустой ответ означает, что разбор взяли из датасета.
-    expect(ts, contains('if (!explained.degraded && explained.byIndex.size > 0)'));
+    // Модель: только когда она действительно ответила. Разбор ошибок
+    // переехал внутрь мультимодального вызова — отдельного вызова за
+    // пояснениями больше нет, и платить за него нечего.
+    expect(ts, contains("if (omni && !omni.degraded && heardBy.debug.cached !== true)"));
     expect(ts, contains('if (!result.degraded)'));
   });
 

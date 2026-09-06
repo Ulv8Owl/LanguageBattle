@@ -28,10 +28,11 @@ class PhraseElement {
 /// Одна фраза раунда: одна и та же мысль на всех языках, разбитая на
 /// элементы.
 ///
-/// ПОЯСНЕНИЙ ЗДЕСЬ НЕТ, и это осознанно: они зависят не от фразы, а от
-/// ПАРЫ языков игрока, и лежат отдельными файлами (см. loadExplanations
-/// ниже). Держать их здесь значило бы возить с каждой фразой шесть версий
-/// разбора, из которых игроку нужна ровно одна.
+/// ЭЛЕМЕНТЫ НУЖНЫ ПОДСКАЗКАМ, и только им. Разбор ошибок их больше не
+/// использует: его пишет мультимодальная модель, у которой эталона нет
+/// вовсе, и границы ошибок она проводит по смыслу сказанного. Здесь
+/// осталась ровно та механика, ради которой элементы и заводились —
+/// открыть перевод одной части фразы, не открывая остальные.
 ///
 /// ИНВАРИАНТ, который держит сборщик (tools/build_cefr.py) и проверяет
 /// assets/cefr/validate.py: число элементов в строке ОДИНАКОВО во всех
@@ -110,10 +111,8 @@ class PhraseEntry {
 
   /// Смещение начала каждого элемента в ЧИСТОЙ фразе (той, что без «|»).
   ///
-  /// Считается ровно так же, как на сервере (parseElements в
-  /// _shared/elementScoring.ts): сумма длин всех предыдущих lead и text.
-  /// Совпадение обязательно — сервер присылает непроизнесённые элементы
-  /// именно смещениями, и по ним клиент находит, какой элемент подсветить.
+  /// Сумма длин всех предыдущих lead и text. Нужно подсказкам: по
+  /// смещению находится, какую часть задания игрок открыл.
   List<int> elementOffsets(String languageCode) {
     final elements = elementsFor(languageCode);
     final offsets = <int>[];
@@ -234,62 +233,4 @@ class PhraseBank {
   static List<PhraseElement> elementsFor(int globalIndex, String languageCode) =>
       entry(globalIndex)?.elementsFor(languageCode) ?? const [];
 
-  // --- Разборы элементов -------------------------------------------------
-  //
-  // Разбор зависит от ПАРЫ языков, а не от одного языка: он написан на том,
-  // которым игрок владеет, и рассказывает про тот, который игрок учит.
-  // Поэтому и файл — на пару: assets/phrases/explain_<уровень>_<пара>.json.
-  // Игроку нужна ровно одна пара из шести, и качать остальные пять незачем.
-
-  /// Уровень + пара -> [фраза][элемент] -> текст разбора.
-  ///
-  /// Пустой список в значении означает «этой пары в датасете нет»: ключ
-  /// всё равно кладётся, чтобы не ходить за файлом снова и снова.
-  static final Map<String, List<List<String>>> _explanations = {};
-
-  static String _explainKey(int level, String native, String target) =>
-      '$level/$native-$target';
-
-  static String _explainPath(int level, String native, String target) =>
-      'assets/phrases/explain_${wordLevelSlugs[level]}_$native-$target.json';
-
-  /// Загрузить разборы уровня для пары игрока.
-  ///
-  /// НЕ БРОСАЕТ. Разбор — это справка после раунда, а не условие его
-  /// проведения: недостающий файл означает лишь, что для этой пары
-  /// объяснение придётся спросить у модели, и ронять из-за него вход в
-  /// режим было бы обменом важного на необязательное.
-  static Future<void> loadExplanations(int levelIndex, String native, String target) async {
-    final level = levelIndex.clamp(0, wordLevelSlugs.length - 1);
-    final key = _explainKey(level, native, target);
-    if (_explanations.containsKey(key)) return;
-    try {
-      final decoded = await RemoteContent.loadJson(_explainPath(level, native, target));
-      _explanations[key] = (decoded as List)
-          .map((row) => (row as List).map((e) => e as String).toList(growable: false))
-          .toList(growable: false);
-    } catch (_) {
-      _explanations[key] = const [];
-    }
-  }
-
-  /// Разбор элемента [elementIndex] фразы [globalIndex] для пары
-  /// [native] -> [target]. Пустая строка — разбора нет.
-  ///
-  /// Уровень берётся из самого индекса фразы, поэтому вызывающему не нужно
-  /// помнить, какой уровень он грузил.
-  static String explanationFor(
-    int globalIndex,
-    int elementIndex,
-    String native,
-    String target,
-  ) {
-    if (globalIndex < 0 || elementIndex < 0) return '';
-    final level = globalIndex ~/ perLevel;
-    final table = _explanations[_explainKey(level, native, target)];
-    if (table == null) return '';
-    final within = globalIndex % perLevel;
-    if (within >= table.length || elementIndex >= table[within].length) return '';
-    return table[within][elementIndex];
-  }
 }

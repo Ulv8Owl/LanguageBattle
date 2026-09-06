@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../core/app_locale.dart';
-import '../../core/game_settings.dart';
 import '../../core/start_destination.dart';
 import '../../core/supabase_client.dart';
 
@@ -40,9 +39,6 @@ class _SplashGateState extends State<SplashGate> {
       // main(): при первом входе на новом устройстве сессии в момент
       // main() ещё нет, и серверное значение прочитать было неоткуда.
       await AppLocale.refreshFromServer();
-      // Переключатели «оценка ИИ» и «объяснения от ИИ» — оттуда же, из
-      // профиля, и нужны они экрану разбора синхронно.
-      await GameSettings.load();
       if (!mounted) return;
       context.go(destination.route);
     } catch (_) {

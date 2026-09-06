@@ -130,7 +130,12 @@ void main() {
     // элементам эталона нечем — у неё эталона не было вовсе.
     expect(screen, contains('class _MistakeBreakdown'));
     expect(screen, contains("if ((e['category'] as String?) != 'omni') continue;"));
-    // Подсказки по элементам эталона при этом никуда не делись.
-    expect(screen, contains('class _ElementBreakdown'));
+    // Поэлементного разбора больше нет: держать рядом две несовместимые
+    // механики значило бы поддерживать ту, которой никто не пользуется.
+    expect(screen.contains('_ElementBreakdown'), isFalse);
+    expect(screen.contains('_messagesByIndex'), isFalse);
+    // Подсказки по элементам эталона при этом остались — это другая
+    // механика: открыть перевод одной части фразы, не открывая остальные.
+    expect(screen, contains('PhraseBank.elementsFor'));
   });
 }

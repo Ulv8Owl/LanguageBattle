@@ -53,13 +53,11 @@ void main() {
         lessThan(s.indexOf('const shared = Deno.env.get("GOOGLE_API_KEY");')));
     // Судья и разбор не должны знать про googleKey вовсе: единственная
     // точка, где решается ключ модели, — llmKey.
-    for (final path in [
-      'supabase/functions/_shared/evaluateGrammar.ts',
-      'supabase/functions/_shared/explainElements.ts',
-    ]) {
-      expect(read(path), contains('llmKey()'), reason: path);
-      expect(read(path).contains('googleKey('), isFalse, reason: path);
-    }
+    // Судья — единственный, кто зовёт текстовую модель: разбор ошибок
+    // переехал к мультимодальной, у которой свой ключ и свой резолвер.
+    const path = 'supabase/functions/_shared/evaluateGrammar.ts';
+    expect(read(path), contains('llmKey()'));
+    expect(read(path).contains('googleKey('), isFalse);
   });
 
   test('по умолчанию провайдер — openai-совместимый, Gemini включается переменной', () {

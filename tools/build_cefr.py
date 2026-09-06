@@ -268,9 +268,15 @@ def main() -> int:
             emit(OUT_DIR / f"cefr_{level.lower()}.json", phrases,
                  f"{len(phrases)} фраз по {ELEMENTS_PER_LEVEL[level]} элементов")
 
-            for pair, table in build_explanations(level).items():
-                emit(OUT_DIR / f"explain_{level.lower()}_{pair}.json", table,
-                     f"{sum(len(row) for row in table)} пояснений")
+            # Пояснения по элементам БОЛЬШЕ НЕ СОБИРАЮТСЯ в assets/phrases.
+            # Разбор ошибок пишет мультимодальная модель, у которой эталона
+            # нет вовсе, и элементами она не мыслит; читать эти таблицы
+            # стало некому. Исходный датасет (assets/cefr/explanations)
+            # намеренно оставлен в репозитории — это написанный вручную
+            # текст, и выбрасывать его вместе с кодом, который его читал,
+            # решение отдельное. Собирать его в приложение при этом больше
+            # незачем: почти мегабайт в сборке ради файлов, которые никто
+            # не открывает.
     except SourceError as e:
         print(f"ОСТАНОВ: {e}", file=sys.stderr)
         return 1

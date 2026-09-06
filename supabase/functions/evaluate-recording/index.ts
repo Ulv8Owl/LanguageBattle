@@ -28,11 +28,8 @@ import {
   type JudgeVerbosity,
   NEUTRAL_SCORE,
 } from "../_shared/evaluateGrammar.ts";
-import { loadPlayerPrefs } from "../_shared/playerPrefs.ts";
 import { omniEnabled, omniEvaluate, type OmniResult, scoreFor } from "../_shared/omniJudge.ts";
 import { transcribeAudio } from "../_shared/asr/index.ts";
-import { scoreByElements } from "../_shared/elementScoring.ts";
-import { explainMissedElements } from "../_shared/explainElements.ts";
 
 /**
  * Лига говорящего приравнена к уровню CEFR (см. supabase/migrations/0023 —
@@ -368,11 +365,6 @@ async function processJob(job_id: string): Promise<void> {
     // них, но в базу не ходит, пока списывать нечего.
     const energy = createEnergyMeter(supabase, recording);
 
-    // Где в раунде участвует модель — решает игрок в настройках. Читаем
-    // это ДО распознавания: при мультимодальном пути от настройки зависит
-    // сам вызов — просить ли у модели разбор или только услышанное.
-    const prefs = await loadPlayerPrefs(supabase, recording.user_id);
-
     // Шаг 1 — услышать сказанное.
     //
     // Два пути. Мультимодальный (OMNI_ENABLED=1) слушает запись напрямую
@@ -398,7 +390,8 @@ async function processJob(job_id: string): Promise<void> {
         cefrLevelForRating(
           (await speakerLeagueRating(supabase, recording.user_id, targetLanguage)) ?? 1000,
         ),
-        prefs.llmScoring,
+        // Разбор просим всегда: другого пути оценки больше нет.
+        true,
         budgetLeft(),
       );
       transcript = heardBy.transcript;
@@ -502,26 +495,12 @@ async function processJob(job_id: string): Promise<void> {
         verbosity,
         budget_left_ms: budgetLeft(),
       };
-      // Настройки прочитаны до распознавания: при мультимодальном пути от
-      // них зависит сам вызов.
-      pipelineDebug.prefs = {
-        llm_scoring: prefs.llmScoring,
-        llm_explanations: prefs.llmExplanations,
-        source: prefs.source,
-      };
-
-      // Мультимодальная модель уже всё сказала — и балл, и ошибки. Второй
-      // раз оценивать нечего: её вызов и был оценкой.
-      const omniJudged = omni !== null && !omni.degraded && prefs.llmScoring;
-
-      // Поэлементная оценка — путь по умолчанию, когда оценку модели не
-      // просили: считается по тому же эталону с «|», который клиент
-      // показывал игроку, поэтому балл и подсветка не могут разойтись.
-      const byElements = (prefs.llmScoring || omniJudged)
-        ? null
-        : scoreByElements(expectedPhrase, transcript);
-
-      if (omniJudged) {
+      // Оценивает мультимодальная модель — другого пути больше нет.
+      // Поэлементный подсчёт и разбор по элементам эталона убраны целиком:
+      // они мыслили структурой правильного ответа, а модель судит перевод
+      // как таковой, и держать рядом две несовместимые механики значило бы
+      // поддерживать ту, которой никто не пользуется.
+      if (omni !== null && !omni.degraded) {
         const judged = omni!;
         // БАЛЛ СЧИТАЕМ МЫ, а не модель. Числовая оценка от неё была самой
         // шаткой частью ответа — на одной записи гуляла на два-три балла и
@@ -569,75 +548,6 @@ async function processJob(job_id: string): Promise<void> {
           scoring: "программа: доля несказанного + по баллу за ошибку",
           score,
           ...judged.debug,
-        };
-      } else if (byElements) {
-        score = byElements.score;
-        // Эталон без «|» — то, с чем клиент сравнивает сказанное.
-        correctedText = expectedPhrase.replaceAll("|", "");
-        cleanedText = transcript;
-
-        // ЧТО неверно — уже решено, без модели. Осталось объяснить ПОЧЕМУ
-        // правильно именно так. Для шести покрытых пар это уже написано в
-        // датасете, и клиент подставит текст сам — тогда сюда не приходит
-        // ни одного вызова провайдера. Модель остаётся страховкой на
-        // случай, когда датасет молчит, и на балл она не влияет никак.
-        const missed = byElements.verdicts
-          .map((v, index) => ({ verdict: v, index }))
-          .filter(({ verdict }) => !verdict.correct);
-        const explained = await explainMissedElements(
-          targetLanguage,
-          nativeLanguage,
-          correctedText,
-          transcript,
-          missed.map(({ verdict, index }) => ({ index, text: verdict.text })),
-          budgetLeft(),
-          !prefs.llmExplanations,
-        );
-
-        // Каждый непроизнесённый элемент — строка в grammar_errors, и
-        // message у неё это объяснение модели. Пустой message — обычное
-        // состояние: для покрытых датасетом пар модель не вызывается
-        // вовсе, и текст разбора клиент берёт из своих файлов.
-        errors = missed.map(({ verdict, index }) => ({
-          offset: verdict.offset,
-          length: verdict.text.length,
-          message: explained.byIndex.get(index) ?? "",
-          replacement: verdict.text,
-          category: "element",
-        }));
-        // Модель ответила — за это платят. Молчание, отказ провайдера и
-        // путь, где к нему не ходили вовсе (пара покрыта датасетом),
-        // бесплатны: energy платит за ответ, а не за попытку.
-        if (!explained.degraded && explained.byIndex.size > 0) {
-          await energy.charge(ENERGY_COST_LLM, "разбор ошибок моделью");
-        }
-        // ok даже когда модель не ответила, и это не оптимизм. Для клиента
-        // judge_status = degraded означает «списку ошибок верить нельзя», и
-        // разбор он тогда прячет целиком. Здесь же список ошибок посчитан
-        // БЕЗ модели и верен полностью — не хватает только текста
-        // объяснений, а его клиент берёт из датасета. Состояние модели
-        // видно в отладочной панели строкой explain.
-        judgeStatus = "ok";
-        feedback = `Произнесено ${byElements.correctCount} из ${byElements.totalCount} частей фразы.`;
-        pipelineDebug.judge = {
-          mode: prefs.llmExplanations
-            ? "элементы + разбор ошибок моделью"
-            : "элементы + разбор ошибок из датасета, модель — страховка",
-          scoring: "поэлементная, без модели",
-          correct_elements: byElements.correctCount,
-          total_elements: byElements.totalCount,
-          explain: explained.debug,
-        };
-      } else if (!prefs.llmScoring) {
-        // Судья выключен, а фраза пришла без «|» — это старый раунд,
-        // заведённый до перехода на поэлементный банк. Балл нейтральный:
-        // ни оценить, ни обвинить игрока тут не за что.
-        score = NEUTRAL_SCORE;
-        judgeStatus = "skipped";
-        feedback = "Эта фраза из старого набора — балл выставлен нейтральным.";
-        pipelineDebug.judge = {
-          status: "skipped",
-          reason: "оценка моделью выключена, а в эталоне нет разделителей элементов",
         };
       } else {
         const result = await evaluateGrammar(

@@ -6,7 +6,6 @@ import 'package:go_router/go_router.dart';
 import '../../core/app_locale.dart';
 import '../../core/cefr_levels.dart';
 import '../../core/debug_flags.dart';
-import '../../core/game_settings.dart';
 import '../../core/game_access.dart';
 import '../../core/languages.dart';
 import '../../core/supabase_client.dart';
@@ -251,12 +250,6 @@ class _TrainingScreenState extends State<TrainingScreen> {
         });
         return;
       }
-      // Разборы элементов для пары игрока. Грузятся здесь, а не в момент
-      // показа: разбор открывается тапом, и уходить за файлом в сеть под
-      // пальцем игрока значило бы показывать пустую панель на секунду.
-      // Отсутствие файла не мешает раунду — тогда объяснение спросят у
-      // модели (см. _messagesByIndex).
-      await PhraseBank.loadExplanations(level, _nativeLanguage, _targetLanguage);
       _phraseOrder = [
         for (var i = 0; i < PhraseBank.perLevel; i++) level * PhraseBank.perLevel + i,
       ]..shuffle();
@@ -1310,24 +1303,6 @@ class _ErrorReport extends StatelessWidget {
     this.isExam = false,
   });
 
-  /// Элементы эталона на изучаемом языке — то, что игрок должен был
-  /// произнести. Пустой список означает, что фраза раунда неизвестна
-  /// (старый раунд), и разбор откатывается на прежний вид со списком
-  /// сообщений судьи.
-  List<PhraseElement> get _elements =>
-      phraseIndex < 0 ? const [] : PhraseBank.elementsFor(phraseIndex, targetLanguage);
-
-  /// Разбор пришёл от мультимодальной модели.
-  ///
-  /// Признак пути, а не наличия ошибок: у безошибочного ответа обе
-  /// коллекции пусты, и без отдельного признака он провалился бы в
-  /// поэлементный разбор — то есть в разметку от механики, которая в этом
-  /// раунде вообще не работала.
-  bool get _fromOmni => errors.any((e) {
-        final category = e['category'] as String?;
-        return category == 'omni' || category == 'missing';
-      });
-
   /// Куски правильного перевода, которых игрок не сказал вовсе.
   ///
   /// Отдельная категория, а не ошибка: объяснять там нечего, показать надо
@@ -1361,56 +1336,6 @@ class _ErrorReport extends StatelessWidget {
       ));
     }
     return out;
-  }
-
-  /// Номер потерянного элемента -> его разбор.
-  ///
-  /// КЛЮЧИ этой карты и есть потерянные элементы, и какие именно — решает
-  /// СЕРВЕР: он присылает их строками grammar_errors категории element со
-  /// смещением в чистой фразе. Клиент только переводит смещение в номер
-  /// элемента (elementOffsets считает его той же формулой, что и сервер) и
-  /// ничего не пересчитывает сам — иначе подсветка могла бы разойтись с
-  /// выставленным баллом.
-  ///
-  /// ОТКУДА БЕРЁТСЯ ТЕКСТ. Порядок задаёт переключатель «Объяснения от
-  /// ИИ» в настройках. Выключен (по умолчанию) — сначала датасет: разбор
-  /// для пары «родной-целевой» написан заранее, доступен мгновенно и не
-  /// зависит ни от лимитов провайдера, ни от его настроения. Включён —
-  /// сначала текст модели: сервер по той же настройке её и спросил.
-  ///
-  /// В ОБЕ СТОРОНЫ ЭТО ПРЕДПОЧТЕНИЕ, А НЕ ЗАПРЕТ. Второй источник
-  /// остаётся запасным: датасет молчит на старой фразе не из банка, на
-  /// непокрытой паре и на элементе за пределами таблицы; модель молчит,
-  /// когда провайдер отказал. Показать пустоту, имея готовый текст рядом,
-  /// было бы наказанием за настройку. Если молчат оба — значение пустое,
-  /// и это видно на экране прямым текстом, а не подменяется похожим.
-  Map<int, _Explanation> get _messagesByIndex {
-    final entry = phraseIndex < 0 ? null : PhraseBank.entry(phraseIndex);
-    if (entry == null) return const {};
-    final offsets = entry.elementOffsets(targetLanguage);
-    final byOffset = <int, String>{};
-    for (final e in errors) {
-      if ((e['category'] as String?) != 'element') continue;
-      final offset = (e['offset_start'] as num?)?.toInt();
-      if (offset == null) continue;
-      byOffset[offset] = (e['message'] as String?)?.trim() ?? '';
-    }
-    final result = <int, _Explanation>{};
-    for (var i = 0; i < offsets.length; i++) {
-      if (!byOffset.containsKey(offsets[i])) continue;
-      final fromDataset = PhraseBank.explanationFor(
-          phraseIndex, i, nativeLanguage, targetLanguage);
-      final fromModel = byOffset[offsets[i]]!;
-      final preferModel = GameSettings.llmExplanations;
-      final first = preferModel ? fromModel : fromDataset;
-      if (first.isNotEmpty) {
-        result[i] = _Explanation(first, fromModel: preferModel);
-      } else {
-        final fallback = preferModel ? fromDataset : fromModel;
-        result[i] = _Explanation(fallback, fromModel: !preferModel);
-      }
-    }
-    return result;
   }
 
   @override
@@ -1507,25 +1432,8 @@ class _ErrorReport extends StatelessWidget {
             // Проверяем ПРИЗНАК ПУТИ, а не наличие ошибок. Иначе безошибочный
             // ответ проваливался бы в поэлементный разбор, и игрок видел бы
             // «сказано всё» под красным несказанным куском в «Разборе».
-            else if (_fromOmni)
-              _omniErrors.isNotEmpty
-                  ? _MistakeBreakdown(mistakes: _omniErrors, targetLanguage: targetLanguage)
-                  : Text(
-                      _missingSpans.isEmpty
-                          ? 'Ошибок не найдено — сказано верно'
-                          : 'Отдельных ошибок нет, но часть фразы не сказана — она '
-                              'выделена красным в разборе',
-                      style: AppFonts.ui(fontSize: 11, color: AppColors.muted),
-                    )
-            // Разбор по элементам показывается ДАЖЕ КОГДА ошибок нет.
-            // Пояснение — это не «работа над ошибками», а справка по
-            // фразе: разобраться в куске, который получился, игрок вправе
-            // не меньше, чем в потерянном.
-            else if (_elements.isNotEmpty)
-              _ElementBreakdown(
-                elements: _elements,
-                messagesByIndex: _messagesByIndex,
-              )
+            else if (_omniErrors.isNotEmpty)
+              _MistakeBreakdown(mistakes: _omniErrors, targetLanguage: targetLanguage)
             else if (errors.isEmpty)
               Text(hint, style: const TextStyle(color: AppColors.muted, fontSize: 12, height: 1.4))
             else
@@ -1562,25 +1470,6 @@ class _ErrorReport extends StatelessWidget {
 /// заготовку, неотличимую на вид от ответа модели, и молчание модели
 /// прошло незамеченным. Теперь источник подписан прямо под текстом: две
 /// строки разного происхождения не должны выглядеть одинаково.
-class _Explanation {
-  final String text;
-  final bool fromModel;
-  const _Explanation(this.text, {required this.fromModel});
-}
-
-/// Разбор ответа по элементам: что нужно было сказать, что потеряно и
-/// почему это устроено именно так.
-///
-/// РАЗДЕЛИТЕЛЯ «|» ЗДЕСЬ НЕТ. В исходнике датасета он служебный, и
-/// показывать его игроку — значит объяснять ему формат наших файлов.
-/// Вместо него элементы разведены визуально: каждый лежит в своей плашке
-/// с рамкой. Плашка сама говорит «я отдельная штука, по мне можно
-/// нажать» — стрелка-подсказка рядом с заголовком договаривает остальное.
-///
-/// Цветом помечены только НЕПРОИЗНЕСЁННЫЕ элементы (их называет сервер).
-/// Нажать можно на любой, включая сказанные верно: пояснение — это не
-/// «работа над ошибками», а справка по фразе, и разобраться в удавшемся
-/// куске игрок вправе не меньше.
 /// Одна ошибка, названная моделью: кусок сказанного и разбор к нему.
 class _Mistake {
   /// Фрагмент того, что игрок СКАЗАЛ. Он же — надпись на плашке.
@@ -1597,12 +1486,10 @@ class _Mistake {
 
 /// Разбор по ОШИБКАМ, а не по элементам эталона.
 ///
-/// ЧЕМ ОТЛИЧАЕТСЯ ОТ [_ElementBreakdown] И ПОЧЕМУ ОБА НУЖНЫ. Поэлементный
-/// разбор раскладывает ПРАВИЛЬНЫЙ ответ на части и подсвечивает
-/// непроизнесённые: он знает эталон и мыслит его структурой. Этот —
-/// показывает куски РЕЧИ ИГРОКА, на которых он ошибся, и эталона за ними
-/// нет вовсе: границы модель провела сама, по смыслу, объединив в одну
-/// ошибку всё, что пошло не так по одной причине.
+/// ПОЧЕМУ НЕ «ФРАЗА С ПОДСВЕТКОЙ». На руках не разложенный эталон, а список
+/// несвязанных фрагментов речи игрока: границы модель провела сама, по
+/// смыслу, объединив в одну ошибку всё, что пошло не так по одной причине.
+/// Эталона за ними нет вовсе — он в этом раунде не участвовал.
 ///
 /// Поэтому здесь нельзя показать «всю фразу с подсветкой»: у нас на руках
 /// не разложенный эталон, а список несвязанных фрагментов. Зато плашка
@@ -1700,116 +1587,6 @@ class _MistakeBreakdown extends StatelessWidget {
                 // потому что модель про него ничего и не сказала.
                 missed: true,
                 onTap: () => _show(context, mistake),
-              ),
-          ],
-        ),
-      ],
-    );
-  }
-}
-
-class _ElementBreakdown extends StatelessWidget {
-  final List<PhraseElement> elements;
-
-  /// Номер элемента -> разбор и его источник. Ключи этой карты и есть
-  /// потерянные элементы: сервер прислал строку об ошибке ровно на них.
-  ///
-  /// Пустой текст значения означает, что разбора нет ни в датасете, ни от
-  /// модели. Это состояние показывается прямым текстом: подменять его
-  /// чем-то похожим на объяснение уже пробовали, и молчание модели тогда
-  /// прошло незамеченным.
-  final Map<int, _Explanation> messagesByIndex;
-
-  const _ElementBreakdown({
-    required this.elements,
-    required this.messagesByIndex,
-  });
-
-  Set<int> get _missedIndices => messagesByIndex.keys.toSet();
-
-  void _showExplanation(BuildContext context, int index) {
-    final found = messagesByIndex[index];
-    final explanation = (found?.text ?? '').trim();
-    showModalBottomSheet<void>(
-      context: context,
-      backgroundColor: AppColors.navy2,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-      ),
-      builder: (ctx) => SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Container(
-                width: 36,
-                height: 4,
-                margin: const EdgeInsets.only(bottom: 16),
-                decoration: BoxDecoration(
-                  color: AppColors.lineStrong,
-                  borderRadius: BorderRadius.circular(2),
-                ),
-              ),
-              Text(
-                elements[index].text,
-                style: AppFonts.ui(fontSize: 16, weight: FontWeight.w800, color: AppColors.gold),
-              ),
-              const SizedBox(height: 12),
-              Text(
-                explanation.isNotEmpty
-                    ? explanation
-                    : 'Разбора этой части нет: в датасете её нет, и модель '
-                        'тоже не ответила. Причина — в отладочной панели '
-                        'под раундом.',
-                style: TextStyle(
-                  color: explanation.isNotEmpty ? AppColors.cream : AppColors.muted,
-                  fontSize: 13,
-                  height: 1.5,
-                ),
-              ),
-              if (explanation.isNotEmpty) ...[
-                const SizedBox(height: 12),
-                Text(
-                  found!.fromModel ? 'разбор от ИИ' : 'разбор из датасета',
-                  style: AppFonts.mono(fontSize: 9, color: AppColors.muted),
-                ),
-              ],
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          _missedIndices.isEmpty
-              ? 'Сказано всё — разбирать нечего'
-              : 'Нажми на подсвеченную часть, чтобы понять, почему правильно так',
-          style: AppFonts.ui(fontSize: 11, color: AppColors.muted),
-        ),
-        const SizedBox(height: 10),
-        Wrap(
-          spacing: 6,
-          runSpacing: 6,
-          children: [
-            for (var i = 0; i < elements.length; i++)
-              _ElementChip(
-                text: elements[i].text,
-                missed: _missedIndices.contains(i),
-                // Нажимаются только потерянные куски. Разбор пишется
-                // потому, что игрок ошибся; у сказанного верно объяснять
-                // нечего, и делать его нажимаемым значило бы обещать
-                // текст, которого нет.
-                onTap: _missedIndices.contains(i)
-                    ? () => _showExplanation(context, i)
-                    : null,
               ),
           ],
         ),
