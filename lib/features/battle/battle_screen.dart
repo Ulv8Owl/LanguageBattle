@@ -12,7 +12,7 @@ import '../../data/player_rating.dart';
 import '../../data/voice_submission.dart';
 import '../../widgets/ai_avatar.dart';
 import '../../widgets/chrolingo_widgets.dart';
-import '../../widgets/transcript_review.dart';
+import '../../widgets/round_review.dart';
 import '../../widgets/voice_message_bubble.dart';
 import '../../widgets/voice_recorder_dock.dart';
 import 'battle_models.dart';
@@ -67,6 +67,12 @@ class _BattleScreenState extends State<BattleScreen> {
   int _phraseLevel = 0;
   List<RoundData> _rounds = [];
   List<VoiceRecordingData> _recordings = [];
+
+  /// Ошибки разбора по своим записям: id записи -> строки grammar_errors.
+  ///
+  /// Только по СВОИМ: разбор в бою видит один его хозяин, и тянуть чужие
+  /// строки значило бы возить по сети то, что всё равно не покажем.
+  final Map<String, List<Map<String, dynamic>>> _errorsByRecording = {};
   List<RoundScoreData> _scores = [];
   bool _loading = true;
   bool _navigatedAway = false;
@@ -195,6 +201,7 @@ class _BattleScreenState extends State<BattleScreen> {
             .map(VoiceRecordingData.fromRow)
             .toList();
       });
+      _loadMyErrors();
       _scrollToBottomSoon();
       _maybeAdvance();
     });
@@ -269,6 +276,55 @@ class _BattleScreenState extends State<BattleScreen> {
     final left = _roundTimeoutSeconds - elapsed;
     return left > 0 ? left : 0;
   }
+
+  /// Дочитывает разбор своих записей.
+  ///
+  /// Отдельным запросом, а не потоком: grammar_errors пишутся один раз и
+  /// больше не меняются, а держать на них подписку значит слушать таблицу,
+  /// которая для нас почти всегда молчит. Каждая запись читается ровно
+  /// один раз — повторный вызов на новом кадре ленты ничего не делает.
+  Future<void> _loadMyErrors() async {
+    // Только по записям, которые судья уже разобрал. Строка записи
+    // появляется в потоке в момент загрузки аудио — за минуту до того, как
+    // воркер напишет ошибки, — и запрос в тот момент вернул бы пусто
+    // навсегда: второй раз мы за одной и той же записью не ходим.
+    // Признак «разбор готов» — непустой review_spans: воркер пишет его
+    // одной транзакцией с grammar_errors.
+    final pending = _recordings
+        .where((r) =>
+            r.userId == _myId &&
+            r.reviewSpans.isNotEmpty &&
+            !_errorsByRecording.containsKey(r.id))
+        .map((r) => r.id)
+        .toList();
+    if (pending.isEmpty) return;
+    // Занимаем места сразу: без этого следующий кадр ленты запустит те же
+    // запросы второй раз, пока первые ещё в полёте.
+    for (final id in pending) {
+      _errorsByRecording[id] = const [];
+    }
+    try {
+      final rows = await supabase
+          .from('grammar_errors')
+          .select()
+          .inFilter('voice_recording_id', pending)
+          .order('created_at');
+      final byRecording = <String, List<Map<String, dynamic>>>{};
+      for (final row in rows) {
+        final id = row['voice_recording_id'] as String?;
+        if (id == null) continue;
+        byRecording.putIfAbsent(id, () => []).add(Map<String, dynamic>.from(row));
+      }
+      if (!mounted || byRecording.isEmpty) return;
+      setState(() => _errorsByRecording.addAll(byRecording));
+    } catch (_) {
+      // Разбор не дочитался — покажем балл без плашек. Ронять из-за этого
+      // экран боя нельзя: сам бой от разбора не зависит.
+    }
+  }
+
+  List<Map<String, dynamic>> _errorsFor(String recordingId) =>
+      _errorsByRecording[recordingId] ?? const [];
 
   Future<void> _maybeAdvance() async {
     final m = _match;
@@ -678,16 +734,13 @@ class _BattleScreenState extends State<BattleScreen> {
             continue;
           }
           if (rec.recordingSlot == 'native') {
-            // Родное голосовое соперника — это и есть образец носителя на
-            // ТВОЁМ изучаемом языке: в Дуэли родной язык одного всегда
-            // изучаемый для другого. Под своим таким же голосовым подпись
-            // не нужна — себя носителем слушать незачем.
-            if (!isMine) {
-              items.add(_AiNote(
-                key: ValueKey('${rec.id}-native-note'),
-                text: 'Запись голоса носителя ↑',
-              ));
-            }
+            // Родное голосовое — просто запись в ленте, без подписи от
+            // хамелеона. Подпись здесь была, и она нарушала главное
+            // правило ленты: после «прочитай ещё раз на своём языке» до
+            // самого разбора хамелеон молчит, а между этими двумя точками
+            // может прилететь что угодно от соперника — в том числе его
+            // родное голосовое. Реплика тогда вклинивалась ровно туда, где
+            // игрок должен говорить, а не читать.
             continue;
           }
         }
@@ -695,12 +748,17 @@ class _BattleScreenState extends State<BattleScreen> {
         // Балл ставится только за голосовое на изучаемом языке — родное
         // в Дуэли соперник просто слушает (раздел 2.4).
         if (rec.recordingSlot != 'target') continue;
+        // РАЗБОР ВИДИТ ТОЛЬКО СВОЙ ХОЗЯИН. Чужие ошибки сопернику ни к
+        // чему, а объяснения к ним написаны на его родном языке — в Дуэли
+        // это язык, которого второй игрок может не знать вовсе. Счёт
+        // соперника при этом никуда не делся: он в шапке боя.
+        if (!isMine) continue;
         items.add(_AiVerdict(
           key: ValueKey('${rec.id}-verdict'),
-          name: isMine ? _myName : _opponentName,
           recording: rec,
           verdict: _verdictFor(round.id, rec.userId),
-          isMine: isMine,
+          targetLanguage: m.languageForSlot(_myId, 'target'),
+          errors: _errorsFor(rec.id),
         ));
       }
     }
@@ -710,10 +768,13 @@ class _BattleScreenState extends State<BattleScreen> {
 
 /// Короткая реплика хамелеона в ленте — подсказка, что делать дальше.
 ///
-/// Живёт только на экране и не пишется в базу: обе такие подсказки
-/// адресованы одному игроку («прочитай теперь на своём языке» — тому, кто
-/// записывает; «запись голоса носителя» — тому, кто слушает), а сообщение
-/// в общей ленте увидели бы оба.
+/// Живёт только на экране и не пишется в базу: подсказка адресована одному
+/// игроку — тому, кто сейчас записывает, — а сообщение в общей ленте
+/// увидели бы оба.
+///
+/// Реплика в ленте ровно одна: «прочитай теперь на своём языке». Дальше до
+/// самого разбора хамелеон молчит — между этими двумя точками говорят
+/// игроки, и вклиниваться туда ИИ нечем.
 class _AiNote extends StatelessWidget {
   final String text;
 
@@ -763,27 +824,28 @@ class _AiNote extends StatelessWidget {
 /// Сообщение всегда слева и с аватаром хамелеона: это говорит ИИ, а не
 /// игрок, — по тому же правилу, что и фраза раунда.
 class _AiVerdict extends StatelessWidget {
-  /// Чьё голосовое разбирают — иначе в бою непонятно, чей это балл.
-  final String name;
-
-  /// Сама запись: из неё берутся распознанный текст и правка.
+  /// Сама запись: из неё берётся лента разбора.
   final VoiceRecordingData recording;
 
   /// null — оценки ещё нет, судья считает.
   final RoundScoreData? verdict;
 
-  /// Своё ли это голосовое. От этого зависит только одно: предлагать ли
-  /// послушать исправленную фразу. В Дуэли соперник переводит на СВОЙ
-  /// изучаемый язык, и озвучка его фразы была бы образцом произношения на
-  /// языке, которого этот игрок не учит.
-  final bool isMine;
+  /// Изучаемый язык игрока — для озвучки правильного варианта.
+  ///
+  /// Берётся из пары языков матча, а не из записи: в Дуэли вторая запись
+  /// сделана на родном языке, и озвучивать по ней исправление было бы
+  /// озвучкой не того языка.
+  final String targetLanguage;
+
+  /// Строки grammar_errors по этой записи — плашки с пояснениями.
+  final List<Map<String, dynamic>> errors;
 
   const _AiVerdict({
     super.key,
-    required this.name,
     required this.recording,
     required this.verdict,
-    required this.isMine,
+    required this.targetLanguage,
+    required this.errors,
   });
 
   @override
@@ -846,20 +908,20 @@ class _AiVerdict extends StatelessWidget {
                             ),
                             const SizedBox(width: 8),
                             Text(
-                              name,
+                              'твой балл за раунд',
                               style: AppFonts.mono(fontSize: 9, weight: FontWeight.w700, color: AppColors.muted),
                             ),
                           ],
                         ),
                         const SizedBox(height: 8),
-                        // В бою — только разбор, без текстовых пояснений:
-                        // сравнить свою фразу с правильной можно за секунду,
-                        // а читать абзац объяснений посреди матча некогда.
-                        TranscriptReview(
-                            spans: recording.reviewSpans,
-                            targetLanguage:
-                                isMine ? (recording.languageCode ?? '') : '',
-                          ),
+                        // Тот же разбор, что и в Одиночной Игре: подсветка
+                        // несказанного и плашки с пояснениями. Отличие
+                        // только в балле над ним — в бою он решает раунд.
+                        RoundReview(
+                          spans: recording.reviewSpans,
+                          mistakes: mistakesFrom(errors),
+                          targetLanguage: targetLanguage,
+                        ),
                       ],
                     ),
             ),

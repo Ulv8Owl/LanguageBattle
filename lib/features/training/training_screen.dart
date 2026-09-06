@@ -16,8 +16,7 @@ import '../../data/player_rating.dart';
 import '../../data/voice_submission.dart';
 import '../../widgets/chrolingo_widgets.dart';
 import '../../widgets/ai_avatar.dart';
-import '../../widgets/speak_button.dart';
-import '../../widgets/transcript_review.dart';
+import '../../widgets/round_review.dart';
 import '../../widgets/voice_message_bubble.dart';
 import '../../widgets/voice_recorder_dock.dart';
 import '../subscription/paywall_screen.dart';
@@ -1305,27 +1304,9 @@ class _ErrorReport extends StatelessWidget {
 
   /// Ошибки, названные мультимодальной моделью.
   ///
-  /// Отличаются от поэлементных категорией и тем, что несут собственный
-  /// фрагмент сказанного (span_text): модель судит без эталона и указывает
-  /// на кусок РЕЧИ ИГРОКА, а не на часть правильного ответа. Поэтому у
-  /// них своя отрисовка — разложить их по элементам эталона нечем.
-  List<_Mistake> get _omniErrors {
-    final out = <_Mistake>[];
-    for (final e in errors) {
-      if ((e['category'] as String?) != 'omni') continue;
-      final span = (e['span_text'] as String?)?.trim() ?? '';
-      final message = (e['message'] as String?)?.trim() ?? '';
-      // Плашка без фрагмента показывается не к чему, а без объяснения —
-      // это пустое обещание разбора. Ни то, ни другое не показываем.
-      if (span.isEmpty || message.isEmpty) continue;
-      out.add(_Mistake(
-        span: span,
-        message: message,
-        correction: (e['replacement'] as String?)?.trim() ?? '',
-      ));
-    }
-    return out;
-  }
+  /// Раскладывает их тот же код, что и в бою (`mistakesFrom`): две правды
+  /// об одном ответе — верный способ развести режимы.
+  List<Mistake> get _mistakes => mistakesFrom(errors);
 
   @override
   Widget build(BuildContext context) {
@@ -1338,11 +1319,8 @@ class _ErrorReport extends StatelessWidget {
     final judge = attempt?.judgeStatus ?? JudgeStatus.ok;
     // Судья не ответил — пустой список ошибок НЕ значит, что ошибок нет.
     final judgeBroken = judge == JudgeStatus.degraded;
-    final notRecognised = status == TranscriptStatus.empty || status == TranscriptStatus.failed;
-    // Результата не было вовсе: список ошибок тут заведомо пуст, и показывать
-    // вместо объяснения пустоту нельзя — нужен текст причины.
-    final noResult = attempt?.clientFailure != null;
-
+    // Результата не было вовсе: разбирать нечего, и на месте разбора должен
+    // стоять текст причины, а не пустота.
     final clientFailure = attempt?.clientFailure;
 
     final (String title, Color titleColor) = switch (status) {
@@ -1394,230 +1372,26 @@ class _ErrorReport extends StatelessWidget {
             Text(title, style: AppFonts.mono(fontSize: 9, weight: FontWeight.w700, color: titleColor)),
             const SizedBox(height: 10),
 
-            TranscriptReview(
+            // Разбор — тот же виджет, что и в бою: подсветка ленты плюс
+            // плашки с пояснениями от модели. Вторая попытка показывается
+            // ТАК ЖЕ, как первая. Раньше у неё прятали плашки: разбор для
+            // неё не запрашивали, чтобы не ждать лишние секунды. Теперь он
+            // приходит тем же единственным вызовом — прятать нечего и
+            // незачем, а игроку важнее всего понять последнюю попытку.
+            // Отличается только заголовок и карточка с баллом ниже.
+            RoundReview(
               spans: attempt?.reviewSpans ?? const [],
+              mistakes: _mistakes,
               targetLanguage: targetLanguage,
+              // Когда разбирать нечего, на его месте — та же подсказка,
+              // что была раньше: почему разбора нет или что делать дальше.
+              emptyHint: hint,
             ),
-            if ((attempt?.reviewSpans ?? const []).isNotEmpty) const SizedBox(height: 10),
-
-            // Вторая попытка показывается ТАК ЖЕ, как первая. Раньше у неё
-            // прятали плашки ошибок: разбор для неё не запрашивали, чтобы
-            // не ждать лишние секунды. Теперь разбор приходит тем же
-            // единственным вызовом — прятать нечего и незачем, а игроку
-            // важнее всего понять именно последнюю попытку. Отличается
-            // только заголовок и карточка с баллом ниже.
-            if (noResult || notRecognised || judgeBroken)
-              Text(hint, style: const TextStyle(color: AppColors.muted, fontSize: 12, height: 1.4))
-            // Разбор от мультимодальной модели — свои плашки. Границы она
-            // провела по смыслу сказанного, а не по элементам эталона, и
-            // разложить их по элементам нечем: у неё эталона не было
-            // вовсе. Показываем ровно то, что она назвала.
-            //
-            // Проверяем ПРИЗНАК ПУТИ, а не наличие ошибок. Иначе безошибочный
-            // ответ проваливался бы в поэлементный разбор, и игрок видел бы
-            // «сказано всё» под красным несказанным куском в «Разборе».
-            else if (_omniErrors.isNotEmpty)
-              _MistakeBreakdown(mistakes: _omniErrors, targetLanguage: targetLanguage)
-            else if (errors.isEmpty)
-              Text(hint, style: const TextStyle(color: AppColors.muted, fontSize: 12, height: 1.4))
-            else
-              ...errors.map((e) => Padding(
-                    padding: const EdgeInsets.only(bottom: 8),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          (e['message'] as String?) ?? '',
-                          style: const TextStyle(color: AppColors.cream, fontSize: 12, height: 1.4),
-                        ),
-                        if ((e['replacement'] as String?)?.isNotEmpty ?? false)
-                          Text(
-                            '→ ${e['replacement']}',
-                            style: AppFonts.mono(fontSize: 11, weight: FontWeight.w700, color: AppColors.ok),
-                          ),
-                      ],
-                    ),
-                  )),
           ],
         ),
             ),
           ),
         ],
-      ),
-    );
-  }
-}
-
-/// Разбор одного элемента и то, откуда он взялся.
-///
-/// ИСТОЧНИК ХРАНИТСЯ НЕ ИЗ ЛЮБОПЫТСТВА. Однажды в этом окне уже показывали
-/// заготовку, неотличимую на вид от ответа модели, и молчание модели
-/// прошло незамеченным. Теперь источник подписан прямо под текстом: две
-/// строки разного происхождения не должны выглядеть одинаково.
-/// Одна ошибка, названная моделью: кусок сказанного и разбор к нему.
-class _Mistake {
-  /// Фрагмент того, что игрок СКАЗАЛ. Он же — надпись на плашке.
-  final String span;
-
-  /// Объяснение на родном языке: почему так неверно.
-  final String message;
-
-  /// Как надо было сказать этот кусок. Пусто — модель не предложила.
-  final String correction;
-
-  const _Mistake({required this.span, required this.message, required this.correction});
-}
-
-/// Разбор по ОШИБКАМ, а не по элементам эталона.
-///
-/// ПОЧЕМУ НЕ «ФРАЗА С ПОДСВЕТКОЙ». На руках не разложенный эталон, а список
-/// несвязанных фрагментов речи игрока: границы модель провела сама, по
-/// смыслу, объединив в одну ошибку всё, что пошло не так по одной причине.
-/// Эталона за ними нет вовсе — он в этом раунде не участвовал.
-///
-/// Поэтому здесь нельзя показать «всю фразу с подсветкой»: у нас на руках
-/// не разложенный эталон, а список несвязанных фрагментов. Зато плашка
-/// говорит ровно то, что игрок сказал, — и нажатие объясняет именно этот
-/// его кусок, а не абстрактную часть правильного варианта.
-class _MistakeBreakdown extends StatelessWidget {
-  final List<_Mistake> mistakes;
-
-  /// Изучаемый язык — для озвучки исправления.
-  ///
-  /// Без него «послушать, как это должно звучать» здесь пропало бы: раньше
-  /// динамик стоял у исправленной фразы целиком, а у модели такой фразы
-  /// нет — она правит куски. Значит и слушать надо кусок.
-  final String targetLanguage;
-
-  const _MistakeBreakdown({required this.mistakes, required this.targetLanguage});
-
-  void _show(BuildContext context, _Mistake mistake) {
-    showModalBottomSheet<void>(
-      context: context,
-      backgroundColor: AppColors.navy2,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-      ),
-      builder: (ctx) => SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Container(
-                width: 36,
-                height: 4,
-                margin: const EdgeInsets.only(bottom: 16),
-                decoration: BoxDecoration(
-                  color: AppColors.lineStrong,
-                  borderRadius: BorderRadius.circular(2),
-                ),
-              ),
-              Text(
-                mistake.span,
-                style: AppFonts.ui(fontSize: 16, weight: FontWeight.w800, color: AppColors.danger),
-              ),
-              if (mistake.correction.isNotEmpty) ...[
-                const SizedBox(height: 6),
-                Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const Icon(Icons.arrow_forward, size: 14, color: AppColors.ok),
-                    const SizedBox(width: 6),
-                    Expanded(
-                      child: Text(
-                        mistake.correction,
-                        style: AppFonts.ui(fontSize: 15, weight: FontWeight.w700, color: AppColors.ok),
-                      ),
-                    ),
-                    SpeakButton(text: mistake.correction, languageCode: targetLanguage),
-                  ],
-                ),
-              ],
-              const SizedBox(height: 12),
-              Text(
-                mistake.message,
-                style: const TextStyle(color: AppColors.cream, fontSize: 13, height: 1.5),
-              ),
-              const SizedBox(height: 12),
-              Text('разбор от ИИ', style: AppFonts.mono(fontSize: 9, color: AppColors.muted)),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          'Нажми на кусок, чтобы понять, что с ним не так',
-          style: AppFonts.ui(fontSize: 11, color: AppColors.muted),
-        ),
-        const SizedBox(height: 10),
-        Wrap(
-          spacing: 6,
-          runSpacing: 6,
-          children: [
-            for (final mistake in mistakes)
-              _ElementChip(
-                text: mistake.span,
-                // Каждая плашка здесь — ошибка по определению: список
-                // состоит только из них. Верно сказанное сюда не попадает,
-                // потому что модель про него ничего и не сказала.
-                missed: true,
-                onTap: () => _show(context, mistake),
-              ),
-          ],
-        ),
-      ],
-    );
-  }
-}
-
-class _ElementChip extends StatelessWidget {
-  final String text;
-  final bool missed;
-
-  /// null — по этому куску разбора нет, и нажимать не на что.
-  final VoidCallback? onTap;
-
-  const _ElementChip({required this.text, required this.missed, required this.onTap});
-
-  @override
-  Widget build(BuildContext context) {
-    final color = missed ? AppColors.danger : AppColors.lineStrong;
-    return InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(8),
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
-        decoration: BoxDecoration(
-          border: Border.all(color: color),
-          borderRadius: BorderRadius.circular(8),
-          color: missed ? AppColors.danger.withValues(alpha: 0.12) : Colors.transparent,
-        ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Text(
-              text,
-              style: TextStyle(
-                color: missed ? AppColors.danger : AppColors.cream,
-                fontSize: 12.5,
-                height: 1.2,
-              ),
-            ),
-            if (onTap != null) ...[
-              const SizedBox(width: 5),
-              Icon(Icons.help_outline, size: 12, color: AppColors.muted.withValues(alpha: 0.8)),
-            ],
-          ],
-        ),
       ),
     );
   }

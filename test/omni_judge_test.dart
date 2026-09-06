@@ -69,7 +69,7 @@ void main() {
   test('ошибка без фрагмента или без объяснения не показывается', () {
     // Плашка — это и есть фрагмент; без объяснения за ней ничего нет.
     expect(omni(), contains('if (text.length === 0 || message.length === 0) continue;'));
-    expect(read('lib/features/training/training_screen.dart'),
+    expect(read('lib/widgets/round_review.dart'),
         contains('if (span.isEmpty || message.isEmpty) continue;'));
   });
 
@@ -194,9 +194,12 @@ void main() {
   test('ошибки модели рисуются своими плашками', () {
     final screen = read('lib/features/training/training_screen.dart');
     // Границы модель провела по смыслу сказанного; разложить их по
-    // элементам эталона нечем — у неё эталона не было вовсе.
-    expect(screen, contains('class _MistakeBreakdown'));
-    expect(screen, contains("if ((e['category'] as String?) != 'omni') continue;"));
+    // элементам эталона нечем — у неё эталона не было вовсе. Сами плашки
+    // переехали в общий разбор: тот же виджет показывает бой.
+    final review = read('lib/widgets/round_review.dart');
+    expect(review, contains('class MistakeBreakdown'));
+    expect(review, contains("if ((e['category'] as String?) != 'omni') continue;"));
+    expect(screen, contains('RoundReview('));
     // Поэлементного разбора больше нет: держать рядом две несовместимые
     // механики значило бы поддерживать ту, которой никто не пользуется.
     expect(screen.contains('_ElementBreakdown'), isFalse);
