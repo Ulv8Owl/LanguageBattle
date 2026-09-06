@@ -8,12 +8,8 @@
 // ожидал, и выяснилось это числами, а не чтением кода.
 //
 // Запуск: deno run --allow-read --allow-env tools/check_score_formula.ts
-import {
-  correctText,
-  type ReviewSpan,
-  scoreFor,
-  withSpacing,
-} from "../supabase/functions/_shared/omniJudge.ts";
+import { correctText, type ReviewSpan, scoreFor } from "../supabase/functions/_shared/omniJudge.ts";
+import { diffWords } from "../supabase/functions/_shared/textDiff.ts";
 
 const ok = (text: string): ReviewSpan => ({ kind: "ok", text });
 const bad_ = (text: string): ReviewSpan => ({ kind: "bad", text });
@@ -38,41 +34,59 @@ for (const [name, review, errors, expected] of cases) {
     console.log(`РАСХОЖДЕНИЕ «${name}»: scoreFor(..., ${errors}) = ${got}, в тесте ${expected}`);
   }
 }
-// Склейка ленты: пробел на стыке модель теряет постоянно, и «morningthen»
-// игрок видел на экране. Проверяем на настоящих кусках из того разбора.
-const spacing: [string, ReviewSpan[], string][] = [
+// Лента считается диффом услышанного с переводом. Случаи взяты из
+// настоящих раундов: «половина фразы» приходила с баллом 10, потому что
+// разметку рисовала модель и объявляла её безошибочной.
+function ribbon(heard: string, correct: string): ReviewSpan[] {
+  const out: ReviewSpan[] = [];
+  for (const part of diffWords(heard, correct)) {
+    const kind = part.kind === "same" ? "ok" : part.kind === "wrong" ? "bad" : "miss";
+    const last = out[out.length - 1];
+    if (last && last.kind === kind) last.text += " " + part.text;
+    else out.push({ kind, text: part.text } as ReviewSpan);
+  }
+  for (let i = 0; i < out.length - 1; i++) out[i].text += " ";
+  return out;
+}
+
+const ribbons: [string, string, string, number, number][] = [
   [
-    "точка и следующее предложение",
-    [
-      { kind: "ok", text: "I get up at seven every morning." },
-      { kind: "miss", text: "then I make coffee" },
-    ],
-    "I get up at seven every morning. then I make coffee",
+    "сказана половина фразы",
+    "This shop is open every day.",
+    "This shop is open every day. I buy bread and milk here.",
+    0,
+    5,
   ],
   [
-    "слово к слову",
-    [{ kind: "ok", text: "then I make coffee" }, { kind: "miss", text: "and read the news" }],
-    "then I make coffee and read the news",
+    "сказано всё верно",
+    "This shop is open every day. I buy bread and milk here.",
+    "This shop is open every day. I buy bread and milk here.",
+    0,
+    10,
   ],
   [
-    "перед запятой пробел не нужен",
-    [{ kind: "ok", text: "coffee" }, { kind: "miss", text: ", then news" }],
-    "coffee, then news",
-  ],
-  [
-    "готовый пробел не удваивается",
-    [{ kind: "ok", text: "coffee " }, { kind: "miss", text: "and news" }],
-    "coffee and news",
+    "оговорка плюс пропуск",
+    "I get up at seven. After that I make coffee.",
+    "I get up at seven. Then I make coffee and read the news.",
+    1,
+    5,
   ],
 ];
 
-for (const [name, review, expected] of spacing) {
-  const got = correctText(withSpacing(review));
+for (const [name, heard, correct, errors, expected] of ribbons) {
+  const review = ribbon(heard, correct);
+  const got = scoreFor(review, errors);
   if (got !== expected) {
     bad++;
-    console.log(`РАСХОЖДЕНИЕ «${name}»: склеилось «${got}», ожидали «${expected}»`);
+    console.log(`РАСХОЖДЕНИЕ «${name}»: балл ${got}, ожидали ${expected}`);
+  }
+  // Склейка обязана дать перевод целиком: по ней озвучивается образец.
+  const assembled = correctText(review).replace(/\s+/g, " ").trim();
+  if (assembled !== correct.replace(/\s+/g, " ").trim()) {
+    bad++;
+    console.log(`РАСХОЖДЕНИЕ «${name}»: склеилось «${assembled}», ожидали «${correct}»`);
   }
 }
 
-console.log(bad === 0 ? "формулы и склейка совпадают" : `разошлись в ${bad} случаях`);
+console.log(bad === 0 ? "формула, лента и склейка совпадают" : `разошлись в ${bad} случаях`);
 if (bad > 0) Deno.exit(1);

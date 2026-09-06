@@ -28,14 +28,11 @@ void main() {
     expect(worker().contains('roundPhrase'), isFalse);
   });
 
-  test('расшифровку у модели не просят', () {
-    // Модель понимает речь напрямую. Отдельно просить текст сказанного —
-    // второй проход по тому же аудио за те же деньги ради строки, которая
-    // нигде не показывается.
+  test('второго вызова за расшифровкой нет', () {
+    // Она приходит тем же единственным вызовом, отдельного прохода по
+    // аудио не делаем.
     final s = omni();
-    expect(s.contains('heard'), isFalse);
     expect(s.contains('wantJudgement'), isFalse);
-    expect(s.contains('transcribe'), isFalse);
   });
 
   test('цитату сказанного модель не чинит', () {
@@ -43,8 +40,8 @@ void main() {
     // не исправленный за него вариант: иначе он не узнает свою ошибку.
     expect(omni(), contains('quoted verbatim with the mistake left in'));
     expect(omni(), contains('never correct them there'));
-    // И зачёркнутый кусок — тоже дословная цитата, а не пересказ.
-    expect(omni(), contains('quoted from the recording verbatim'));
+    // И расшифровка — дословная, а не приглаженная.
+    expect(omni(), contains('with every mistake left in'));
   });
 
   test('ошибки группируются по смыслу, а не по словам', () {
@@ -105,12 +102,8 @@ void main() {
     expect(worker(), contains('scoreFor(judged.review, judged.errors.length)'));
   });
 
-  test('разбор приходит размеченной лентой, а не двумя списками', () {
-    // Раньше приложение искало пропущенные куски в переводе подстрокой, и
-    // поиск промахивался на каждой неточной цитате — подсветка молча
-    // пропадала. Границы теперь проводит модель.
+  test('разбор доезжает до экрана лентой кусков', () {
     expect(omni(), contains('export type SpanKind'));
-    expect(omni(), contains('"k": "ok"|"bad"|"miss"'));
     expect(worker(), contains('review_spans: reviewSpans'));
     expect(read('lib/widgets/correction_text.dart'), contains('List<TextSpan> reviewSpans('));
   });
@@ -124,41 +117,46 @@ void main() {
     expect(omni(), contains('audible=false'));
   });
 
-  test('лента обязана собираться в перевод модели', () {
-    // Настоящая поломка выглядела так: модель пометила «I get up at seven
-    // every morning» как НЕ СКАЗАННОЕ, хотя игрок это сказал, — и верно
-    // сказанный кусок покрасился красным. Склейка тогда даёт не её
-    // перевод, а обрубок: по одному сравнению видно, что верить нельзя.
+  test('ленту строит код, а не модель', () {
+    // Дважды подряд модель размечала её неверно: то помечала сказанное как
+    // пропущенное, то объявляла «ошибок нет» на половине фразы. Сравнить
+    // две строки по словам — арифметика, и её надо считать, а не
+    // спрашивать.
     final s = omni();
-    expect(s, contains('squeeze(assembled) !== squeeze(claimed)'));
-    expect(s, contains('лента разбора не собирается в перевод модели'));
-    // Сравниваем без пробелов и регистра: и то, и другое модель на стыках
-    // теряет постоянно, а придираться значило бы браковать исправное.
-    expect(s, contains('.replace(/\\s+/g, "").toLowerCase()'));
+    expect(s, contains('ribbon(diffWords(heard, correct))'));
+    expect(s.contains('parsed.review'), isFalse);
+    expect(read('supabase/functions/_shared/textDiff.ts'), contains('export function diffWords'));
+  });
+
+  test('расшифровка обязательна и не показывается игроку', () {
+    // Она нужна не экрану, а сравнению: без неё модель не представляет
+    // сказанное явно и по умолчанию соглашается, что всё верно.
+    final s = omni();
+    expect(s, contains('THE TRANSCRIPTION IS THE POINT OF THIS TASK'));
+    expect(s, contains('в ответе нет расшифровки'));
+    // На экране её нет: блок «Голосовое:» убран и не возвращается.
+    expect(read('lib/widgets/transcript_review.dart').contains('Голосовое'), isFalse);
   });
 
   test('пропуск, выданный за ошибку, не снимает балл второй раз', () {
     // Модель регулярно присылает «сказал X, надо X» с объяснением «эту
     // часть не сказали». Долю несказанного мы уже посчитали по ленте.
     expect(omni(), contains('if (correction.length > 0 && correction === text) continue;'));
-    expect(omni(), contains('NEVER put an omission in "errors"'));
+    expect(omni(), contains('NEVER put an omission in'));
   });
 
   test('пробел на стыке кусков восстанавливается', () {
     // «every morning» + «then I» слипались в «morningthen» — это игрок
-    // видел на экране. Просить об этом модель бесполезно: граница видна
-    // только при склейке, а куски она пишет по одному.
-    expect(omni(), contains('export function withSpacing'));
-    expect(omni(), contains(r'if (/^[.,!?;:)\]»]/.test(right)) continue;'));
+    // видел на экране. Дифф отдаёт голые слова, пробелы ставит склейка.
+    expect(omni(), contains('out[i].text += " ";'));
   });
 
   test('в промпте есть разобранный пример', () {
-    // Одних определений ok/bad/miss модели не хватило: на второй попытке
-    // она пометила сказанное как пропущенное. Пример показывает и это, и
-    // то, что пропуск не идёт в errors.
+    // Пример показывает главное: расшифровка обрывается там, где игрок
+    // замолчал, и пропуск не превращается в запись об ошибке.
     final s = omni();
     expect(s, contains('Example. The learner was asked to say'));
-    expect(s, contains('it is a \\"miss\\" piece and nothing more'));
+    expect(s, contains('"heard" stops where the learner stopped'));
   });
 
   test('сырой ответ модели сохраняется', () {
