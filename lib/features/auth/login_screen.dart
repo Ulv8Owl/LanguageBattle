@@ -3,6 +3,7 @@ import 'package:go_router/go_router.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../core/app_locale.dart';
+import '../../core/game_settings.dart';
 import '../../core/start_destination.dart';
 import '../../core/supabase_client.dart';
 
@@ -46,6 +47,7 @@ class _LoginScreenState extends State<LoginScreen> {
       // Язык интерфейса лежит в профиле — до входа его прочитать было
       // неоткуда.
       await AppLocale.refreshFromServer();
+      await GameSettings.load();
       if (!mounted) return;
       context.go(destination.route);
     } on AuthException catch (e) {

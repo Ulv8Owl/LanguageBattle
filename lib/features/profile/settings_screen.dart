@@ -7,6 +7,7 @@ import '../../core/all_languages.dart';
 import '../../core/app_events.dart';
 import '../../core/app_locale.dart';
 import '../../core/debug_flags.dart';
+import '../../core/game_settings.dart';
 import '../../core/leagues.dart';
 import '../../core/supabase_client.dart';
 import '../../data/content_languages.dart';
@@ -46,6 +47,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
   int _deckSize = defaultTrainingDeckSize;
   bool _savingDeckSize = false;
 
+  /// Где в раунде участвует модель. Значения зеркалят [GameSettings], но
+  /// живут в состоянии экрана: переключателю нужно перерисоваться сразу,
+  /// а статическое поле об этом сообщить не может.
+  bool _llmScoring = GameSettings.llmScoring;
+  bool _llmExplanations = GameSettings.llmExplanations;
+  bool _savingScoring = false;
+  bool _savingExplanations = false;
+
   /// Рейтинг по изучаемому языку. Здесь его можно задать вручную — это
   /// отладочная возможность: дождаться перехода в следующую лигу честной
   /// игрой это десятки матчей, а проверять надо все шесть.
@@ -62,11 +71,43 @@ class _SettingsScreenState extends State<SettingsScreen> {
     _loadNativeLanguage();
   }
 
+  /// Сохраняет переключатель, показывая новое положение сразу.
+  ///
+  /// Переключатель, который ждёт сеть, прежде чем сдвинуться, читается как
+  /// сломанный, поэтому положение меняется сразу, а при отказе честно
+  /// возвращается на место с объяснением. Ошибку тут прятать нельзя: игрок
+  /// уйдёт с экрана уверенным, что настройка сменилась, а сервер продолжит
+  /// считать по-старому.
+  Future<void> _saveToggle({
+    required Future<void> Function() apply,
+    required VoidCallback optimistic,
+    required VoidCallback revert,
+    required void Function(bool) busy,
+  }) async {
+    setState(() {
+      optimistic();
+      busy(true);
+    });
+    try {
+      await apply();
+      if (mounted) setState(() => busy(false));
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        revert();
+        busy(false);
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Не удалось сохранить настройку: $e')),
+      );
+    }
+  }
+
   Future<void> _loadNativeLanguage() async {
     try {
       final row = await supabase
           .from('users')
-          .select('training_deck_size')
+          .select('training_deck_size, llm_scoring_enabled, llm_explanations_enabled')
           .eq('id', currentUserId)
           .maybeSingle();
       if (!mounted) return;
@@ -85,6 +126,15 @@ class _SettingsScreenState extends State<SettingsScreen> {
         final size = (row?['training_deck_size'] as num?)?.toInt();
         if (size != null && trainingDeckSizes.contains(size)) _deckSize = size;
         _rating = learning == null ? null : PlayerRating.fromRow(learning);
+        // Переключатели показываем по базе, а не по кэшу: кэш мог
+        // разойтись, если настройку меняли с другого устройства, и экран
+        // настроек — последнее место, где уместно показать устаревшее.
+        if (row != null) {
+          _llmScoring = row['llm_scoring_enabled'] == true;
+          _llmExplanations = row['llm_explanations_enabled'] == true;
+          GameSettings.llmScoring = _llmScoring;
+          GameSettings.llmExplanations = _llmExplanations;
+        }
       });
     } catch (_) {
       // Не удалось — покажем прочерк, менять язык это не мешает.
@@ -538,6 +588,54 @@ class _SettingsScreenState extends State<SettingsScreen> {
               ),
             ),
             const SizedBox(height: 18),
+            // Отдельная секция, а не «ТРЕНИРОВКА»: переключатели действуют
+            // во всех трёх режимах, и спрятать их под заголовком одного
+            // значило бы соврать про область действия.
+            Text(t.sectionScoring, style: AppFonts.mono(fontSize: 9, weight: FontWeight.w700, color: AppColors.gold)),
+            const SizedBox(height: 8),
+            ChPanel(
+              padding: EdgeInsets.zero,
+              child: Column(
+                children: [
+                  _Row(
+                    icon: Icons.auto_awesome_outlined,
+                    title: t.llmScoring,
+                    subtitle: _llmScoring ? null : t.llmScoringOff,
+                    trailing: _savingScoring
+                        ? const SizedBox(height: 14, width: 14, child: CircularProgressIndicator(strokeWidth: 2))
+                        : Switch(
+                            value: _llmScoring,
+                            activeThumbColor: AppColors.gold,
+                            onChanged: (v) => _saveToggle(
+                              apply: () => GameSettings.setLlmScoring(v),
+                              optimistic: () => _llmScoring = v,
+                              revert: () => _llmScoring = !v,
+                              busy: (b) => _savingScoring = b,
+                            ),
+                          ),
+                  ),
+                  const Divider(height: 1, color: AppColors.line),
+                  _Row(
+                    icon: Icons.menu_book_outlined,
+                    title: t.llmExplanations,
+                    subtitle: _llmExplanations ? null : t.llmExplanationsOff,
+                    trailing: _savingExplanations
+                        ? const SizedBox(height: 14, width: 14, child: CircularProgressIndicator(strokeWidth: 2))
+                        : Switch(
+                            value: _llmExplanations,
+                            activeThumbColor: AppColors.gold,
+                            onChanged: (v) => _saveToggle(
+                              apply: () => GameSettings.setLlmExplanations(v),
+                              optimistic: () => _llmExplanations = v,
+                              revert: () => _llmExplanations = !v,
+                              busy: (b) => _savingExplanations = b,
+                            ),
+                          ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 18),
             Text(t.sectionDebug, style: AppFonts.mono(fontSize: 9, weight: FontWeight.w700, color: AppColors.danger)),
             const SizedBox(height: 8),
             ChPanel(
@@ -671,10 +769,21 @@ class _SettingsScreenState extends State<SettingsScreen> {
 class _Row extends StatelessWidget {
   final IconData icon;
   final String title;
+
+  /// Пояснение под заголовком. Нужно там, где по названию не догадаться,
+  /// что даст выключенное положение переключателя, — а у настроек, которые
+  /// меняют способ оценки, это ровно тот случай.
+  final String? subtitle;
   final Widget? trailing;
   final VoidCallback? onTap;
 
-  const _Row({required this.icon, required this.title, this.trailing, this.onTap});
+  const _Row({
+    required this.icon,
+    required this.title,
+    this.subtitle,
+    this.trailing,
+    this.onTap,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -686,7 +795,21 @@ class _Row extends StatelessWidget {
           children: [
             Icon(icon, size: 18, color: AppColors.muted),
             const SizedBox(width: 12),
-            Expanded(child: Text(title, style: AppFonts.ui(fontSize: 13))),
+            Expanded(
+              child: subtitle == null
+                  ? Text(title, style: AppFonts.ui(fontSize: 13))
+                  : Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(title, style: AppFonts.ui(fontSize: 13)),
+                        const SizedBox(height: 2),
+                        Text(
+                          subtitle!,
+                          style: AppFonts.ui(fontSize: 10, color: AppColors.muted),
+                        ),
+                      ],
+                    ),
+            ),
             trailing ?? const Icon(Icons.chevron_right, color: AppColors.muted, size: 20),
           ],
         ),

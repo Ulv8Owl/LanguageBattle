@@ -28,6 +28,7 @@ class AppStrings {
   final String settingsTitle;
   final String sectionInterface;
   final String sectionTraining;
+  final String sectionScoring;
   final String sectionDebug;
   final String sectionNotifications;
   final String sectionPrivacy;
@@ -38,6 +39,10 @@ class AppStrings {
   final String nativeLanguages;
   final String cardsPerTraining;
   final String ratingAndLeague;
+  final String llmScoring;
+  final String llmScoringOff;
+  final String llmExplanations;
+  final String llmExplanationsOff;
   final String matchNotifications;
   final String hideFromLeaderboard;
   final String blockedPlayers;
@@ -93,6 +98,7 @@ class AppStrings {
     required this.settingsTitle,
     required this.sectionInterface,
     required this.sectionTraining,
+    required this.sectionScoring,
     required this.sectionDebug,
     required this.sectionNotifications,
     required this.sectionPrivacy,
@@ -102,6 +108,10 @@ class AppStrings {
     required this.nativeLanguages,
     required this.cardsPerTraining,
     required this.ratingAndLeague,
+    required this.llmScoring,
+    required this.llmScoringOff,
+    required this.llmExplanations,
+    required this.llmExplanationsOff,
     required this.matchNotifications,
     required this.hideFromLeaderboard,
     required this.blockedPlayers,
@@ -145,6 +155,7 @@ class AppStrings {
     settingsTitle: 'Настройки',
     sectionInterface: 'ИНТЕРФЕЙС',
     sectionTraining: 'ТРЕНИРОВКА',
+    sectionScoring: 'ОЦЕНКА ОТВЕТОВ',
     sectionDebug: 'ОТЛАДКА',
     sectionNotifications: 'УВЕДОМЛЕНИЯ',
     sectionPrivacy: 'ПРИВАТНОСТЬ',
@@ -154,6 +165,10 @@ class AppStrings {
     nativeLanguages: 'Родные языки',
     cardsPerTraining: 'Карточек за тренировку',
     ratingAndLeague: 'Рейтинг и лига',
+    llmScoring: 'Оценка от ИИ',
+    llmScoringOff: 'Выключено — балл считается по произнесённым элементам фразы',
+    llmExplanations: 'Объяснения от ИИ',
+    llmExplanationsOff: 'Выключено — разбор берётся из готовых пояснений',
     matchNotifications: 'Уведомления о матчах',
     hideFromLeaderboard: 'Скрыть меня из рейтинга',
     blockedPlayers: 'Заблокированные игроки',
@@ -203,6 +218,7 @@ class AppStrings {
     settingsTitle: 'Settings',
     sectionInterface: 'INTERFACE',
     sectionTraining: 'TRAINING',
+    sectionScoring: 'ANSWER SCORING',
     sectionDebug: 'DEBUG',
     sectionNotifications: 'NOTIFICATIONS',
     sectionPrivacy: 'PRIVACY',
@@ -212,6 +228,10 @@ class AppStrings {
     nativeLanguages: 'Native languages',
     cardsPerTraining: 'Cards per training',
     ratingAndLeague: 'Rating and league',
+    llmScoring: 'AI scoring',
+    llmScoringOff: 'Off — the score counts the phrase elements you said',
+    llmExplanations: 'AI explanations',
+    llmExplanationsOff: 'Off — feedback comes from the prewritten explanations',
     matchNotifications: 'Match notifications',
     hideFromLeaderboard: 'Hide me from the leaderboard',
     blockedPlayers: 'Blocked players',

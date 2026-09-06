@@ -26,9 +26,9 @@ import {
   type CefrLevel,
   evaluateGrammar,
   type JudgeVerbosity,
-  JUDGE_ENABLED,
   NEUTRAL_SCORE,
 } from "../_shared/evaluateGrammar.ts";
+import { loadPlayerPrefs } from "../_shared/playerPrefs.ts";
 import { transcribeAudio } from "../_shared/asr/index.ts";
 import { scoreByElements } from "../_shared/elementScoring.ts";
 import { explainMissedElements } from "../_shared/explainElements.ts";
@@ -427,10 +427,20 @@ async function processJob(job_id: string): Promise<void> {
         verbosity,
         budget_left_ms: budgetLeft(),
       };
-      // Поэлементная оценка — основной путь, пока судья выключен.
-      // Считается по тому же эталону с «|», который клиент показывал
-      // игроку, поэтому балл и подсветка не могут разойтись.
-      const byElements = JUDGE_ENABLED ? null : scoreByElements(expectedPhrase, transcript);
+      // Где участвует модель — решает игрок в настройках. JUDGE_ENABLED и
+      // EXPLAIN_PREFER_DATASET остаются рубильником оператора и работают
+      // только когда настройки игрока прочитать не удалось.
+      const prefs = await loadPlayerPrefs(supabase, recording.user_id);
+      pipelineDebug.prefs = {
+        llm_scoring: prefs.llmScoring,
+        llm_explanations: prefs.llmExplanations,
+        source: prefs.source,
+      };
+
+      // Поэлементная оценка — путь по умолчанию: считается по тому же
+      // эталону с «|», который клиент показывал игроку, поэтому балл и
+      // подсветка не могут разойтись.
+      const byElements = prefs.llmScoring ? null : scoreByElements(expectedPhrase, transcript);
 
       if (byElements) {
         score = byElements.score;
@@ -453,6 +463,7 @@ async function processJob(job_id: string): Promise<void> {
           transcript,
           missed.map(({ verdict, index }) => ({ index, text: verdict.text })),
           budgetLeft(),
+          !prefs.llmExplanations,
         );
 
         // Каждый непроизнесённый элемент — строка в grammar_errors, и
@@ -481,13 +492,15 @@ async function processJob(job_id: string): Promise<void> {
         judgeStatus = "ok";
         feedback = `Произнесено ${byElements.correctCount} из ${byElements.totalCount} частей фразы.`;
         pipelineDebug.judge = {
-          mode: "элементы + разбор ошибок из датасета, модель — страховка",
+          mode: prefs.llmExplanations
+            ? "элементы + разбор ошибок моделью"
+            : "элементы + разбор ошибок из датасета, модель — страховка",
           scoring: "поэлементная, без модели",
           correct_elements: byElements.correctCount,
           total_elements: byElements.totalCount,
           explain: explained.debug,
         };
-      } else if (!JUDGE_ENABLED) {
+      } else if (!prefs.llmScoring) {
         // Судья выключен, а фраза пришла без «|» — это старый раунд,
         // заведённый до перехода на поэлементный банк. Балл нейтральный:
         // ни оценить, ни обвинить игрока тут не за что.
@@ -496,7 +509,7 @@ async function processJob(job_id: string): Promise<void> {
         feedback = "Эта фраза из старого набора — балл выставлен нейтральным.";
         pipelineDebug.judge = {
           status: "skipped",
-          reason: "судья выключен, а в эталоне нет разделителей элементов",
+          reason: "оценка моделью выключена, а в эталоне нет разделителей элементов",
         };
       } else {
         const result = await evaluateGrammar(

@@ -83,10 +83,13 @@ const DATASET_PAIRS = new Set([
  *
  * По умолчанию НЕТ: готовый разбор для этой пары уже написан, клиент
  * подставит его сам, и вызов провайдера был бы платой за текст, который и
- * так есть. Включить модель поверх датасета (например, чтобы сравнить
- * качество) — `npx supabase secrets set EXPLAIN_PREFER_DATASET=0`.
+ * так есть.
+ *
+ * Это значение по умолчанию НА УРОВНЕ СЕРВЕРА. У игрока есть свой
+ * переключатель («Объяснения от ИИ»), и он главнее — см. playerPrefs.ts.
+ * Сюда смотрят только тогда, когда настройки игрока прочитать не удалось.
  */
-const PREFER_DATASET = (Deno.env.get("EXPLAIN_PREFER_DATASET") ?? "1") !== "0";
+export const PREFER_DATASET = (Deno.env.get("EXPLAIN_PREFER_DATASET") ?? "1") !== "0";
 
 /** Есть ли в датасете готовые разборы для этой пары. */
 export function hasDatasetExplanations(nativeLanguage: string, targetLanguage: string): boolean {
@@ -222,6 +225,11 @@ export async function explainMissedElements(
   missed: ElementExplanation[],
   /** Остаток бюджета задачи. Пережить его запрос не имеет права. */
   budgetMs: number,
+  /**
+   * Брать разбор из датасета, когда пара им покрыта. Приходит из
+   * настроек игрока; сервер решает за него только если их не прочитали.
+   */
+  preferDataset: boolean = PREFER_DATASET,
 ): Promise<ExplainResult> {
   const empty = new Map<number, string>();
 
@@ -233,7 +241,7 @@ export async function explainMissedElements(
   }
   // Пару покрывает датасет — к провайдеру не идём вовсе. degraded здесь
   // false: разбор у игрока будет, просто не от модели.
-  if (PREFER_DATASET && hasDatasetExplanations(nativeLanguage, targetLanguage)) {
+  if (preferDataset && hasDatasetExplanations(nativeLanguage, targetLanguage)) {
     return {
       byIndex: empty,
       degraded: false,

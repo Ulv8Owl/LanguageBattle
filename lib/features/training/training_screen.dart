@@ -6,6 +6,7 @@ import 'package:go_router/go_router.dart';
 import '../../core/app_locale.dart';
 import '../../core/cefr_levels.dart';
 import '../../core/debug_flags.dart';
+import '../../core/game_settings.dart';
 import '../../core/game_access.dart';
 import '../../core/languages.dart';
 import '../../core/supabase_client.dart';
@@ -1305,12 +1306,18 @@ class _ErrorReport extends StatelessWidget {
   /// ничего не пересчитывает сам — иначе подсветка могла бы разойтись с
   /// выставленным баллом.
   ///
-  /// ОТКУДА БЕРЁТСЯ ТЕКСТ. Сначала — датасет: разбор для пары
-  /// «родной-целевой» написан заранее, доступен мгновенно и не зависит ни
-  /// от лимитов провайдера, ни от его настроения. Модель подключается
-  /// там, где датасет молчит: старая фраза не из банка, непокрытая пара,
-  /// элемент за пределами таблицы. Если молчат обе — значение пустое, и
-  /// это видно на экране прямым текстом, а не подменяется чем-то похожим.
+  /// ОТКУДА БЕРЁТСЯ ТЕКСТ. Порядок задаёт переключатель «Объяснения от
+  /// ИИ» в настройках. Выключен (по умолчанию) — сначала датасет: разбор
+  /// для пары «родной-целевой» написан заранее, доступен мгновенно и не
+  /// зависит ни от лимитов провайдера, ни от его настроения. Включён —
+  /// сначала текст модели: сервер по той же настройке её и спросил.
+  ///
+  /// В ОБЕ СТОРОНЫ ЭТО ПРЕДПОЧТЕНИЕ, А НЕ ЗАПРЕТ. Второй источник
+  /// остаётся запасным: датасет молчит на старой фразе не из банка, на
+  /// непокрытой паре и на элементе за пределами таблицы; модель молчит,
+  /// когда провайдер отказал. Показать пустоту, имея готовый текст рядом,
+  /// было бы наказанием за настройку. Если молчат оба — значение пустое,
+  /// и это видно на экране прямым текстом, а не подменяется похожим.
   Map<int, _Explanation> get _messagesByIndex {
     final entry = phraseIndex < 0 ? null : PhraseBank.entry(phraseIndex);
     if (entry == null) return const {};
@@ -1327,10 +1334,14 @@ class _ErrorReport extends StatelessWidget {
       if (!byOffset.containsKey(offsets[i])) continue;
       final fromDataset = PhraseBank.explanationFor(
           phraseIndex, i, nativeLanguage, targetLanguage);
-      if (fromDataset.isNotEmpty) {
-        result[i] = _Explanation(fromDataset, fromModel: false);
+      final fromModel = byOffset[offsets[i]]!;
+      final preferModel = GameSettings.llmExplanations;
+      final first = preferModel ? fromModel : fromDataset;
+      if (first.isNotEmpty) {
+        result[i] = _Explanation(first, fromModel: preferModel);
       } else {
-        result[i] = _Explanation(byOffset[offsets[i]]!, fromModel: true);
+        final fallback = preferModel ? fromDataset : fromModel;
+        result[i] = _Explanation(fallback, fromModel: !preferModel);
       }
     }
     return result;
