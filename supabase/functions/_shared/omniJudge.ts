@@ -39,8 +39,6 @@ export interface OmniError {
 }
 
 export interface OmniResult {
-  /** Что модель услышала, на изучаемом языке. */
-  heard: string;
   /**
    * Перевод, сделанный САМОЙ моделью. Он же — «Разбор:» на экране.
    *
@@ -205,8 +203,7 @@ function systemPrompt(nativeLanguage: string, targetLanguage: string, level: str
     "",
     "Work in this order:",
     `1. Translate the ${native} sentence into ${target} yourself. This is your reference — you have no other.`,
-    "2. Listen to the recording and transcribe it exactly as spoken, mistakes included. Do not fix anything.",
-    "3. Compare the recording with your own translation.",
+    "2. Listen to the recording and compare what you hear with your own translation.",
     "",
     "A different wording is NOT an error: a sentence can be translated in several correct ways, and you must",
     "accept any wording that conveys the same meaning correctly. Mark an error only when something is genuinely",
@@ -222,21 +219,11 @@ function systemPrompt(nativeLanguage: string, targetLanguage: string, level: str
     `Explain at ${level} level: short and concrete, no grammar jargon the learner would not know.`,
     "",
     "Reply with a single JSON object and nothing else — no markdown, no commentary:",
-    '{"correct": string, "heard": string, "missing": [string],',
-    ' "errors": [{"said": string, "fix": string, "why": string}]}',
-    `"correct" — your translation. "heard" — the transcription. "missing" — fragments of "correct" the learner`,
-    `did not convey. "said" — the exact fragment of "heard" that is wrong, "fix" — how it should sound in ${target},`,
+    '{"correct": string, "missing": [string], "errors": [{"said": string, "fix": string, "why": string}]}',
+    `"correct" — your translation. "missing" — fragments of "correct" the learner did not convey.`,
+    `"said" — what the learner actually said at that point, quoted from the recording verbatim,`,
+    `mistakes included; do not correct it there. "fix" — how it should sound in ${target}.`,
     `"why" — the explanation in ${nativeSelf}. Empty arrays when there is nothing to report.`,
-  ].join("\n");
-}
-
-/** Только услышать — без оценки. Нужен, когда балл считается по элементам. */
-function transcribeOnlyPrompt(targetLanguage: string): string {
-  const target = languageName(targetLanguage);
-  return [
-    `Transcribe the ${target} speech in this recording exactly as spoken, including any mistakes.`,
-    "Do not correct, complete or rephrase anything you hear.",
-    'Reply with a single JSON object and nothing else: {"heard": string}',
   ].join("\n");
 }
 
@@ -347,12 +334,6 @@ export interface OmniRequest {
   /** Задание на РОДНОМ языке — то, что видел игрок. */
   prompt: string;
   level: string;
-  /**
-   * Нужна ли оценка. false — просим только услышанное: балл в этом случае
-   * считается по элементам, и платить за разбор, который никто не покажет,
-   * незачем.
-   */
-  wantJudgement: boolean;
   /** Остаток бюджета задачи. Пережить его вызов не имеет права. */
   budgetMs: number;
 }
@@ -367,7 +348,6 @@ export interface OmniRequest {
 export async function omniEvaluate(req: OmniRequest): Promise<OmniResult> {
   const started = Date.now();
   const fail = (reason: string, extra: Record<string, unknown> = {}): OmniResult => ({
-    heard: "",
     correct: "",
     missing: [],
     errors: [],
@@ -387,13 +367,8 @@ export async function omniEvaluate(req: OmniRequest): Promise<OmniResult> {
     return fail(`на вызов осталось ${Math.round(req.budgetMs / 1000)}с — меньше минимума`);
   }
 
-  const system = req.wantJudgement
-    ? systemPrompt(req.nativeLanguage, req.targetLanguage, req.level)
-    : transcribeOnlyPrompt(req.targetLanguage);
+  const system = systemPrompt(req.nativeLanguage, req.targetLanguage, req.level);
 
-  // Задание уходит ОТДЕЛЬНОЙ строкой и только при оценке. В режиме
-  // «только услышать» его нет намеренно: зная ожидаемый смысл, модель
-  // склонна дописывать за игрока то, чего он не сказал.
   const userParts: unknown[] = [
     {
       type: "input_audio",
@@ -403,12 +378,10 @@ export async function omniEvaluate(req: OmniRequest): Promise<OmniResult> {
       },
     },
   ];
-  if (req.wantJudgement) {
-    userParts.push({
-      type: "text",
-      text: `The learner was asked to say this in ${languageName(req.targetLanguage)}:\n${req.prompt}`,
-    });
-  }
+  userParts.push({
+    type: "text",
+    text: `The learner was asked to say this in ${languageName(req.targetLanguage)}:\n${req.prompt}`,
+  });
 
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
@@ -456,28 +429,19 @@ export async function omniEvaluate(req: OmniRequest): Promise<OmniResult> {
   const parsed = parseJson(raw);
   if (!parsed) return fail(`ответ не разобран как JSON: ${raw.slice(0, 300)}`);
 
-  const heard = typeof parsed.heard === "string" ? parsed.heard.trim() : "";
   const debug: Record<string, unknown> = {
     ...omniConfigDebug(),
     status: "ok",
-    mode: req.wantJudgement ? "оценка и разбор" : "только распознавание",
     ms: Date.now() - started,
     audio_bytes: req.audio.byteLength,
     audio_format: req.audioFormat,
-    heard,
   };
-
-  if (!req.wantJudgement) {
-    // Разбора не просили. Пустой транскрипт при этом не ошибка: игрок мог
-    // промолчать, и это отдельное состояние, а не сбой.
-    return { heard, correct: "", missing: [], errors: [], degraded: false, debug };
-  }
 
   const correct = typeof parsed.correct === "string" ? parsed.correct.trim() : "";
   if (correct.length === 0) {
     // Без собственного перевода модели не с чем сравнивать, и «Разбор:»
     // показать нечем. Это сбой ответа, а не пустой результат.
-    return fail(`в ответе нет перевода: ${raw.slice(0, 300)}`, { heard });
+    return fail(`в ответе нет перевода: ${raw.slice(0, 300)}`);
   }
 
   const missing = Array.isArray(parsed.missing)
@@ -497,5 +461,5 @@ export async function omniEvaluate(req: OmniRequest): Promise<OmniResult> {
   debug.errors_raw = Array.isArray(parsed.errors) ? parsed.errors.length : 0;
   debug.score_formula = `10 - доля несказанного - ${errors.length}`;
 
-  return { heard, correct, missing, errors, degraded: false, debug };
+  return { correct, missing, errors, degraded: false, debug };
 }

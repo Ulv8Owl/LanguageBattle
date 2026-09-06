@@ -856,8 +856,6 @@ class _AiVerdict extends StatelessWidget {
                         // сравнить свою фразу с правильной можно за секунду,
                         // а читать абзац объяснений посреди матча некогда.
                         TranscriptReview(
-                            transcript: recording.transcript,
-                            spoken: recording.spokenForDiff,
                             corrected: recording.correctedText,
                             targetLanguage:
                                 isMine ? (recording.languageCode ?? '') : '',

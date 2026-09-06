@@ -58,7 +58,7 @@ void main() {
     // физически не могут быть одним файлом: разные рантаймы. Значит, они
     // обязаны сверяться тестом, иначе разъедутся молча — и язык, который
     // игрок видит в списке, окажется неизвестен ASR (или наоборот).
-    final ts = File('supabase/functions/_shared/asr/languages.ts').readAsStringSync();
+    final ts = File('supabase/functions/_shared/languages.ts').readAsStringSync();
     final table = ts.substring(
       ts.indexOf('const LANGUAGES'),
       ts.indexOf('};', ts.indexOf('const LANGUAGES')),

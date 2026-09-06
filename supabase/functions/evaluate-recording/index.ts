@@ -8,28 +8,20 @@
 // Одиночную Игру (в соло тоже начисляются валюта и опыт, поэтому оценивать
 // на клиенте нельзя — раздел 2.2).
 //
-// Воркер делает ДВА шага подряд:
-//   1) распознаёт речь по загруженному аудио (_shared/asr/index.ts —
-//      провайдер-агностичный адаптер, см. его же комментарий) — раньше
-//      это делал сам телефон средствами ОС, но одновременный захват
-//      микрофона записью и распознавателем на Android не работает, и
-//      транскрипт всегда приходил пустым;
-//   2) отдаёт транскрипт LLM-судье (evaluateGrammar.ts).
+// ОДИН ШАГ. Мультимодальная модель слушает запись, сама переводит задание
+// и сравнивает услышанное со своим переводом (_shared/omniJudge.ts).
+// Раньше шагов было два: распознавание превращало речь в текст, а
+// текстовый судья сравнивал текст с эталоном. Оба удалены. Распознавание
+// теряло всё, что слышно только в звуке; судья наказывал за правильный
+// перевод, сказанный иначе, чем в эталоне.
 //
-// Балл берётся НАПРЯМУЮ из ответа LLM (раздел 9.4, MVP-версия): без
-// нормирующей формулы, без фильтра по категории ошибок и без сопоставления
-// с confidence ASR. Все три пункта осознанно отложены — см.
-// deferred_suggestions.md, не добавлять их сюда без отдельного запроса.
+// БАЛЛ СЧИТАЕТ ВОРКЕР, а не модель: доля несказанного плюс по баллу за
+// ошибку (scoreFor). Числовая оценка от модели гуляла на два-три балла на
+// одной и той же записи и не объяснялась игроку.
 
 import { createClient, type SupabaseClient } from "jsr:@supabase/supabase-js@2";
-import {
-  type CefrLevel,
-  evaluateGrammar,
-  type JudgeVerbosity,
-  NEUTRAL_SCORE,
-} from "../_shared/evaluateGrammar.ts";
-import { omniEnabled, omniEvaluate, type OmniResult, scoreFor } from "../_shared/omniJudge.ts";
-import { transcribeAudio } from "../_shared/asr/index.ts";
+import { type CefrLevel, NEUTRAL_SCORE } from "../_shared/cefr.ts";
+import { omniEvaluate, type OmniResult, scoreFor } from "../_shared/omniJudge.ts";
 
 /**
  * Лига говорящего приравнена к уровню CEFR (см. supabase/migrations/0023 —
@@ -50,12 +42,6 @@ function cefrLevelForRating(leagueRating: number): CefrLevel {
   if (leagueRating < 2400) return "C1";
   return "C2";
 }
-
-/** Балл за тишину: ASR отработал, но говорить было не о чем. */
-const EMPTY_TRANSCRIPT_SCORE = 1;
-
-/** Статусы распознавания — те же значения, что в CHECK у voice_recordings (миграция 0013). */
-type TranscriptStatus = "pending" | "ok" | "empty" | "failed";
 
 /** Статусы работы судьи — CHECK у voice_recordings (миграции 0014, 0024). */
 type JudgeStatus = "pending" | "ok" | "degraded" | "skipped";
@@ -106,8 +92,6 @@ const WRITE_RESERVE_MS = 15_000;
  * распознавание речи и один ответ модели. Разница в цене отражает разницу
  * в стоимости: ответ модели дороже и дольше.
  */
-const ENERGY_COST_ASR = Number(Deno.env.get("ENERGY_COST_ASR") ?? 1);
-const ENERGY_COST_LLM = Number(Deno.env.get("ENERGY_COST_LLM") ?? 2);
 
 /**
  * Сколько стоит один вызов мультимодальной модели.
@@ -211,8 +195,6 @@ interface VoiceRecordingRow {
   recording_slot: string;
   language_code: string | null;
   audio_storage_path: string;
-  transcript: string | null;
-  transcript_status: TranscriptStatus | null;
   attempt_number: number | null;
   created_at: string;
 }
@@ -317,11 +299,6 @@ async function processJob(job_id: string): Promise<void> {
     const targetLanguage = recording.language_code ?? "en";
     const budgetLeft = () => JOB_BUDGET_MS - (Date.now() - jobStartedAt) - WRITE_RESERVE_MS;
 
-    // Фраза раунда на изучаемом языке — то, что игрок должен был сказать.
-    // Нужна дважды: подсказкой распознавателю и эталоном судье, поэтому
-    // читается один раз здесь.
-    const expectedPhrase = await roundPhrase(supabase, recording, targetLanguage);
-
     // Родной язык игрока нужен ДО распознавания, а не только судье: он
     // уходит в ASR альтернативой, чтобы распознаватель мог сказать «это
     // вообще-то русский», а не подбирать целевые слова под родную речь.
@@ -365,79 +342,47 @@ async function processJob(job_id: string): Promise<void> {
     // них, но в базу не ходит, пока списывать нечего.
     const energy = createEnergyMeter(supabase, recording);
 
-    // Шаг 1 — услышать сказанное.
+    // Единственный шаг пайплайна: модель слушает запись, переводит задание
+    // сама и сравнивает.
     //
-    // Два пути. Мультимодальный (OMNI_ENABLED=1) слушает запись напрямую
-    // и одним вызовом отдаёт и услышанное, и разбор. Классический —
-    // распознавание отдельно, судья отдельно.
-    let transcript: string;
-    let status: TranscriptStatus;
-    let asrDebug: Record<string, unknown>;
-    let uncertainWords: string[] = [];
-    let omni: OmniResult | null = null;
-
-    if (omniEnabled()) {
-      const heardBy = await resolveWithOmni(
-        supabase,
-        recording,
-        targetLanguage,
-        nativeLanguage,
-        // Задание на РОДНОМ языке — единственное, что модель получает
-        // кроме звука. Эталон ей не показывают намеренно: увидев его, она
-        // начнёт сверять с одним вариантом вместо того, чтобы оценивать
-        // перевод (см. omniJudge.ts).
-        await roundPrompt(supabase, recording, nativeLanguage),
-        cefrLevelForRating(
-          (await speakerLeagueRating(supabase, recording.user_id, targetLanguage)) ?? 1000,
-        ),
-        // Разбор просим всегда: другого пути оценки больше нет.
-        true,
-        budgetLeft(),
-      );
-      transcript = heardBy.transcript;
-      status = heardBy.status;
-      asrDebug = heardBy.debug;
-      omni = heardBy.omni;
-      // Один вызов — одно списание, и только когда модель ответила. Отказ
-      // провайдера и повторный прогон по сохранённому транскрипту
-      // бесплатны: энергия платит за ответ, а не за попытку.
-      if (omni && !omni.degraded && heardBy.debug.cached !== true) {
-        await energy.charge(ENERGY_COST_OMNI, "разбор мультимодальной моделью");
-      }
-    } else {
-      const asr = await resolveTranscript(
-        supabase,
-        recording,
-        targetLanguage,
-        expectedPhrase,
-        budgetLeft(),
-      );
-      transcript = asr.transcript;
-      status = asr.status;
-      asrDebug = asr.debug;
-      uncertainWords = asr.uncertainWords;
-      // Распознавание состоялось — списываем за него. Условий два, и оба
-      // важны: "ok" отсекает тишину и сбой (за них игрок не платит), а
-      // cached — повторный прогон по уже сохранённому транскрипту, где
-      // провайдера не звали вовсе.
-      if (status === "ok" && asrDebug.cached !== true) {
-        await energy.charge(ENERGY_COST_ASR, "распознавание речи");
-      }
+    // РАСПОЗНАВАНИЯ ЗДЕСЬ БОЛЬШЕ НЕТ — и не «выключено», а удалено. Оно
+    // превращало речь в текст, теряя всё, что слышно только в звуке, и
+    // существовало ради текстового судьи, которого тоже больше нет. Модель
+    // слышит запись напрямую; просить у неё вдобавок расшифровку — платить
+    // за второй проход по тому же аудио ради текста, который нигде не
+    // показывается.
+    const omni = await runOmni(
+      supabase,
+      recording,
+      targetLanguage,
+      nativeLanguage,
+      // Задание на РОДНОМ языке — единственное, что модель получает кроме
+      // звука. Эталон ей не показывают намеренно: увидев его, она начнёт
+      // сверять с одним вариантом вместо того, чтобы оценивать перевод
+      // (см. omniJudge.ts).
+      await roundPrompt(supabase, recording, nativeLanguage),
+      cefrLevelForRating(
+        (await speakerLeagueRating(supabase, recording.user_id, targetLanguage)) ?? 1000,
+      ),
+      budgetLeft(),
+    );
+    // Один вызов — одно списание, и только когда модель ответила. Отказ
+    // провайдера бесплатен: энергия платит за ответ, а не за попытку.
+    if (!omni.degraded) {
+      await energy.charge(ENERGY_COST_OMNI, "разбор мультимодальной моделью");
     }
 
     // Диагностика пайплайна для отладочной панели в игре (миграция 0016).
-    const pipelineDebug: Record<string, unknown> = { asr: asrDebug };
+    const pipelineDebug: Record<string, unknown> = { omni: omni.debug };
 
-    // Номер попытки в соло нужен ДО вызова судьи: на второй попытке
-    // текстовые объяснения не показываются, а значит и генерировать их не
-    // надо — это основная часть времени ответа.
+    // Номер попытки: на второй попытке текстовые объяснения не
+    // показываются, и разбор пишется в другую строку раунда.
     const attempt = recording.training_round_id
       ? await trainingAttemptNumber(supabase, recording)
       : { attempt: 1, source: "PvP" };
     const attemptNumber = attempt.attempt;
 
-    // Шаг 2 — оценка. Три исхода распознавания дают три разных балла, и
-    // путать их нельзя: за нашу поломку игрок не должен получать 1.
+    // Шаг 2 — что записать. Исходов два: модель ответила или нет.
     let score: number;
     let errors: {
       offset: number;
@@ -458,50 +403,29 @@ async function processJob(job_id: string): Promise<void> {
     let correctedText = "";
     let cleanedText = "";
 
-    if (status === "failed") {
+    if (omni.degraded) {
+      // Модель не ответила. Балл нейтральный, а не единица: единица
+      // означала бы «игрок ответил плохо», а мы просто не знаем, как он
+      // ответил, и наказывать за наш сбой нельзя.
       score = NEUTRAL_SCORE;
-      feedback = "Не удалось распознать речь — балл выставлен нейтральным.";
-      judgeStatus = "skipped";
-      pipelineDebug.judge = { status: "skipped", reason: "речь не распознана — судью не звали" };
-    } else if (status === "empty") {
-      score = EMPTY_TRANSCRIPT_SCORE;
-      feedback = "Не удалось разобрать речь — попробуй сказать чётче и ближе к микрофону.";
-      judgeStatus = "skipped";
-      pipelineDebug.judge = { status: "skipped", reason: "записана тишина — судью не звали" };
+      feedback = "Не удалось разобрать ответ — балл выставлен нейтральным.";
+      judgeStatus = "degraded";
+      pipelineDebug.judge = {
+        status: "degraded",
+        reason: omni.failureReason ?? "модель не ответила",
+      };
+      console.error("evaluate-recording: модель деградировала", {
+        recordingId: recording.id,
+        reason: omni.failureReason,
+      });
     } else {
-      // Лига говорящего на этом языке -> уровень CEFR (скрытая механика:
-      // приравнивание лиг к A1-C2) — ограничивает только сложность текста
-      // объяснений LLM, не саму оценку. Нет строки — считаем новичком
-      // (league_rating 1000 = A1, как и везде в проекте).
-      const level = cefrLevelForRating(
-        (await speakerLeagueRating(supabase, recording.user_id, targetLanguage)) ?? 1000,
-      );
-
-      // Первая попытка Одиночной Игры просит подробный разбор (раздел 2.2:
-      // игрок должен понять, что исправить перед второй попыткой). Вторая
-      // показывает только подсветку правки — объяснения там не выводятся,
-      // поэтому не запрашиваются. PvP получает короткую пометку в ленте боя.
-      // Балл и исправленный текст считаются одинаково во всех режимах.
-      const verbosity: JudgeVerbosity = recording.training_round_id == null
-        ? "brief"
-        : attemptNumber >= 2
-        ? "marksOnly"
-        : "detailed";
-      // Номер попытки и выбранный режим — в отладку: по экрану невозможно
-      // отличить «судью попросили объяснять» от «попытку сочли первой».
       pipelineDebug.round = {
         attempt: attemptNumber,
         attempt_source: attempt.source,
-        verbosity,
         budget_left_ms: budgetLeft(),
       };
-      // Оценивает мультимодальная модель — другого пути больше нет.
-      // Поэлементный подсчёт и разбор по элементам эталона убраны целиком:
-      // они мыслили структурой правильного ответа, а модель судит перевод
-      // как таковой, и держать рядом две несовместимые механики значило бы
-      // поддерживать ту, которой никто не пользуется.
-      if (omni !== null && !omni.degraded) {
-        const judged = omni!;
+      {
+        const judged = omni;
         // БАЛЛ СЧИТАЕМ МЫ, а не модель. Числовая оценка от неё была самой
         // шаткой частью ответа — на одной записи гуляла на два-три балла и
         // объяснить её игроку было нечем. Здесь арифметика: доля
@@ -510,9 +434,8 @@ async function processJob(job_id: string): Promise<void> {
         score = scoreFor(judged.correct, judged.missing, judged.errors.length);
 
         // «Разбор:» — перевод, сделанный САМОЙ моделью. Не эталон из
-        // датасета: его она не видела. Сравнивается он с услышанным.
+        // датасета: его она не видела.
         correctedText = judged.correct;
-        cleanedText = judged.heard;
 
         // Ошибка привязана к ФРАГМЕНТУ сказанного, а не к элементу
         // эталона: границы модель провела по смыслу, и указывать ими в
@@ -549,50 +472,6 @@ async function processJob(job_id: string): Promise<void> {
           score,
           ...judged.debug,
         };
-      } else {
-        const result = await evaluateGrammar(
-          transcript,
-          targetLanguage,
-          nativeLanguage,
-          verbosity,
-          level,
-          expectedPhrase.replaceAll("|", ""),
-          budgetLeft(),
-          uncertainWords,
-        );
-
-        // Судья — тот же платный вызов модели, что и разбор ошибок, и
-        // цена у него та же. Отказ бесплатен: балл в этом случае
-        // нейтральный, то есть игрок ничего и не получил.
-        if (!result.degraded) {
-          await energy.charge(ENERGY_COST_LLM, "оценка судьёй");
-        }
-
-        score = result.score;
-        errors = result.errors;
-        judgeStatus = result.degraded ? "degraded" : "ok";
-        pipelineDebug.judge = result.debug;
-        correctedText = result.corrected;
-        cleanedText = result.cleaned;
-        // Пустой список ошибок значит «ошибок нет» ТОЛЬКО если объяснения
-        // вообще запрашивались. В бою их не просят (verbosity brief), и
-        // писать там «ошибок не найдено» — значит утверждать то, чего судья
-        // не говорил: правка при этом может быть на пол-фразы.
-        const explanationsAsked = verbosity === "detailed";
-        feedback = result.degraded
-          ? "Не удалось получить разбор от ИИ — балл выставлен нейтральным."
-          : errors.length > 0
-          ? errors.map((e) => e.message).slice(0, 3).join(" ")
-          : explanationsAsked
-          ? "Отлично, ошибок не найдено!"
-          : "Разбор показан подсветкой правки.";
-
-        if (result.degraded) {
-          console.error("evaluate-recording: судья деградировал", {
-            recordingId: recording.id,
-            reason: result.failureReason,
-          });
-        }
       }
     }
 
@@ -646,7 +525,7 @@ async function processJob(job_id: string): Promise<void> {
     }
 
     await markDone(supabase, job_id);
-    console.log("evaluate-recording: готово", { job_id, score, transcript_status: status, judge_status: judgeStatus });
+    console.log("evaluate-recording: готово", { job_id, score, judge_status: judgeStatus });
   } catch (e) {
     // Задача ОБЯЗАНА получить конечный статус в любом случае: клиент ждёт
     // 'done'/'failed' через Realtime, и оставленный 'processing' — это
@@ -716,49 +595,26 @@ async function roundPrompt(
 }
 
 /**
- * Мультимодальный путь: один вызов вместо связки «распознавание + судья».
+ * Единственный вызов пайплайна: звук на вход, разбор на выход.
  *
- * Кэш транскрипта тот же, что у классического пути, и по той же причине:
- * повторный прогон задачи по уже разобранной записи не должен ходить к
- * провайдеру второй раз. Но кэшируется только УСЛЫШАННОЕ — разбор при
- * повторе не восстановится, и это честно видно по debug.cached.
+ * Никогда не бросает — сбой провайдера приходит как degraded, и балл тогда
+ * нейтральный. Иначе задача осталась бы висеть в 'processing', а игрок
+ * ждал бы результат, которого не будет.
+ *
+ * КЭША ЗДЕСЬ НЕТ, и это осознанно. Раньше повторный прогон задачи брал
+ * сохранённый транскрипт и не ходил к провайдеру. Транскрипта больше нет —
+ * хранить нечего, — а повтор случается только когда первая попытка не
+ * дошла до записи результата, то есть звать модель заново там и надо.
  */
-async function resolveWithOmni(
+async function runOmni(
   supabase: SupabaseClient,
   recording: VoiceRecordingRow,
   targetLanguage: string,
   nativeLanguage: string,
   prompt: string,
-  level: string,
-  wantJudgement: boolean,
+  level: CefrLevel,
   budgetMs: number,
-): Promise<{
-  transcript: string;
-  status: TranscriptStatus;
-  debug: Record<string, unknown>;
-  omni: OmniResult | null;
-}> {
-  const existing = (recording.transcript ?? "").trim();
-  if (existing.length > 0) {
-    if (recording.transcript_status !== "ok") {
-      await saveTranscript(supabase, recording.id, existing, [], "ok");
-    }
-    return {
-      transcript: existing,
-      status: "ok",
-      debug: { provider: "omni", status: "ok", transcript: existing, cached: true },
-      omni: null,
-    };
-  }
-  if (recording.transcript_status === "empty" || recording.transcript_status === "failed") {
-    return {
-      transcript: "",
-      status: recording.transcript_status,
-      debug: { provider: "omni", status: recording.transcript_status, cached: true },
-      omni: null,
-    };
-  }
-
+): Promise<OmniResult> {
   const { data: file, error: downloadErr } = await supabase.storage
     .from("voice-recordings")
     .download(recording.audio_storage_path);
@@ -767,38 +623,26 @@ async function resolveWithOmni(
       path: recording.audio_storage_path,
       downloadErr,
     });
-    await saveTranscript(supabase, recording.id, "", [], "failed");
     return {
-      transcript: "",
-      status: "failed",
-      debug: {
-        provider: "omni",
-        status: "failed",
-        error: `не удалось скачать аудио: ${downloadErr?.message ?? downloadErr}`,
-      },
-      omni: null,
+      correct: "",
+      missing: [],
+      errors: [],
+      degraded: true,
+      failureReason: `не удалось скачать аудио: ${downloadErr?.message ?? downloadErr}`,
+      debug: { provider: "omni", status: "failed", error: "аудио не скачалось" },
     };
   }
 
   const audio = new Uint8Array(await file.arrayBuffer());
-  const result = await omniEvaluate({
+  return await omniEvaluate({
     audio,
     audioFormat: audioFormatOf(recording.audio_storage_path),
     nativeLanguage,
     targetLanguage,
     prompt,
     level,
-    wantJudgement,
     budgetMs,
   });
-
-  const status: TranscriptStatus = result.degraded
-    ? "failed"
-    : result.heard.trim().length > 0
-    ? "ok"
-    : "empty";
-  await saveTranscript(supabase, recording.id, result.heard, [], status);
-  return { transcript: result.heard, status, debug: result.debug, omni: result };
 }
 
 /**
@@ -813,95 +657,6 @@ async function resolveWithOmni(
 function audioFormatOf(path: string): string {
   const ext = path.split(".").pop()?.toLowerCase() ?? "";
   return ["wav", "mp3", "m4a", "aac", "ogg", "flac", "webm"].includes(ext) ? ext : "wav";
-}
-
-/**
- * Возвращает транскрипт записи, распознавая аудио, если это ещё не сделано,
- * и сохраняя результат обратно в voice_recordings — чтобы повторный запуск
- * задачи по той же записи не гонял ASR второй раз, а клиент мог показать
- * игроку, что именно услышал распознаватель.
- */
-async function resolveTranscript(
-  supabase: SupabaseClient,
-  recording: VoiceRecordingRow,
-  targetLanguage: string,
-  expectedPhrase: string,
-  /** Остаток бюджета задачи — распознавание не должно его пережить. */
-  budgetMs: number,
-): Promise<{
-  transcript: string;
-  status: TranscriptStatus;
-  debug: Record<string, unknown>;
-  /** Слова, в которых распознавание не уверено, — судье в помощь. */
-  uncertainWords: string[];
-  /** Язык, который услышал распознаватель, или null, если он не сказал. */
-}> {
-  const existing = (recording.transcript ?? "").trim();
-  if (existing.length > 0) {
-    if (recording.transcript_status !== "ok") {
-      await saveTranscript(supabase, recording.id, existing, [], "ok");
-    }
-    return {
-      transcript: existing,
-      status: "ok",
-      debug: { status: "ok", transcript: existing, cached: true },
-      uncertainWords: [],
-      // Готовый транскрипт языка не помнит — дальше сработает проверка
-      // по письменности.
-    };
-  }
-  if (recording.transcript_status === "empty" || recording.transcript_status === "failed") {
-    // Уже пробовали и не получилось — не тратим квоту провайдера повторно.
-    return {
-      transcript: "",
-      status: recording.transcript_status,
-      debug: { status: recording.transcript_status, cached: true },
-      uncertainWords: [],
-    };
-  }
-
-  const { data: file, error: downloadErr } = await supabase.storage
-    .from("voice-recordings")
-    .download(recording.audio_storage_path);
-  if (downloadErr || !file) {
-    console.error("evaluate-recording: audio download failed", {
-      path: recording.audio_storage_path,
-      downloadErr,
-    });
-    await saveTranscript(supabase, recording.id, "", [], "failed");
-    return {
-      transcript: "",
-      status: "failed",
-      debug: { status: "failed", error: `не удалось скачать аудио: ${downloadErr?.message ?? downloadErr}` },
-      uncertainWords: [],
-    };
-  }
-
-  const audio = new Uint8Array(await file.arrayBuffer());
-  // Фраза раунда — это ровно то, что игрок сейчас пытается повторить.
-  // Отдаём её распознавателю подсказкой: он всё так же слышит настоящую
-  // речь со всеми ошибками, но перестаёт угадывать слова из всего языка
-  // сразу и заметно реже подставляет непохожие.
-  const asr = await transcribeAudio(
-    audio,
-    targetLanguage,
-    hintPhrases(expectedPhrase),
-    budgetMs,
-  );
-
-  const status: TranscriptStatus = asr.degraded ? "failed" : asr.transcript.length > 0 ? "ok" : "empty";
-  await saveTranscript(supabase, recording.id, asr.transcript, asr.words, status);
-  return {
-    transcript: asr.transcript,
-    status,
-    debug: asr.debug,
-    // Порог намеренно высокий: лучше показать судье лишнее слово, чем
-    // пропустить то самое, на котором распознаватель ослышался.
-    uncertainWords: asr.words
-      .filter((w) => w.confidence > 0 && w.confidence < 0.85)
-      .map((w) => w.word)
-      .slice(0, 12),
-    };
 }
 
 /**
@@ -933,85 +688,6 @@ async function trainingAttemptNumber(
     return { attempt: 1, source: `подсчёт не удался (${error?.message ?? "нет count"}) — считаем первой` };
   }
   return { attempt: count, source: "подсчёт строк (старый клиент)" };
-}
-
-/**
- * Фраза раунда на изучаемом языке — из соло-раунда или из раунда боя, смотря
- * чей это слот. Пустая строка, если фразы нет: и подсказка распознавателю, и
- * эталон судье без неё просто не передаются.
- */
-async function roundPhrase(
-  supabase: SupabaseClient,
-  recording: VoiceRecordingRow,
-  targetLanguage: string,
-): Promise<string> {
-  try {
-    if (recording.training_round_id) {
-      // В Одиночной Игре язык один, и эталон с разделителями лежит прямо
-      // в generated_phrase.
-      const { data } = await supabase
-        .from("training_rounds")
-        .select("generated_phrase")
-        .eq("id", recording.training_round_id)
-        .maybeSingle();
-      return (data?.generated_phrase ?? "").trim();
-    }
-    if (!recording.round_id) return "";
-
-    const { data } = await supabase
-      .from("rounds")
-      .select("generated_phrase, expected_by_language")
-      .eq("id", recording.round_id)
-      .maybeSingle();
-
-    // В Дуэли generated_phrase — это ОБЕ фразы через слэш (так они
-    // показаны в ленте), и оценивать по ней нельзя: непонятно, какая
-    // половина чья. Эталон для оценки лежит по языкам — миграция 0029.
-    const byLanguage = data?.expected_by_language as Record<string, string> | null;
-    const forSpeaker = byLanguage?.[targetLanguage];
-    if (typeof forSpeaker === "string" && forSpeaker.trim().length > 0) {
-      return forSpeaker.trim();
-    }
-    return (data?.generated_phrase ?? "").trim();
-  } catch (e) {
-    console.error("evaluate-recording: не смог получить фразу раунда", e);
-    return "";
-  }
-}
-
-/**
- * Google ждёт короткие фразы-подсказки, а не абзац целиком: разбиваем по
- * предложениям — так подсказка помогает на каждом из них, а не только при
- * точном совпадении всего текста.
- */
-function hintPhrases(phrase: string): string[] {
-  if (phrase.length === 0) return [];
-  return phrase
-    .split(/(?<=[.!?])\s+/)
-    .map((part: string) => part.trim())
-    .filter((part: string) => part.length > 0);
-}
-
-async function saveTranscript(
-  supabase: SupabaseClient,
-  recordingId: string,
-  transcript: string,
-  words: { word: string; confidence: number }[],
-  status: TranscriptStatus,
-) {
-  const { error } = await supabase
-    .from("voice_recordings")
-    .update({
-      transcript,
-      word_confidences: words,
-      transcript_status: status,
-    })
-    .eq("id", recordingId);
-  // Не роняем задачу из-за этого (балл всё равно будет выставлен), но и
-  // молчать нельзя: если столбца transcript_status нет, значит миграция
-  // 0013 не применена, и ASR будет впустую перезапускаться на каждой
-  // повторной обработке записи.
-  if (error) console.error("evaluate-recording: failed to save transcript", { recordingId, error });
 }
 
 async function markDone(supabase: SupabaseClient, jobId: string) {

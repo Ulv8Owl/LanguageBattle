@@ -42,22 +42,25 @@ void main() {
     expect(migration(), contains("raise exception 'no_energy'"));
   });
 
-  test('цены вызовов: распознавание 1, модель 2', () {
-    final ts = worker();
-    expect(ts, contains('Deno.env.get("ENERGY_COST_ASR") ?? 1'));
-    expect(ts, contains('Deno.env.get("ENERGY_COST_LLM") ?? 2'));
+  test('цена вызова: один разбор — три энергии', () {
+    // Прежняя связка стоила 1 (распознавание) + 2 (разбор). Один вызов
+    // делает работу обоих, и цена та же: менять экономику игры заодно с
+    // пайплайном — отдельное решение, которого никто не принимал.
+    expect(worker(), contains('ENERGY_COST_OMNI") ?? 3'));
+    // Прежних цен в коде остаться не должно: за что платят, видно по
+    // одному месту.
+    expect(worker().contains('ENERGY_COST_ASR'), isFalse);
+    expect(worker().contains('ENERGY_COST_LLM'), isFalse);
   });
+
 
   test('за молчание провайдера и за кэш не платят', () {
     final ts = worker();
-    // Распознавание: только успешное и только настоящее — повторный
-    // прогон по уже сохранённому транскрипту провайдера не звал.
-    expect(ts, contains('if (status === "ok" && asrDebug.cached !== true)'));
-    // Модель: только когда она действительно ответила. Разбор ошибок
-    // переехал внутрь мультимодального вызова — отдельного вызова за
-    // пояснениями больше нет, и платить за него нечего.
-    expect(ts, contains("if (omni && !omni.degraded && heardBy.debug.cached !== true)"));
-    expect(ts, contains('if (!result.degraded)'));
+    // Платим только за ответ. Отказ провайдера бесплатен: игрок за нашу
+    // неудачу платить не должен.
+    expect(ts, contains('if (!omni.degraded) {'));
+    // Кэша транскрипта больше нет — распознавание удалено, хранить нечего.
+    expect(ts.contains('cached'), isFalse);
   });
 
   test('проверка уровня остаётся бесплатной', () {

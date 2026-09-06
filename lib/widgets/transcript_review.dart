@@ -4,41 +4,35 @@ import '../core/theme.dart';
 import 'correction_text.dart';
 import 'speak_button.dart';
 
-/// Два блока разбора: что услышало распознавание и как это должно звучать.
+/// Блок «Разбор:» — как это должно было прозвучать.
 ///
-/// Общий для всех трёх режимов. Раньше эта разметка жила внутри экрана
-/// Одиночной Игры, и в бою её просто не было: там ИИ выдавал текстовые
-/// пояснения к паре ошибок, а увидеть свою фразу целиком с правкой было
-/// негде.
+/// «ГОЛОСОВОГО» ЗДЕСЬ БОЛЬШЕ НЕТ. Раньше сверху стояла расшифровка
+/// сказанного, и её приходилось отдельно просить у провайдера. Теперь речь
+/// разбирает мультимодальная модель: она слышит запись напрямую и текстом
+/// её не переводит. Просить расшифровку ради строки на экране значило бы
+/// платить за второй проход по тому же аудио.
+///
+/// Что игрок сказал не так, видно из плашек ошибок: там его собственные
+/// слова, процитированные моделью, — и ровно те куски, в которых он
+/// ошибся, а не вся фраза целиком.
 class TranscriptReview extends StatelessWidget {
-  /// Что услышало распознавание — дословно, без правок.
-  final String transcript;
-
-  /// С чем сравнивается [corrected]: очищенный от самоисправлений текст,
-  /// если судья его прислал, иначе — тот же [transcript].
-  final String spoken;
-
-  /// Тот же ответ, но исправленный. Пусто — сравнивать не с чем.
+  /// Правильный перевод — его сделала модель. Пусто — показывать нечего.
   final String corrected;
 
-  /// Изучаемый язык — на нём и только на нём озвучивается исправленная
-  /// фраза. Пусто — значка динамика не будет: подставить язык «по
-  /// умолчанию» здесь нельзя, иначе английскую фразу однажды прочитают
-  /// по-русски и подадут это как образец произношения.
+  /// Изучаемый язык — на нём и только на нём озвучивается фраза. Пусто —
+  /// значка динамика не будет: подставить язык «по умолчанию» здесь
+  /// нельзя, иначе английскую фразу однажды прочитают по-русски и подадут
+  /// это как образец произношения.
   final String targetLanguage;
 
   /// Куски [corrected], которых игрок не сказал, — их назвала модель.
   ///
-  /// Пустой список означает «считай сам»: тогда правка строится диффом,
-  /// как раньше. Непустой — красим ровно то, что назвала модель, потому
-  /// что по этому же списку ей начислен балл, и красить одно, а снимать
-  /// за другое нельзя.
+  /// По этому же списку ей начислен балл, поэтому красим ровно его:
+  /// красить одно, а снимать за другое нельзя.
   final List<String> missing;
 
   const TranscriptReview({
     super.key,
-    required this.transcript,
-    required this.spoken,
     required this.corrected,
     this.targetLanguage = '',
     this.missing = const [],
@@ -46,46 +40,31 @@ class TranscriptReview extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    if (transcript.isEmpty) return const SizedBox.shrink();
+    if (corrected.isEmpty) return const SizedBox.shrink();
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       mainAxisSize: MainAxisSize.min,
       children: [
-        _label('Голосовое:'),
-        const SizedBox(height: 3),
-        SelectableText(
-          transcript,
-          style: const TextStyle(color: AppColors.cream, fontSize: 13, height: 1.4),
-        ),
-        if (corrected.isNotEmpty) ...[
-          const SizedBox(height: 10),
-          // Значок стоит у заголовка, а не в конце текста: фраза бывает в
-          // несколько строк, и кнопка, уехавшая под неё, читается как
-          // отдельный элемент, а не как «послушать вот это».
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.center,
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              _label('Разбор:'),
-              SpeakButton(text: corrected, languageCode: targetLanguage),
-            ],
-          ),
-          const SizedBox(height: 3),
-          SelectableText.rich(
-            TextSpan(
-              children: missing.isEmpty
-                  ? correctionSpans(spoken, corrected)
-                  : missingSpans(corrected, missing),
+        // Значок стоит у заголовка, а не в конце текста: фраза бывает в
+        // несколько строк, и кнопка, уехавшая под неё, читается как
+        // отдельный элемент, а не как «послушать вот это».
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.center,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              'Разбор:',
+              style: AppFonts.mono(fontSize: 10, weight: FontWeight.w700, color: AppColors.muted),
             ),
-            style: const TextStyle(fontSize: 13, height: 1.4),
-          ),
-        ],
+            SpeakButton(text: corrected, languageCode: targetLanguage),
+          ],
+        ),
+        const SizedBox(height: 3),
+        SelectableText.rich(
+          TextSpan(children: missingSpans(corrected, missing)),
+          style: const TextStyle(fontSize: 13, height: 1.4),
+        ),
       ],
     );
   }
-
-  Widget _label(String text) => Text(
-        text,
-        style: AppFonts.mono(fontSize: 10, weight: FontWeight.w700, color: AppColors.muted),
-      );
 }

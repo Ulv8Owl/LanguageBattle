@@ -13,7 +13,7 @@
  * сверяется с активной парой.
  */
 
-import { bcp47For, isKnownLanguage } from "./asr/languages.ts";
+import { bcp47For, isKnownLanguage } from "./languages.ts";
 import { googleKey, missingKeyMessage } from "./googleKey.ts";
 
 export interface SynthesisResult {

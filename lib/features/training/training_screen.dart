@@ -1387,11 +1387,7 @@ class _ErrorReport extends StatelessWidget {
       _ => 'Скажи фразу ещё раз — вторая попытка идёт в зачёт.',
     };
 
-    final transcript = attempt?.transcript ?? '';
     final correction = attempt?.corrected ?? '';
-    // Сравниваем с очищенным текстом: если игрок поправил сам себя,
-    // брошенный вариант не должен подсветиться как ошибка.
-    final spoken = attempt?.spokenForDiff ?? '';
 
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: feedGap / 2),
@@ -1411,13 +1407,11 @@ class _ErrorReport extends StatelessWidget {
             const SizedBox(height: 10),
 
             TranscriptReview(
-              transcript: transcript,
-              spoken: spoken,
               corrected: correction,
               targetLanguage: targetLanguage,
               missing: _missingSpans,
             ),
-            if (transcript.isNotEmpty) const SizedBox(height: 10),
+            if (correction.isNotEmpty) const SizedBox(height: 10),
 
             if (isSecondAttempt) ...[
               if (noResult || notRecognised || judgeBroken || correction.isEmpty)

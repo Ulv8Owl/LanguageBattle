@@ -23,21 +23,25 @@ void main() {
     }
     expect(s, contains('This is your reference — you have no other'));
     // И воркер не передаёт эталон в вызов: параметр называется prompt, и
-    // приходит в него roundPrompt, а не roundPhrase.
+    // приходит в него roundPrompt. Эталон воркер теперь и не читает.
     expect(worker(), contains('await roundPrompt(supabase, recording, nativeLanguage)'));
+    expect(worker().contains('roundPhrase'), isFalse);
   });
 
-  test('в режиме «только услышать» задание тоже не уходит', () {
-    // Зная ожидаемый смысл, модель склонна дописывать за игрока то, чего
-    // он не сказал, — а транскрипт нужен ровно как сказано.
+  test('расшифровку у модели не просят', () {
+    // Модель понимает речь напрямую. Отдельно просить текст сказанного —
+    // второй проход по тому же аудио за те же деньги ради строки, которая
+    // нигде не показывается.
     final s = omni();
-    expect(s, contains('if (req.wantJudgement) {\n    userParts.push('));
+    expect(s.contains('heard'), isFalse);
+    expect(s.contains('wantJudgement'), isFalse);
+    expect(s.contains('transcribe'), isFalse);
   });
 
-  test('модель просят не чинить услышанное', () {
-    final s = omni();
-    expect(s, contains('mistakes included. Do not fix anything'));
-    expect(s, contains('Do not correct, complete or rephrase'));
+  test('цитату сказанного модель не чинит', () {
+    // В плашке ошибки должны стоять слова игрока, а не исправленный за
+    // него вариант: иначе он не узнает собственную ошибку.
+    expect(omni(), contains('mistakes included; do not correct it there'));
   });
 
   test('ошибки группируются по смыслу, а не по словам', () {
@@ -112,16 +116,24 @@ void main() {
     // делает работу обоих, и цена та же.
     expect(w, contains('ENERGY_COST_OMNI") ?? 3'));
     expect(w, contains('energy.charge(ENERGY_COST_OMNI'));
-    // Платим только за ответ: отказ и повторный прогон по сохранённому
-    // транскрипту бесплатны.
-    expect(w, contains('!omni.degraded && heardBy.debug.cached !== true'));
+    // Платим только за ответ: отказ провайдера бесплатен.
+    expect(w, contains('if (!omni.degraded) {'));
   });
 
-  test('старый путь остаётся, переключается переменной', () {
+  test('распознавания и текстового судьи в пайплайне нет', () {
     final w = worker();
-    expect(w, contains('if (omniEnabled()) {'));
-    expect(w, contains('resolveTranscript('));
-    expect(omni(), contains('Deno.env.get("OMNI_ENABLED") ?? "0"'));
+    for (final gone in ['transcribeAudio', 'resolveTranscript', 'evaluateGrammar', 'ASR_']) {
+      expect(w.contains(gone), isFalse, reason: gone);
+    }
+    // И самих файлов тоже: выключенный путь, который нельзя включить, —
+    // это не запас, а мусор.
+    for (final path in [
+      'supabase/functions/_shared/asr',
+      'supabase/functions/_shared/evaluateGrammar.ts',
+      'supabase/functions/_shared/llmChat.ts',
+    ]) {
+      expect(File(path).existsSync(), isFalse, reason: path);
+    }
   });
 
   test('ошибки модели рисуются своими плашками', () {
