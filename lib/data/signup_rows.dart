@@ -30,6 +30,13 @@ List<Map<String, dynamic>> signupLanguageRows({
         'user_id': userId,
         'language_code': nativeLanguage,
         'role': 'native',
+        // У родной строки native_for нет смысла: она и есть родной язык.
+        // Ключ всё равно нужен — PostgREST на групповой вставке строит
+        // один список столбцов из объединения ключей всех объектов, и
+        // пропуск здесь превратился бы в явный NULL там, где схема ждёт
+        // значение (эта же ловушка когда-то роняла регистрацию из-за
+        // is_active).
+        'native_for': null,
         // Активна всегда изучаемая пара, не родной язык.
         'is_active': false,
       },
@@ -37,6 +44,14 @@ List<Map<String, dynamic>> signupLanguageRows({
         'user_id': userId,
         'language_code': targetLanguage,
         'role': 'learning',
+        // native_for — родной язык ИМЕННО этой пары. Без него первая пара
+        // аккаунта оставалась с null, а весь клиент читает
+        // `native_for ?? users.native_language`: пока главный родной не
+        // меняли, подмены не было видно, но стоило сменить русский на
+        // английский — и пара ru-en превращалась в en-en, то есть язык
+        // становился сам себе родным. Пара обязана помнить, с какого
+        // языка её учат, с первой же секунды.
+        'native_for': nativeLanguage,
         'is_active': true,
       },
     ];

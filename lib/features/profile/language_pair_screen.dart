@@ -35,7 +35,14 @@ class _LanguagePairScreenState extends State<LanguagePairScreen> {
   /// Языки с готовым банком фраз и слов — только их можно взять целевыми.
   /// Реестр знает 32 языка, но учить можно лишь то, что переведено.
   Set<String> _ready = {};
-  Set<String> _usedTargets = {};
+
+  /// Уже заведённые пары как «родной-изучаемый».
+  ///
+  /// Раньше здесь лежали одни изучаемые языки, и это повторяло ошибку
+  /// сервера: испанский, взятый от русского, закрывал испанский от
+  /// английского — то есть ровно ту вторую пару, ради которой заводят
+  /// второй родной язык.
+  Set<String> _usedPairs = {};
   String? _selectedTarget;
   String? _selectedNative;
 
@@ -52,26 +59,32 @@ class _LanguagePairScreenState extends State<LanguagePairScreen> {
       final ready = await ContentLanguages.ready();
       final pairs = await supabase
           .from('user_languages')
-          .select('language_code')
+          .select('language_code, native_for')
           .eq('user_id', uid)
           .eq('role', 'learning');
       final primary = natives.firstWhere(
         (n) => n.isPrimary,
         orElse: () => natives.isEmpty ? const NativeLanguage(code: 'ru', isPrimary: true) : natives.first,
       );
-      final used = pairs.map((r) => r['language_code'] as String).toSet();
-      // Сортировка обязательна: ready — множество, и «первый» элемент без
-      // неё зависит от порядка обхода, то есть предложенный по умолчанию
-      // язык менялся бы от запуска к запуску.
-      final available = (ready.where((l) => l != primary.code && !used.contains(l)).toList())
-        ..sort((a, b) => languageName(a).compareTo(languageName(b)));
+      final used = pairs
+          .map((r) => '${r['native_for'] ?? primary.code}-${r['language_code']}')
+          .toSet();
+      // Родной по умолчанию — тот, у которого ещё есть что учить. Иначе
+      // экран открывался бы на языке без свободных пар и выглядел бы как
+      // «добавлять больше нечего», хотя у соседнего родного всё свободно.
+      final startNative = natives
+              .map((n) => n.code)
+              .where((n) => _freeTargetsFor(n, ready, used).isNotEmpty)
+              .firstOrNull ??
+          primary.code;
       if (!mounted) return;
       setState(() {
         _natives = natives;
         _ready = ready;
-        _selectedNative = primary.code;
-        _usedTargets = used;
-        _selectedTarget = available.isEmpty ? null : available.first;
+        _selectedNative = startNative;
+        _usedPairs = used;
+        final free = _freeTargetsFor(startNative, ready, used);
+        _selectedTarget = free.isEmpty ? null : free.first;
         _loading = false;
       });
     } catch (e) {
@@ -121,14 +134,39 @@ class _LanguagePairScreenState extends State<LanguagePairScreen> {
     );
   }
 
-  List<String> get _availableTargets =>
-      (_ready.where((l) => l != _selectedNative && !_usedTargets.contains(l)).toList())
+  /// Что ещё можно учить с этого родного языка.
+  ///
+  /// Статический, потому что нужен до setState — на загрузке, когда полей
+  /// экрана ещё нет, а решить, с какого родного открыться, уже надо.
+  ///
+  /// Сортировка обязательна: [ready] — множество, и «первый» элемент без
+  /// неё зависит от порядка обхода, то есть предложенный по умолчанию
+  /// язык менялся бы от запуска к запуску.
+  static List<String> _freeTargetsFor(
+    String native,
+    Set<String> ready,
+    Set<String> usedPairs,
+  ) =>
+      (ready.where((l) => l != native && !usedPairs.contains('$native-$l')).toList())
         ..sort((a, b) => languageName(a).compareTo(languageName(b)));
+
+  List<String> get _availableTargets =>
+      _freeTargetsFor(_selectedNative ?? '', _ready, _usedPairs);
+
+  /// Есть ли вообще что добавлять — хоть с одного родного языка.
+  ///
+  /// Именно ХОТЬ С ОДНОГО. Раньше пустое состояние считалось по текущему
+  /// выбранному родному и обрывало всю форму целиком — вместе с выбором
+  /// родного. Игрок с парами en-ru и en-es видел «языков больше нет» и не
+  /// мог даже переключиться на русский, где свободны и английский, и
+  /// испанский. Экран сам себя запирал.
+  bool get _anythingToAdd => _natives
+      .any((n) => _freeTargetsFor(n.code, _ready, _usedPairs).isNotEmpty);
 
   Widget _buildBody() {
     final available = _availableTargets;
 
-    if (available.isEmpty) {
+    if (!_anythingToAdd) {
       return Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
@@ -181,30 +219,41 @@ class _LanguagePairScreenState extends State<LanguagePairScreen> {
         const SizedBox(height: 20),
         const Text('Новый изучаемый язык', style: TextStyle(fontWeight: FontWeight.w700)),
         const SizedBox(height: 8),
-        DropdownButtonFormField<String>(
-          initialValue: _selectedTarget,
-          items:
-              available
-                  .map((l) => DropdownMenuItem(
-                        value: l,
-                        child: Text('${languageFlag(l)}  ${languageName(l)}'),
-                      ))
-                  .toList(),
-          onChanged: (v) => setState(() => _selectedTarget = v),
-        ),
+        // Свободных языков нет ИМЕННО У ЭТОГО родного — но у другого они
+        // есть, иначе мы бы сюда не дошли. Говорим об этом прямо и
+        // оставляем выбор родного доступным, вместо того чтобы обрывать
+        // форму: именно так экран и запирал сам себя.
+        if (available.isEmpty)
+          const Text(
+            'С этого родного языка уже заведены все доступные пары. '
+            'Выберите другой родной язык выше.',
+            style: TextStyle(color: Colors.white54, fontSize: 13, height: 1.4),
+          )
+        else
+          DropdownButtonFormField<String>(
+            initialValue: _selectedTarget,
+            items: available
+                .map((l) => DropdownMenuItem(
+                      value: l,
+                      child: Text('${languageFlag(l)}  ${languageName(l)}'),
+                    ))
+                .toList(),
+            onChanged: (v) => setState(() => _selectedTarget = v),
+          ),
         if (_error != null) ...[
           const SizedBox(height: 12),
           Text(_error!, style: const TextStyle(color: Colors.redAccent)),
         ],
         const SizedBox(height: 12),
         const Text(
-          'Новая пара стартует с рейтинга 1500 ± 350 и не заменяет текущую активную — '
-          'переключиться на неё можно будет тапом по плашке в профиле.',
+          'Новая пара стартует с начального рейтинга и не заменяет текущую активную — '
+          'переключиться на неё можно будет тапом по плашке в профиле. '
+          'Уже заведённые пары не меняются: список родных языков на них не влияет.',
           style: TextStyle(color: Colors.white54, fontSize: 12, height: 1.4),
         ),
         const SizedBox(height: 24),
         ElevatedButton(
-          onPressed: _saving ? null : _save,
+          onPressed: _saving || _selectedTarget == null ? null : _save,
           child: _saving
               ? const SizedBox(height: 20, width: 20, child: CircularProgressIndicator(strokeWidth: 2))
               : const Text('Добавить'),

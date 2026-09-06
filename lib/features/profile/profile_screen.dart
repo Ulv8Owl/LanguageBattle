@@ -60,11 +60,15 @@ class _ProfileScreenState extends State<ProfileScreen> {
     final uid = currentUserId;
     try {
       final profile = await supabase.from('users').select().eq('id', uid).maybeSingle();
+      // Скрытые плашки не показываем, но и не удаляем: hidden_at убирает
+      // пару с экрана, оставляя рейтинг, лигу и историю целыми
+      // (миграция 0034).
       final pairs = await supabase
           .from('user_languages')
           .select()
           .eq('user_id', uid)
           .eq('role', 'learning')
+          .isFilter('hidden_at', null)
           .order('language_code');
       final asA = await supabase.from('matches').select().eq('player_a_id', uid).eq('status', 'completed');
       final asB = await supabase.from('matches').select().eq('player_b_id', uid).eq('status', 'completed');
@@ -112,14 +116,104 @@ class _ProfileScreenState extends State<ProfileScreen> {
   Widget _pairChip(Map<String, dynamic> pair, String defaultNative) {
     // native_for — с какого родного языка изучается ИМЕННО эта пара
     // (миграция 0025); у пар, заведённых до неё, значение null, и тогда
-    // честно берём единственный на тот момент родной.
+    // честно берём единственный на тот момент родной. После миграции 0034
+    // null здесь уже невозможен — запасной путь оставлен на случай
+    // клиента, работающего с базой до неё.
     final anchor = (pair['native_for'] as String?) ?? defaultNative;
     return _LanguagePairChip(
       nativeFlag: languageFlag(anchor),
       targetFlag: languageFlag(pair['language_code'] as String?),
+      // Подсвечена ВЫБРАННАЯ пара, а не та, по которой сейчас попали
+      // пальцем. Подсветка означает «этой парой вы играете», и мигать ею
+      // на каждом касании значило бы обесценить единственный признак, по
+      // которому активную пару вообще видно.
       active: pair['is_active'] == true,
-      onTap: pair['is_active'] == true ? null : () => _selectPair(pair['language_code'] as String),
+      onTap: () => _openPairMenu(pair, anchor),
     );
+  }
+
+  /// Меню плашки: выбрать пару или убрать её с профиля.
+  ///
+  /// ПОЧЕМУ МЕНЮ, А НЕ ПРЯМОЕ ПЕРЕКЛЮЧЕНИЕ. Тап по плашке раньше сразу
+  /// менял активную пару. Промах по соседней плашке молча уводил игрока на
+  /// другой язык, и заметно это становилось уже в бою. Лишний шаг здесь
+  /// стоит секунды и убирает целый класс случайных переключений.
+  ///
+  /// Тап мимо листа закрывает его, ничего не меняя, — это поведение
+  /// showModalBottomSheet по умолчанию, и оно ровно то, что нужно: отмена
+  /// должна быть самым доступным действием.
+  Future<void> _openPairMenu(Map<String, dynamic> pair, String anchor) async {
+    final target = pair['language_code'] as String;
+    final isActive = pair['is_active'] == true;
+    final title = '${languageFlag(anchor)} ${languageName(anchor)} → '
+        '${languageFlag(target)} ${languageName(target)}';
+
+    final action = await showModalBottomSheet<String>(
+      context: context,
+      backgroundColor: AppColors.navy2,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const SizedBox(height: 12),
+            Text(title, style: AppFonts.ui(fontSize: 15, weight: FontWeight.w700)),
+            const SizedBox(height: 4),
+            Text(
+              isActive ? 'Сейчас выбрана' : 'Не выбрана',
+              style: AppFonts.mono(fontSize: 10, color: AppColors.muted),
+            ),
+            const SizedBox(height: 12),
+            ListTile(
+              leading: const Icon(Icons.check_circle_outline, color: AppColors.gold),
+              title: const Text('Выбрать языковую пару'),
+              enabled: !isActive,
+              onTap: () => Navigator.pop(ctx, 'select'),
+            ),
+            ListTile(
+              leading: const Icon(Icons.visibility_off_outlined, color: AppColors.danger),
+              title: const Text('Удалить языковую пару'),
+              subtitle: Text(
+                isActive
+                    ? 'Сначала выберите другую пару'
+                    : 'Плашка исчезнет с профиля. Рейтинг, лига и история '
+                        'по этой паре сохранятся — добавите её снова, и всё вернётся.',
+                style: AppFonts.ui(fontSize: 11, color: AppColors.muted),
+              ),
+              isThreeLine: !isActive,
+              enabled: !isActive,
+              onTap: () => Navigator.pop(ctx, 'hide'),
+            ),
+            const SizedBox(height: 8),
+          ],
+        ),
+      ),
+    );
+
+    if (action == 'select') await _selectPair(target, anchor);
+    if (action == 'hide') await _hidePair(target, anchor);
+  }
+
+  /// Убирает плашку с профиля, не трогая саму пару.
+  Future<void> _hidePair(String targetLanguage, String nativeLanguage) async {
+    setState(() => _switchingPair = true);
+    try {
+      await supabase.rpc('hide_language_pair', params: {
+        'p_target_language': targetLanguage,
+        'p_native_language': nativeLanguage,
+      });
+      await _load();
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Не удалось убрать пару: $e')),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _switchingPair = false);
+    }
   }
 
   Widget _addPairChip() => _AddPairChip(
@@ -153,25 +247,35 @@ class _ProfileScreenState extends State<ProfileScreen> {
       byNative.putIfAbsent(anchor, () => []).add(pair);
     }
 
+    // Порядок групп: сначала родные языки из списка, потом все остальные,
+    // на которые ещё смотрят пары. Второе — не теория: удалив родной язык
+    // из настроек, игрок НЕ теряет пары, заведённые от него (это правило
+    // всей задачи), и перебор только по _natives молча спрятал бы их с
+    // профиля. Пара, которой не видно, выглядит потерянной.
+    final ordered = [
+      for (final n in _natives)
+        if (byNative.containsKey(n.code)) n.code,
+      ...byNative.keys.where((code) => !_natives.any((n) => n.code == code)),
+    ];
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        for (final n in _natives)
-          if (byNative[n.code]?.isNotEmpty ?? false) ...[
-            Padding(
-              padding: const EdgeInsets.only(bottom: 6),
-              child: Text(
-                languageName(n.code),
-                style: AppFonts.mono(fontSize: 10, weight: FontWeight.w700, color: AppColors.muted),
-              ),
+        for (final code in ordered) ...[
+          Padding(
+            padding: const EdgeInsets.only(bottom: 6),
+            child: Text(
+              languageName(code),
+              style: AppFonts.mono(fontSize: 10, weight: FontWeight.w700, color: AppColors.muted),
             ),
-            Wrap(
-              spacing: 8,
-              runSpacing: 8,
-              children: [for (final pair in byNative[n.code]!) _pairChip(pair, defaultNative)],
-            ),
-            const SizedBox(height: 10),
-          ],
+          ),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [for (final pair in byNative[code]!) _pairChip(pair, defaultNative)],
+          ),
+          const SizedBox(height: 10),
+        ],
         if (_pairs.length < kMaxLanguagePairs) _addPairChip(),
       ],
     );
@@ -181,10 +285,16 @@ class _ProfileScreenState extends State<ProfileScreen> {
   /// новой пары — это просто смена того, какая строка сейчас "активна"
   /// (задача итерации: "рейтинг НЕ обнуляется, а записывается для новой
   /// пары... выбрав старую пару рейтинг опять отображается").
-  Future<void> _selectPair(String targetLanguage) async {
+  Future<void> _selectPair(String targetLanguage, String nativeLanguage) async {
     setState(() => _switchingPair = true);
     try {
-      await supabase.rpc('set_active_language_pair', params: {'p_target_language': targetLanguage});
+      // Родной язык обязателен: с двух родных можно учить один и тот же
+      // язык (ru-es и en-es), и по одному изучаемому пара больше не
+      // опознаётся однозначно.
+      await supabase.rpc('set_active_language_pair', params: {
+        'p_target_language': targetLanguage,
+        'p_native_language': nativeLanguage,
+      });
       notifyLanguagePairChanged();
       await _load();
     } catch (e) {

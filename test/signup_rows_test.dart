@@ -20,12 +20,24 @@ void main() {
     }
   });
 
-  test('ни одно значение не пустое', () {
+  test('ни одно значение не пустое, кроме осмысленного null', () {
+    // native_for у родной строки — единственное законное исключение: она
+    // и есть родной язык, ссылаться ей не на что. Ключ при этом обязан
+    // присутствовать, иначе наборы столбцов разойдутся (тест выше).
     for (final row in rows) {
       for (final entry in row.entries) {
+        if (row['role'] == 'native' && entry.key == 'native_for') continue;
         expect(entry.value, isNotNull, reason: 'столбец ${entry.key}');
       }
     }
+  });
+
+  test('изучаемая пара помнит, с какого языка её учат', () {
+    // Без native_for пара следовала за users.native_language: сменив
+    // главный родной с русского на английский, игрок получал пару en-en —
+    // язык сам себе родной.
+    final learning = rows.firstWhere((r) => r['role'] == 'learning');
+    expect(learning['native_for'], 'ru');
   });
 
   test('активна изучаемая пара, а не родной язык', () {
