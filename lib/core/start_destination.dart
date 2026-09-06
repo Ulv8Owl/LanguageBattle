@@ -33,19 +33,44 @@ enum StartDestination {
 /// в игру аккаунт, про который ничего не известно, — хуже.
 Future<StartDestination> resolveStartDestination() async {
   try {
-    final rows = await supabase
+    // Спрашиваем именно АКТИВНУЮ пару.
+    //
+    // Здесь стояло `.limit(1)` без порядка и без фильтра по активности —
+    // то есть решение принималось по случайной паре. Пары, добавленные
+    // через add_language_pair, приходят с placement_done = false (уровень
+    // определяют только при регистрации), поэтому у игрока со второй парой
+    // жребий мог выпасть на неё: маршрут вёл на экран уровня, а сам экран
+    // работает с активной парой, у которой уровень давно определён, и
+    // отвечал placement_already_done. Игрок упирался в стену, которую
+    // нечем было обойти.
+    final active = await supabase
         .from('user_languages')
         .select('id, placement_done')
         .eq('user_id', currentUserId)
         .eq('role', 'learning')
+        .eq('is_active', true)
+        .maybeSingle();
+    if (active != null) {
+      // placement_done приходит false у пар, заведённых после миграции 0028
+      // и ещё не подтверждённых. Отсутствие поля (старый клиент, урезанная
+      // выборка) считаем пройденным: у всех существовавших до 0028 пар
+      // миграция проставила true.
+      final done = active['placement_done'] as bool? ?? true;
+      return done ? StartDestination.arena : StartDestination.levelSelect;
+    }
+
+    // Активной пары нет — либо аккаунт совсем новый, либо строки есть, а
+    // активной среди них не оказалось. Первое означает онбординг; второе
+    // само по себе поломка, но вести из-за неё на онбординг (и заводить
+    // пару заново поверх существующих) хуже, чем пустить в игру: Арена
+    // покажет профиль, где пару можно выбрать руками.
+    final any = await supabase
+        .from('user_languages')
+        .select('id')
+        .eq('user_id', currentUserId)
+        .eq('role', 'learning')
         .limit(1);
-    if (rows.isEmpty) return StartDestination.onboarding;
-    // placement_done приходит false у пар, заведённых после миграции 0028 и
-    // ещё не подтверждённых. Отсутствие поля (старый клиент, урезанная
-    // выборка) считаем пройденным: у всех существовавших до 0028 пар
-    // миграция проставила true.
-    final done = rows.first['placement_done'] as bool? ?? true;
-    return done ? StartDestination.arena : StartDestination.levelSelect;
+    return any.isEmpty ? StartDestination.onboarding : StartDestination.arena;
   } catch (_) {
     return StartDestination.onboarding;
   }
