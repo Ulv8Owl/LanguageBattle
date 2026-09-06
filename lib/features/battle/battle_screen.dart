@@ -313,6 +313,19 @@ class _BattleScreenState extends State<BattleScreen> {
       final marked = PhraseBank.markedTextFor(phraseIndex, language);
       if (marked.isNotEmpty) expectedByLanguage[language] = marked;
     }
+    // Задание по языкам: соперники видят фразу каждый на своём родном, и
+    // мультимодальной модели нужно то, которое видел ИМЕННО оцениваемый
+    // игрок. Складываем все известные варианты — сервер выберет нужный.
+    final promptByLanguage = <String, String>{};
+    for (final language in {
+      if (m.playerBId != null) ...{
+        m.languageForSlot(m.playerAId!, 'native'),
+        m.languageForSlot(m.playerBId!, 'native'),
+      },
+    }) {
+      final text = PhraseBank.textFor(phraseIndex, language);
+      if (text.isNotEmpty) promptByLanguage[language] = text;
+    }
     try {
       await supabase.from('rounds').upsert(
         {
@@ -320,6 +333,7 @@ class _BattleScreenState extends State<BattleScreen> {
           'round_number': n,
           'generated_phrase': phrase,
           'expected_by_language': expectedByLanguage,
+          'prompt_by_language': promptByLanguage,
           'phrase_index': phraseIndex,
         },
         onConflict: 'match_id,round_number',

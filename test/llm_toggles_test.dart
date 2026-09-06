@@ -46,7 +46,12 @@ void main() {
   test('воркер решает по настройкам, а не по константе', () {
     final worker = read('supabase/functions/evaluate-recording/index.ts');
     expect(worker, contains('loadPlayerPrefs(supabase, recording.user_id)'));
-    expect(worker, contains('prefs.llmScoring ? null : scoreByElements'));
+    // Поэлементный подсчёт — путь по умолчанию, когда оценку модели не
+    // просили. Условие выросло с появлением мультимодального пути: там
+    // оценка приходит тем же вызовом, что и распознавание, и повторно
+    // считать её нечем и незачем.
+    expect(worker, contains('(prefs.llmScoring || omniJudged)'));
+    expect(worker, contains(': scoreByElements(expectedPhrase, transcript)'));
     // Датасет предпочитается ровно когда объяснения от модели выключены.
     expect(worker, contains('!prefs.llmExplanations'));
     // Старой глобальной константы в решениях воркера быть не должно:

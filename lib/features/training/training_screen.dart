@@ -17,6 +17,7 @@ import '../../data/player_rating.dart';
 import '../../data/voice_submission.dart';
 import '../../widgets/chrolingo_widgets.dart';
 import '../../widgets/ai_avatar.dart';
+import '../../widgets/speak_button.dart';
 import '../../widgets/transcript_review.dart';
 import '../../widgets/voice_message_bubble.dart';
 import '../../widgets/voice_recorder_dock.dart';
@@ -305,7 +306,17 @@ class _TrainingScreenState extends State<TrainingScreen> {
     final expected = PhraseBank.markedTextFor(phraseIndex, _targetLanguage);
     final row = await supabase
         .from('training_rounds')
-        .insert({'session_id': sessionId, 'round_number': n, 'generated_phrase': expected})
+        .insert({
+          'session_id': sessionId,
+          'round_number': n,
+          'generated_phrase': expected,
+          // Задание на родном языке — то, что игрок сейчас видит. Нужно
+          // мультимодальной модели: эталон ей не показывают, иначе она
+          // сверяет ответ с одним вариантом вместо того, чтобы оценивать
+          // перевод. Вывести его на сервере нельзя — банк фраз лежит
+          // здесь, в приложении.
+          'prompt_text': promptText,
+        })
         .select()
         .single();
     if (!mounted) return;
@@ -367,7 +378,12 @@ class _TrainingScreenState extends State<TrainingScreen> {
     try {
       await supabase
           .from('training_rounds')
-          .update({'generated_phrase': expected})
+          .update({
+            'generated_phrase': expected,
+            // Задание меняется вместе с фразой: разошедшись, они дали бы
+            // модели чужой текст для оценки.
+            'prompt_text': PhraseBank.textFor(phraseIndex, _nativeLanguage),
+          })
           .eq('id', roundId);
     } catch (e) {
       if (!mounted) return;
@@ -507,7 +523,11 @@ class _TrainingScreenState extends State<TrainingScreen> {
           .from('grammar_errors')
           .select()
           .eq('voice_recording_id', recordingId)
-          .order('offset_start');
+          // Вторичный порядок по времени вставки: у ошибок от модели
+          // смещения в эталон нулевые (эталона у неё не было), и без него
+          // они выстроились бы как попало, а не как их назвала модель.
+          .order('offset_start')
+          .order('created_at');
       if (!mounted) return;
       setState(() {
         _firstAttemptErrors = List<Map<String, dynamic>>.from(errors);
@@ -1297,6 +1317,30 @@ class _ErrorReport extends StatelessWidget {
   List<PhraseElement> get _elements =>
       phraseIndex < 0 ? const [] : PhraseBank.elementsFor(phraseIndex, targetLanguage);
 
+  /// Ошибки, названные мультимодальной моделью.
+  ///
+  /// Отличаются от поэлементных категорией и тем, что несут собственный
+  /// фрагмент сказанного (span_text): модель судит без эталона и указывает
+  /// на кусок РЕЧИ ИГРОКА, а не на часть правильного ответа. Поэтому у
+  /// них своя отрисовка — разложить их по элементам эталона нечем.
+  List<_Mistake> get _omniErrors {
+    final out = <_Mistake>[];
+    for (final e in errors) {
+      if ((e['category'] as String?) != 'omni') continue;
+      final span = (e['span_text'] as String?)?.trim() ?? '';
+      final message = (e['message'] as String?)?.trim() ?? '';
+      // Плашка без фрагмента показывается не к чему, а без объяснения —
+      // это пустое обещание разбора. Ни то, ни другое не показываем.
+      if (span.isEmpty || message.isEmpty) continue;
+      out.add(_Mistake(
+        span: span,
+        message: message,
+        correction: (e['replacement'] as String?)?.trim() ?? '',
+      ));
+    }
+    return out;
+  }
+
   /// Номер потерянного элемента -> его разбор.
   ///
   /// КЛЮЧИ этой карты и есть потерянные элементы, и какие именно — решает
@@ -1432,6 +1476,12 @@ class _ErrorReport extends StatelessWidget {
                 Text(hint, style: const TextStyle(color: AppColors.muted, fontSize: 12, height: 1.4)),
             ] else if (noResult || notRecognised || judgeBroken)
               Text(hint, style: const TextStyle(color: AppColors.muted, fontSize: 12, height: 1.4))
+            // Ошибки от мультимодальной модели — свои плашки. Границы она
+            // провела по смыслу сказанного, а не по элементам эталона, и
+            // разложить их по элементам нечем: у неё эталона не было
+            // вовсе. Показываем ровно то, что она назвала.
+            else if (_omniErrors.isNotEmpty)
+              _MistakeBreakdown(mistakes: _omniErrors, targetLanguage: targetLanguage)
             // Разбор по элементам показывается ДАЖЕ КОГДА ошибок нет.
             // Пояснение — это не «работа над ошибками», а справка по
             // фразе: разобраться в куске, который получился, игрок вправе
@@ -1496,6 +1546,133 @@ class _Explanation {
 /// Нажать можно на любой, включая сказанные верно: пояснение — это не
 /// «работа над ошибками», а справка по фразе, и разобраться в удавшемся
 /// куске игрок вправе не меньше.
+/// Одна ошибка, названная моделью: кусок сказанного и разбор к нему.
+class _Mistake {
+  /// Фрагмент того, что игрок СКАЗАЛ. Он же — надпись на плашке.
+  final String span;
+
+  /// Объяснение на родном языке: почему так неверно.
+  final String message;
+
+  /// Как надо было сказать этот кусок. Пусто — модель не предложила.
+  final String correction;
+
+  const _Mistake({required this.span, required this.message, required this.correction});
+}
+
+/// Разбор по ОШИБКАМ, а не по элементам эталона.
+///
+/// ЧЕМ ОТЛИЧАЕТСЯ ОТ [_ElementBreakdown] И ПОЧЕМУ ОБА НУЖНЫ. Поэлементный
+/// разбор раскладывает ПРАВИЛЬНЫЙ ответ на части и подсвечивает
+/// непроизнесённые: он знает эталон и мыслит его структурой. Этот —
+/// показывает куски РЕЧИ ИГРОКА, на которых он ошибся, и эталона за ними
+/// нет вовсе: границы модель провела сама, по смыслу, объединив в одну
+/// ошибку всё, что пошло не так по одной причине.
+///
+/// Поэтому здесь нельзя показать «всю фразу с подсветкой»: у нас на руках
+/// не разложенный эталон, а список несвязанных фрагментов. Зато плашка
+/// говорит ровно то, что игрок сказал, — и нажатие объясняет именно этот
+/// его кусок, а не абстрактную часть правильного варианта.
+class _MistakeBreakdown extends StatelessWidget {
+  final List<_Mistake> mistakes;
+
+  /// Изучаемый язык — для озвучки исправления.
+  ///
+  /// Без него «послушать, как это должно звучать» здесь пропало бы: раньше
+  /// динамик стоял у исправленной фразы целиком, а у модели такой фразы
+  /// нет — она правит куски. Значит и слушать надо кусок.
+  final String targetLanguage;
+
+  const _MistakeBreakdown({required this.mistakes, required this.targetLanguage});
+
+  void _show(BuildContext context, _Mistake mistake) {
+    showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: AppColors.navy2,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Container(
+                width: 36,
+                height: 4,
+                margin: const EdgeInsets.only(bottom: 16),
+                decoration: BoxDecoration(
+                  color: AppColors.lineStrong,
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+              Text(
+                mistake.span,
+                style: AppFonts.ui(fontSize: 16, weight: FontWeight.w800, color: AppColors.danger),
+              ),
+              if (mistake.correction.isNotEmpty) ...[
+                const SizedBox(height: 6),
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Icon(Icons.arrow_forward, size: 14, color: AppColors.ok),
+                    const SizedBox(width: 6),
+                    Expanded(
+                      child: Text(
+                        mistake.correction,
+                        style: AppFonts.ui(fontSize: 15, weight: FontWeight.w700, color: AppColors.ok),
+                      ),
+                    ),
+                    SpeakButton(text: mistake.correction, languageCode: targetLanguage),
+                  ],
+                ),
+              ],
+              const SizedBox(height: 12),
+              Text(
+                mistake.message,
+                style: const TextStyle(color: AppColors.cream, fontSize: 13, height: 1.5),
+              ),
+              const SizedBox(height: 12),
+              Text('разбор от ИИ', style: AppFonts.mono(fontSize: 9, color: AppColors.muted)),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          'Нажми на кусок, чтобы понять, что с ним не так',
+          style: AppFonts.ui(fontSize: 11, color: AppColors.muted),
+        ),
+        const SizedBox(height: 10),
+        Wrap(
+          spacing: 6,
+          runSpacing: 6,
+          children: [
+            for (final mistake in mistakes)
+              _ElementChip(
+                text: mistake.span,
+                // Каждая плашка здесь — ошибка по определению: список
+                // состоит только из них. Верно сказанное сюда не попадает,
+                // потому что модель про него ничего и не сказала.
+                missed: true,
+                onTap: () => _show(context, mistake),
+              ),
+          ],
+        ),
+      ],
+    );
+  }
+}
+
 class _ElementBreakdown extends StatelessWidget {
   final List<PhraseElement> elements;
 

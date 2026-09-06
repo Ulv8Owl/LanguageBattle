@@ -17,6 +17,7 @@
 import { bcp47For } from "../_shared/asr/index.ts";
 import { evaluateGrammar, trivialProbeEnabled } from "../_shared/evaluateGrammar.ts";
 import { googleKey, googleKeySource, missingKeyMessage } from "../_shared/googleKey.ts";
+import { omniConfigDebug, omniEnabled, omniEvaluate } from "../_shared/omniJudge.ts";
 import {
   llmBaseUrl,
   llmChat,
@@ -218,6 +219,77 @@ async function checkLlm(): Promise<CheckResult> {
   }
 }
 
+/**
+ * Проверка мультимодальной модели ЖИВЫМ вызовом.
+ *
+ * Отдельная функция, а не строчка в блоке llm: это другой провайдер, другой
+ * ключ и другой протокол. И проверить его иначе нельзя — у сервиса нет
+ * эндпоинта «просто скажи, что ключ верный», а ошибка в ключе выглядит как
+ * обычный HTTP 401 в середине разбора речи, то есть всплывает уже в игре.
+ *
+ * Шлём короткую тишину: содержимое звука неважно, важно, что запрос дошёл,
+ * ключ принят и ответ разобрался. Модель на тишине честно вернёт пустое
+ * «услышанное» — этого достаточно.
+ */
+async function checkOmni(): Promise<CheckResult> {
+  if (!omniEnabled()) {
+    return {
+      configured: false,
+      reachable: null,
+      detail: "мультимодальный путь выключен (OMNI_ENABLED != 1) — " +
+        "речь разбирают распознавание и судья по отдельности",
+    };
+  }
+
+  const result = await omniEvaluate({
+    audio: silentWav(),
+    audioFormat: "wav",
+    nativeLanguage: "ru",
+    targetLanguage: "en",
+    prompt: "",
+    level: "A1",
+    // Просим только услышанное: оценивать тишину бессмысленно, а разбор
+    // стоил бы дороже и дольше ради того же ответа «ключ принят».
+    wantJudgement: false,
+    budgetMs: 60_000,
+  });
+
+  return result.degraded
+    ? {
+      configured: true,
+      reachable: false,
+      detail: `${JSON.stringify(omniConfigDebug())}: ${result.failureReason ?? "неизвестная причина"}`,
+    }
+    : {
+      configured: true,
+      reachable: true,
+      detail: `${omniConfigDebug().model} отвечает, ключ принят`,
+    };
+}
+
+/** Секунда тишины в WAV 16 кГц моно — минимальный корректный контейнер. */
+function silentWav(): Uint8Array {
+  const samples = 16_000;
+  const bytes = new Uint8Array(44 + samples * 2);
+  const view = new DataView(bytes.buffer);
+  const ascii = (offset: number, text: string) => {
+    for (let i = 0; i < text.length; i++) view.setUint8(offset + i, text.charCodeAt(i));
+  };
+  ascii(0, "RIFF");
+  view.setUint32(4, 36 + samples * 2, true);
+  ascii(8, "WAVEfmt ");
+  view.setUint32(16, 16, true);
+  view.setUint16(20, 1, true);
+  view.setUint16(22, 1, true);
+  view.setUint32(24, 16_000, true);
+  view.setUint32(28, 32_000, true);
+  view.setUint16(32, 2, true);
+  view.setUint16(34, 16, true);
+  ascii(36, "data");
+  view.setUint32(40, samples * 2, true);
+  return bytes;
+}
+
 /** Список моделей Gemini — у него свой эндпоинт и своя форма ответа. */
 async function listGeminiModels(baseUrl: string, apiKey: string): Promise<string[]> {
   try {
@@ -398,11 +470,12 @@ Deno.serve(async (req) => {
     );
   }
 
-  const [asr, llm, tts, judge] = await Promise.all([
+  const [asr, llm, tts, judge, omni] = await Promise.all([
     checkAsr(),
     checkLlm(),
     checkTts(),
     checkJudge(),
+    checkOmni(),
   ]);
   // Озвучка в готовность не входит: без неё играть можно, просто нельзя
   // послушать образец. Валить общий ready из-за неё значило бы прятать
@@ -428,6 +501,11 @@ Deno.serve(async (req) => {
         // не работать.
         judge,
         tts: { key_from: googleKeySource("tts"), ...tts },
+        // Мультимодальный путь. В ready не входит намеренно: он
+        // альтернатива связке asr+llm, а не дополнение к ней, и требовать
+        // исправности обоих значило бы объявлять поломкой сам факт
+        // выключенного пути.
+        omni,
         hint: ready
           ? "Ключи на месте, провайдеры отвечают, судья находит ошибки." +
             (tts.reachable === true ? "" : " Озвучка при этом не работает — смотрите блок tts.")
