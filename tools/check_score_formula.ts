@@ -8,7 +8,12 @@
 // ожидал, и выяснилось это числами, а не чтением кода.
 //
 // Запуск: deno run --allow-read --allow-env tools/check_score_formula.ts
-import { type ReviewSpan, scoreFor } from "../supabase/functions/_shared/omniJudge.ts";
+import {
+  correctText,
+  type ReviewSpan,
+  scoreFor,
+  withSpacing,
+} from "../supabase/functions/_shared/omniJudge.ts";
 
 const ok = (text: string): ReviewSpan => ({ kind: "ok", text });
 const bad_ = (text: string): ReviewSpan => ({ kind: "bad", text });
@@ -33,5 +38,41 @@ for (const [name, review, errors, expected] of cases) {
     console.log(`РАСХОЖДЕНИЕ «${name}»: scoreFor(..., ${errors}) = ${got}, в тесте ${expected}`);
   }
 }
-console.log(bad === 0 ? "формулы совпадают" : `разошлись в ${bad} случаях`);
+// Склейка ленты: пробел на стыке модель теряет постоянно, и «morningthen»
+// игрок видел на экране. Проверяем на настоящих кусках из того разбора.
+const spacing: [string, ReviewSpan[], string][] = [
+  [
+    "точка и следующее предложение",
+    [
+      { kind: "ok", text: "I get up at seven every morning." },
+      { kind: "miss", text: "then I make coffee" },
+    ],
+    "I get up at seven every morning. then I make coffee",
+  ],
+  [
+    "слово к слову",
+    [{ kind: "ok", text: "then I make coffee" }, { kind: "miss", text: "and read the news" }],
+    "then I make coffee and read the news",
+  ],
+  [
+    "перед запятой пробел не нужен",
+    [{ kind: "ok", text: "coffee" }, { kind: "miss", text: ", then news" }],
+    "coffee, then news",
+  ],
+  [
+    "готовый пробел не удваивается",
+    [{ kind: "ok", text: "coffee " }, { kind: "miss", text: "and news" }],
+    "coffee and news",
+  ],
+];
+
+for (const [name, review, expected] of spacing) {
+  const got = correctText(withSpacing(review));
+  if (got !== expected) {
+    bad++;
+    console.log(`РАСХОЖДЕНИЕ «${name}»: склеилось «${got}», ожидали «${expected}»`);
+  }
+}
+
+console.log(bad === 0 ? "формулы и склейка совпадают" : `разошлись в ${bad} случаях`);
 if (bad > 0) Deno.exit(1);

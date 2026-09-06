@@ -212,32 +212,44 @@ function systemPrompt(nativeLanguage: string, targetLanguage: string, level: str
     "Answer false when the recording is silent, noise only, or you received no audio. Never guess in that case —",
     "an invented assessment is worse than none.",
     "",
+    'Put your translation in "correct", and then break THAT SAME SENTENCE into "review" pieces:',
+    `  {"k": "ok",   "t": "..."} — part of your translation whose meaning the learner conveyed;`,
+    `  {"k": "miss", "t": "..."} — part of your translation the learner did not convey at all;`,
+    `  {"k": "bad",  "t": "..."} — what the learner said INSTEAD, quoted from the recording verbatim.`,
+    "",
+    "HARD RULE: reading the \"ok\" and \"miss\" pieces in order, one after another, must reproduce \"correct\"",
+    "exactly — same words, same punctuation, nothing added, nothing dropped. Only \"bad\" pieces carry the",
+    "learner's own words; they are extra and sit next to the piece they replace. If a part was said, it is",
+    "\"ok\" even when the learner worded it differently — the different wording goes in a \"bad\" piece beside it.",
+    "Keep the spaces inside \"t\" so the pieces read as one sentence.",
+    "",
     "A different wording is NOT an error: a sentence can be translated in several correct ways, and you must",
     "accept any wording that conveys the same meaning correctly. Mark an error only when something is genuinely",
     "wrong — wrong meaning, wrong grammar, an invented word. Never mark stylistic preference.",
     "Group errors by MEANING: everything that goes wrong for one reason is a single error.",
     "",
-    'Then build "review" — your translation with the learner\'s mistakes woven into it, as an ordered list of',
-    "pieces that reads left to right like one sentence. Each piece is one of:",
-    `  {"k": "ok",   "t": "..."} — part of your translation the learner conveyed correctly;`,
-    `  {"k": "bad",  "t": "..."} — what the learner said instead, quoted from the recording verbatim,`,
-    "                             mistakes included; it will be shown struck through;",
-    `  {"k": "miss", "t": "..."} — part of your translation the learner did not convey at all;`,
-    "                             it will be shown in red.",
-    'Put a "bad" piece where the learner said it, right next to the "miss" or "ok" piece it replaces.',
-    'Keep spacing inside "t" so that joining all pieces reads naturally. Reading the "ok" and "miss" pieces',
-    "in order must give exactly your translation, word for word.",
+    'NEVER put an omission in "errors". Something the learner did not say is a "miss" piece and nothing else;',
+    'an "errors" entry is only for words that WERE spoken and were wrong. An entry whose "said" equals its',
+    '"fix" is always a mistake on your part.',
+    "",
+    "Example. The learner was asked to say «Я встаю в семь. Потом я варю кофе и читаю новости.» in English",
+    'and said "I get up at seven. After that I make coffee." Correct answer:',
+    '{"audible": true, "correct": "I get up at seven. Then I make coffee and read the news.",',
+    ' "review": [{"k": "ok", "t": "I get up at seven. "}, {"k": "bad", "t": "After that I "},',
+    '            {"k": "ok", "t": "Then I make coffee"}, {"k": "miss", "t": " and read the news."}],',
+    ' "errors": [{"said": "After that", "fix": "Then", "why": "<объяснение>"}]}',
+    "Note there is no error for the missing news — it is a \"miss\" piece and nothing more.",
     "",
     `LANGUAGE OF EXPLANATIONS: every "why" field must be written in ${native} (${nativeSelf}) and in no other`,
     `language. This is not a preference — the learner reads only ${nativeSelf}. Everything else (the translation,`,
-    `the quoted fragments, the corrections) stays in ${target}.`,
+    `the pieces, the quoted fragments, the corrections) stays in ${target}.`,
     `Explain at ${level} level: short and concrete, no grammar jargon the learner would not know.`,
     "",
     "Reply with a single JSON object and nothing else — no markdown, no commentary:",
-    '{"audible": boolean, "review": [{"k": "ok"|"bad"|"miss", "t": string}],',
+    '{"audible": boolean, "correct": string, "review": [{"k": "ok"|"bad"|"miss", "t": string}],',
     ' "errors": [{"said": string, "fix": string, "why": string}]}',
-    `"said" — the fragment of the recording that is wrong, quoted verbatim; "fix" — how it should sound in`,
-    `${target}; "why" — the explanation in ${nativeSelf}. Empty "errors" when there is nothing to report.`,
+    '"said" — the learner\'s own words, quoted verbatim with the mistake left in; never correct them there,',
+    `or the learner will not recognise his own mistake. "fix" — how that fragment should sound in ${target}.`,
   ].join("\n");
 }
 
@@ -329,14 +341,57 @@ function asErrors(raw: unknown): OmniError[] {
     // Ошибка без фрагмента показывается не к чему: плашка в разборе — это
     // и есть фрагмент. Ошибка без объяснения — пустая плашка, за которой
     // ничего нет; такую лучше не показывать вовсе, чем обещать разбор.
+    const correction = typeof row.fix === "string" ? row.fix.trim() : "";
     if (text.length === 0 || message.length === 0) continue;
+    // «Сказал X, надо X» — это не ошибка, а пропуск, выданный за ошибку.
+    // Модель делает так регулярно, и каждый такой ложный пункт снимал бы
+    // балл второй раз: доля несказанного его уже учла.
+    if (correction.length > 0 && correction === text) continue;
     out.push({
       text,
       message,
-      correction: typeof row.fix === "string" ? row.fix.trim() : "",
+      correction,
     });
   }
   return out;
+}
+
+/**
+ * Возвращает ленту со склеенными пробелами.
+ *
+ * Модель режет фразу по смыслу и регулярно теряет пробел на стыке: «…every
+ * morning» + «then I…» слипались в «morningthen». Чинить это просьбой в
+ * промпте бесполезно — граница видна только при склейке, а модель пишет
+ * куски по одному. Поэтому чиним здесь: если на стыке нет пробела ни
+ * слева, ни справа и справа не знак препинания, пробел добавляем.
+ */
+export function withSpacing(review: ReviewSpan[]): ReviewSpan[] {
+  const out = review.map((s) => ({ ...s }));
+  for (let i = 0; i < out.length - 1; i++) {
+    const left = out[i].text;
+    const right = out[i + 1].text;
+    if (left.length === 0 || right.length === 0) continue;
+    if (/\s$/.test(left) || /^\s/.test(right)) continue;
+    // Перед знаком препинания пробел не нужен: «coffee ,» читается хуже,
+    // чем слипшееся слово.
+    if (/^[.,!?;:)\]»]/.test(right)) continue;
+    out[i].text = left + " ";
+  }
+  return out;
+}
+
+/**
+ * Текст без пробелов и регистра — для сравнения ленты с переводом модели.
+ *
+ * И то, и другое отброшено по опыту, а не для мягкости. Пробелы на стыках
+ * модель теряет постоянно. Регистр она меняет на границе предложения:
+ * кусок «then I make coffee» вырезан из середины, а в переводе он стоит
+ * после точки и написан с большой буквы. Придираться к этому значило бы
+ * браковать совершенно исправные разборы; содержание при этом сверяется
+ * полностью, включая знаки препинания.
+ */
+function squeeze(text: string): string {
+  return text.replace(/\s+/g, "").toLowerCase();
 }
 
 /** Сегменты разбора: только известные виды и только непустой текст. */
@@ -475,13 +530,41 @@ export async function omniEvaluate(req: OmniRequest): Promise<OmniResult> {
     return fail("модель не слышит речи в записи (audible=false)", { raw: raw.slice(0, 400) });
   }
 
-  const review = asReview(parsed.review);
+  const claimed = typeof parsed.correct === "string" ? parsed.correct.trim() : "";
+  if (claimed.length === 0) {
+    return fail(`в ответе нет перевода: ${raw.slice(0, 300)}`);
+  }
+
+  const review = withSpacing(asReview(parsed.review));
   if (review.length === 0) {
     return fail(`в ответе нет разбора: ${raw.slice(0, 300)}`);
   }
 
+  // ЛЕНТА ОБЯЗАНА СОБИРАТЬСЯ В ПЕРЕВОД. Куски ok и miss — это разрезанный
+  // на части собственный перевод модели, и склейка должна дать его же.
+  //
+  // Проверка не формальность. Именно так выглядела настоящая поломка:
+  // модель пометила «I get up at seven every morning» как НЕ СКАЗАННОЕ,
+  // хотя игрок это сказал, и правильно сказанный кусок покрасился красным.
+  // Склейка тогда давала не её перевод, а обрубок — то есть по одному
+  // сравнению видно, что разметке верить нельзя.
+  //
+  // Сравниваем без пробелов: на стыках модель их теряет постоянно, и
+  // придираться к ним значило бы браковать исправные разборы.
+  const assembled = correctText(review);
+  if (squeeze(assembled) !== squeeze(claimed)) {
+    return fail(
+      "лента разбора не собирается в перевод модели — разметке нельзя верить",
+      {
+        raw: raw.slice(0, 800),
+        assembled,
+        claimed,
+      },
+    );
+  }
+
   const errors = asErrors(parsed.errors);
-  const correct = correctText(review);
+  const correct = claimed;
 
   debug.correct = correct;
   debug.spans = {

@@ -1376,7 +1376,6 @@ class _ErrorReport extends StatelessWidget {
       _ => 'Скажи фразу ещё раз — вторая попытка идёт в зачёт.',
     };
 
-    final correction = attempt?.corrected ?? '';
 
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: feedGap / 2),
@@ -1401,10 +1400,13 @@ class _ErrorReport extends StatelessWidget {
             ),
             if ((attempt?.reviewSpans ?? const []).isNotEmpty) const SizedBox(height: 10),
 
-            if (isSecondAttempt) ...[
-              if (noResult || notRecognised || judgeBroken || correction.isEmpty)
-                Text(hint, style: const TextStyle(color: AppColors.muted, fontSize: 12, height: 1.4)),
-            ] else if (noResult || notRecognised || judgeBroken)
+            // Вторая попытка показывается ТАК ЖЕ, как первая. Раньше у неё
+            // прятали плашки ошибок: разбор для неё не запрашивали, чтобы
+            // не ждать лишние секунды. Теперь разбор приходит тем же
+            // единственным вызовом — прятать нечего и незачем, а игроку
+            // важнее всего понять именно последнюю попытку. Отличается
+            // только заголовок и карточка с баллом ниже.
+            if (noResult || notRecognised || judgeBroken)
               Text(hint, style: const TextStyle(color: AppColors.muted, fontSize: 12, height: 1.4))
             // Разбор от мультимодальной модели — свои плашки. Границы она
             // провела по смыслу сказанного, а не по элементам эталона, и

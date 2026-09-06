@@ -41,8 +41,10 @@ void main() {
   test('цитату сказанного модель не чинит', () {
     // В плашке ошибки и в зачёркнутом куске должны стоять слова игрока, а
     // не исправленный за него вариант: иначе он не узнает свою ошибку.
-    expect(omni(), contains('mistakes included'));
-    expect(omni(), contains('quoted verbatim'));
+    expect(omni(), contains('quoted verbatim with the mistake left in'));
+    expect(omni(), contains('never correct them there'));
+    // И зачёркнутый кусок — тоже дословная цитата, а не пересказ.
+    expect(omni(), contains('quoted from the recording verbatim'));
   });
 
   test('ошибки группируются по смыслу, а не по словам', () {
@@ -120,6 +122,43 @@ void main() {
     expect(omni(), contains(r'\"audible\": true or false'));
     expect(omni(), contains('if (parsed.audible === false)'));
     expect(omni(), contains('audible=false'));
+  });
+
+  test('лента обязана собираться в перевод модели', () {
+    // Настоящая поломка выглядела так: модель пометила «I get up at seven
+    // every morning» как НЕ СКАЗАННОЕ, хотя игрок это сказал, — и верно
+    // сказанный кусок покрасился красным. Склейка тогда даёт не её
+    // перевод, а обрубок: по одному сравнению видно, что верить нельзя.
+    final s = omni();
+    expect(s, contains('squeeze(assembled) !== squeeze(claimed)'));
+    expect(s, contains('лента разбора не собирается в перевод модели'));
+    // Сравниваем без пробелов и регистра: и то, и другое модель на стыках
+    // теряет постоянно, а придираться значило бы браковать исправное.
+    expect(s, contains('.replace(/\\s+/g, "").toLowerCase()'));
+  });
+
+  test('пропуск, выданный за ошибку, не снимает балл второй раз', () {
+    // Модель регулярно присылает «сказал X, надо X» с объяснением «эту
+    // часть не сказали». Долю несказанного мы уже посчитали по ленте.
+    expect(omni(), contains('if (correction.length > 0 && correction === text) continue;'));
+    expect(omni(), contains('NEVER put an omission in "errors"'));
+  });
+
+  test('пробел на стыке кусков восстанавливается', () {
+    // «every morning» + «then I» слипались в «morningthen» — это игрок
+    // видел на экране. Просить об этом модель бесполезно: граница видна
+    // только при склейке, а куски она пишет по одному.
+    expect(omni(), contains('export function withSpacing'));
+    expect(omni(), contains(r'if (/^[.,!?;:)\]»]/.test(right)) continue;'));
+  });
+
+  test('в промпте есть разобранный пример', () {
+    // Одних определений ok/bad/miss модели не хватило: на второй попытке
+    // она пометила сказанное как пропущенное. Пример показывает и это, и
+    // то, что пропуск не идёт в errors.
+    final s = omni();
+    expect(s, contains('Example. The learner was asked to say'));
+    expect(s, contains('it is a \\"miss\\" piece and nothing more'));
   });
 
   test('сырой ответ модели сохраняется', () {
