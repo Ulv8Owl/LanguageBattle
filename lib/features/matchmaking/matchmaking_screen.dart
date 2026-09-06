@@ -54,6 +54,14 @@ class _MatchmakingScreenState extends State<MatchmakingScreen> {
   StreamSubscription? _ticketSub;
   bool _leaving = false;
 
+  /// Почему соперник ещё не найден — словами. Пусто, пока сервер не
+  /// сказал ничего внятного.
+  ///
+  /// Без этого «в очереди никого» и «соперник есть, но рейтинг далеко»
+  /// выглядели одинаково: крутящийся индикатор. Второе — чинится
+  /// ожиданием, первое нет, и игрок вправе знать, что именно происходит.
+  String _searchNote = '';
+
   String get _modeName => widget.gameMode == 'native_duel' ? 'Дуэль' : 'Состязание';
 
   @override
@@ -187,7 +195,35 @@ class _MatchmakingScreenState extends State<MatchmakingScreen> {
   int _eloWindowFor(int elapsedSeconds) {
     if (elapsedSeconds < 10) return 100;
     if (elapsedSeconds < 20) return 250;
-    return 600;
+    // ПОСЛЕДНИЙ ШАГ БЕЗ ПОТОЛКА, и это исправление, а не послабление.
+    //
+    // Раньше окно останавливалось на 600, и разница в 900 очков — обычная
+    // между тем, кто прошёл проверку уровня на B1 (1500), и новичком (600)
+    // — не покрывалась НИКОГДА. Два игрока с одной парой стояли в очереди
+    // рядом, и матч не мог случиться, сколько ни жди. Для игрока это
+    // выглядело как «режим не работает», и по сути так и было: поиск, у
+    // которого нет ни одного исхода с успехом, — тупик, а не строгий
+    // подбор. В игре с небольшим онлайном неравный соперник лучше, чем
+    // никакого.
+    return 1000000;
+  }
+
+  /// Человеческая причина из ответа mm_search (миграция 0041).
+  String _noteFor(Map<String, dynamic> map) {
+    final byLanguage = (map['by_language'] as num?)?.toInt() ?? 0;
+    if (byLanguage == 0) {
+      return widget.gameMode == 'native_duel'
+          ? 'Пока никто не ищет обратную пару — нужен носитель твоего '
+              'изучаемого языка, который учит твой родной.'
+          : 'Пока никто не ищет соперника на этом языке.';
+    }
+    final gap = (map['nearest_gap'] as num?)?.toInt();
+    final window = (map['elo_window'] as num?)?.toInt();
+    if (gap != null && window != null && gap > window) {
+      return 'Соперник в очереди есть, но рейтинг далеко — '
+          'разница $gap. Круг поиска расширяется, подожди.';
+    }
+    return 'Соперник в очереди есть — подбираем.';
   }
 
   Future<void> _searchStep() async {
@@ -207,8 +243,13 @@ class _MatchmakingScreenState extends State<MatchmakingScreen> {
         await _onMatchFound(map['match_id'] as String);
         return;
       }
+      if (mounted) setState(() => _searchNote = _noteFor(map));
     } catch (e) {
-      debugPrint('mm_search failed: $e');
+      // Ошибку поиска БОЛЬШЕ НЕ ПРЯЧЕМ. Она уходила в debugPrint, и любой
+      // сбой на сервере выглядел на экране как обычное ожидание: игрок
+      // смотрел на крутящийся индикатор, а поиск в это время падал на
+      // каждом тике.
+      if (mounted) setState(() => _searchNote = 'Поиск отвечает ошибкой: $e');
     }
 
     if (_elapsed >= _searchLimit.inSeconds && _phase == _Phase.searching) {
@@ -391,9 +432,21 @@ class _MatchmakingScreenState extends State<MatchmakingScreen> {
         Text('Ищем соперника', style: AppFonts.ui(fontSize: 17, weight: FontWeight.w800)),
         const SizedBox(height: 8),
         Text(
-          'Окно рейтинга расширяется: ±${_eloWindowFor(_elapsed)}',
+          // На последнем шаге потолка нет: показывать «±1000000» —
+          // бессмыслица, а «любой соперник» это ровно то, что происходит.
+          _elapsed < 20
+              ? 'Окно рейтинга расширяется: ±${_eloWindowFor(_elapsed)}'
+              : 'Круг поиска открыт: подойдёт любой соперник',
           style: const TextStyle(color: AppColors.muted, fontSize: 12),
         ),
+        if (_searchNote.isNotEmpty) ...[
+          const SizedBox(height: 10),
+          Text(
+            _searchNote,
+            textAlign: TextAlign.center,
+            style: const TextStyle(color: AppColors.muted, fontSize: 12, height: 1.4),
+          ),
+        ],
         const SizedBox(height: 32),
         SizedBox(
           width: double.infinity,
