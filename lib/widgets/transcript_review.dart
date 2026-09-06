@@ -27,12 +27,21 @@ class TranscriptReview extends StatelessWidget {
   /// по-русски и подадут это как образец произношения.
   final String targetLanguage;
 
+  /// Куски [corrected], которых игрок не сказал, — их назвала модель.
+  ///
+  /// Пустой список означает «считай сам»: тогда правка строится диффом,
+  /// как раньше. Непустой — красим ровно то, что назвала модель, потому
+  /// что по этому же списку ей начислен балл, и красить одно, а снимать
+  /// за другое нельзя.
+  final List<String> missing;
+
   const TranscriptReview({
     super.key,
     required this.transcript,
     required this.spoken,
     required this.corrected,
     this.targetLanguage = '',
+    this.missing = const [],
   });
 
   @override
@@ -63,7 +72,11 @@ class TranscriptReview extends StatelessWidget {
           ),
           const SizedBox(height: 3),
           SelectableText.rich(
-            TextSpan(children: correctionSpans(spoken, corrected)),
+            TextSpan(
+              children: missing.isEmpty
+                  ? correctionSpans(spoken, corrected)
+                  : missingSpans(corrected, missing),
+            ),
             style: const TextStyle(fontSize: 13, height: 1.4),
           ),
         ],

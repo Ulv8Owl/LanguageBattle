@@ -1317,6 +1317,28 @@ class _ErrorReport extends StatelessWidget {
   List<PhraseElement> get _elements =>
       phraseIndex < 0 ? const [] : PhraseBank.elementsFor(phraseIndex, targetLanguage);
 
+  /// Разбор пришёл от мультимодальной модели.
+  ///
+  /// Признак пути, а не наличия ошибок: у безошибочного ответа обе
+  /// коллекции пусты, и без отдельного признака он провалился бы в
+  /// поэлементный разбор — то есть в разметку от механики, которая в этом
+  /// раунде вообще не работала.
+  bool get _fromOmni => errors.any((e) {
+        final category = e['category'] as String?;
+        return category == 'omni' || category == 'missing';
+      });
+
+  /// Куски правильного перевода, которых игрок не сказал вовсе.
+  ///
+  /// Отдельная категория, а не ошибка: объяснять там нечего, показать надо
+  /// красным. По этому же списку сервер снял баллы, поэтому красим ровно
+  /// его — красить одно, а снимать за другое нельзя.
+  List<String> get _missingSpans => [
+        for (final e in errors)
+          if ((e['category'] as String?) == 'missing')
+            ((e['span_text'] as String?) ?? '').trim(),
+      ]..removeWhere((t) => t.isEmpty);
+
   /// Ошибки, названные мультимодальной моделью.
   ///
   /// Отличаются от поэлементных категорией и тем, что несут собственный
@@ -1468,6 +1490,7 @@ class _ErrorReport extends StatelessWidget {
               spoken: spoken,
               corrected: correction,
               targetLanguage: targetLanguage,
+              missing: _missingSpans,
             ),
             if (transcript.isNotEmpty) const SizedBox(height: 10),
 
@@ -1476,12 +1499,24 @@ class _ErrorReport extends StatelessWidget {
                 Text(hint, style: const TextStyle(color: AppColors.muted, fontSize: 12, height: 1.4)),
             ] else if (noResult || notRecognised || judgeBroken)
               Text(hint, style: const TextStyle(color: AppColors.muted, fontSize: 12, height: 1.4))
-            // Ошибки от мультимодальной модели — свои плашки. Границы она
+            // Разбор от мультимодальной модели — свои плашки. Границы она
             // провела по смыслу сказанного, а не по элементам эталона, и
             // разложить их по элементам нечем: у неё эталона не было
             // вовсе. Показываем ровно то, что она назвала.
-            else if (_omniErrors.isNotEmpty)
-              _MistakeBreakdown(mistakes: _omniErrors, targetLanguage: targetLanguage)
+            //
+            // Проверяем ПРИЗНАК ПУТИ, а не наличие ошибок. Иначе безошибочный
+            // ответ проваливался бы в поэлементный разбор, и игрок видел бы
+            // «сказано всё» под красным несказанным куском в «Разборе».
+            else if (_fromOmni)
+              _omniErrors.isNotEmpty
+                  ? _MistakeBreakdown(mistakes: _omniErrors, targetLanguage: targetLanguage)
+                  : Text(
+                      _missingSpans.isEmpty
+                          ? 'Ошибок не найдено — сказано верно'
+                          : 'Отдельных ошибок нет, но часть фразы не сказана — она '
+                              'выделена красным в разборе',
+                      style: AppFonts.ui(fontSize: 11, color: AppColors.muted),
+                    )
             // Разбор по элементам показывается ДАЖЕ КОГДА ошибок нет.
             // Пояснение — это не «работа над ошибками», а справка по
             // фразе: разобраться в куске, который получился, игрок вправе

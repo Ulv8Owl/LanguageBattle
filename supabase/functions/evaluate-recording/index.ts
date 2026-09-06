@@ -29,7 +29,7 @@ import {
   NEUTRAL_SCORE,
 } from "../_shared/evaluateGrammar.ts";
 import { loadPlayerPrefs } from "../_shared/playerPrefs.ts";
-import { omniEnabled, omniEvaluate, type OmniResult } from "../_shared/omniJudge.ts";
+import { omniEnabled, omniEvaluate, type OmniResult, scoreFor } from "../_shared/omniJudge.ts";
 import { transcribeAudio } from "../_shared/asr/index.ts";
 import { scoreByElements } from "../_shared/elementScoring.ts";
 import { explainMissedElements } from "../_shared/explainElements.ts";
@@ -337,14 +337,24 @@ async function processJob(job_id: string): Promise<void> {
     // языке, которым игрок в этой паре не пользуется. native_for бывает
     // null у пар, которых backfill миграции не затронул, — тогда честно
     // откатываемся на общий родной.
-    const { data: pair } = await supabase
+    //
+    // ПОЧЕМУ ЗДЕСЬ order, А НЕ maybeSingle. После миграции 0034 у игрока
+    // может быть ДВЕ пары с одним изучаемым языком (ru-en и es-en).
+    // maybeSingle на двух строках возвращает ошибку и пустые данные — то
+    // есть родной язык молча откатывался на общий users.native_language.
+    // Игрок с русским в этой паре получал разбор на испанском: язык
+    // объяснений брался не от той пары. Активная пара — та, которой сейчас
+    // играют, и именно её родной здесь нужен.
+    const { data: pairs } = await supabase
       .from("user_languages")
-      .select("native_for")
+      .select("native_for, is_active")
       .eq("user_id", recording.user_id)
       .eq("role", "learning")
       .eq("language_code", targetLanguage)
-      .maybeSingle();
-    let nativeLanguage = pair?.native_for ?? null;
+      .order("is_active", { ascending: false })
+      .order("native_for")
+      .limit(1);
+    let nativeLanguage = pairs?.[0]?.native_for ?? null;
     if (!nativeLanguage) {
       const { data: speaker } = await supabase
         .from("users")
@@ -513,12 +523,16 @@ async function processJob(job_id: string): Promise<void> {
 
       if (omniJudged) {
         const judged = omni!;
-        score = judged.score;
-        // Исправленного текста тут нет и быть не может: модель судит без
-        // эталона, а склеивать «правильную фразу» из её поправок значило
-        // бы выдумать за неё вариант, которого она не предлагала.
-        // Показываем услышанное — то, что игрок реально сказал.
-        correctedText = "";
+        // БАЛЛ СЧИТАЕМ МЫ, а не модель. Числовая оценка от неё была самой
+        // шаткой частью ответа — на одной записи гуляла на два-три балла и
+        // объяснить её игроку было нечем. Здесь арифметика: доля
+        // несказанного плюс по баллу за ошибку, и это проговаривается
+        // одной фразой.
+        score = scoreFor(judged.correct, judged.missing, judged.errors.length);
+
+        // «Разбор:» — перевод, сделанный САМОЙ моделью. Не эталон из
+        // датасета: его она не видела. Сравнивается он с услышанным.
+        correctedText = judged.correct;
         cleanedText = judged.heard;
 
         // Ошибка привязана к ФРАГМЕНТУ сказанного, а не к элементу
@@ -533,16 +547,27 @@ async function processJob(job_id: string): Promise<void> {
           category: "omni",
           spanText: e.text,
         }));
+        // Несказанное живёт в той же таблице, но отдельной категорией: это
+        // не ошибка с объяснением, а кусок перевода, который клиент
+        // покрасит красным. Смешать их в одну категорию значило бы либо
+        // показать плашку без разбора, либо потерять подсветку.
+        errors.push(...judged.missing.map((text) => ({
+          offset: 0,
+          length: 0,
+          message: "",
+          replacement: "",
+          category: "missing",
+          spanText: text,
+        })));
 
         judgeStatus = "ok";
-        feedback = judged.summary.length > 0
-          ? judged.summary
-          : judged.errors.length === 0
-          ? "Ошибок не найдено."
-          : `Найдено ошибок: ${judged.errors.length}.`;
+        feedback = judged.errors.length === 0 && judged.missing.length === 0
+          ? "Отлично, ошибок не найдено!"
+          : `Ошибок: ${judged.errors.length}, пропущено кусков: ${judged.missing.length}.`;
         pipelineDebug.judge = {
-          mode: "мультимодальная модель: слушает запись, судит без эталона",
-          scoring: "модель",
+          mode: "мультимодальная модель: переводит сама, сравнивает с услышанным",
+          scoring: "программа: доля несказанного + по баллу за ошибку",
+          score,
           ...judged.debug,
         };
       } else if (byElements) {

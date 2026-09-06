@@ -41,16 +41,73 @@ export interface OmniError {
 export interface OmniResult {
   /** Что модель услышала, на изучаемом языке. */
   heard: string;
-  /** Балл 1..10. */
-  score: number;
+  /**
+   * Перевод, сделанный САМОЙ моделью. Он же — «Разбор:» на экране.
+   *
+   * Это не эталон из датасета: эталона модель не видела. Она переводила
+   * то же задание, что и игрок, и сравнивала с собственным результатом.
+   */
+  correct: string;
+  /**
+   * Куски [correct], смысл которых игрок не передал вовсе.
+   *
+   * Цитаты из [correct] дословно — по ним приложение красит несказанное и
+   * по ним же считается доля потерянного.
+   */
+  missing: string[];
   /** Ошибки, найденные моделью. Пустой список — сказано верно. */
   errors: OmniError[];
-  /** Сводка одной фразой для ленты боя. */
-  summary: string;
   /** Модель не ответила или ответила не тем. Балл тогда нейтральный. */
   degraded: boolean;
   failureReason?: string;
   debug: Record<string, unknown>;
+}
+
+/**
+ * Балл за ответ считает ПРОГРАММА, а не модель.
+ *
+ * Числовая оценка от модели была самой шаткой частью ответа: на одной и
+ * той же записи она гуляла на два-три балла и объяснить её игроку было
+ * нечем. Арифметика по её же разбору повторяема и проговаривается одной
+ * фразой — «половину не сказал и две ошибки».
+ *
+ * Формула: из десяти вычитаем долю несказанного (не сказал 60% — минус 6)
+ * и по баллу за каждую отдельную ошибку. Ниже единицы не опускаемся:
+ * единица и есть «ничего не получилось», отрицательных баллов в игре нет.
+ */
+export function scoreFor(correct: string, missing: string[], errorCount: number): number {
+  const total = correct.replace(/\s+/g, " ").trim().length;
+  // Перевода нет — считать долю не от чего. Тогда единственное, что у нас
+  // есть, это ошибки: пусть отвечают только они.
+  const share = total === 0 ? 0 : Math.min(1, missingLength(correct, missing) / total);
+  const score = 10 - Math.round(10 * share) - errorCount;
+  return Math.max(1, Math.min(10, score));
+}
+
+/**
+ * Сколько символов [correct] покрыто пропусками.
+ *
+ * Считаем ПО ВХОЖДЕНИЯМ в текст перевода, а не суммой длин цитат. Модель
+ * может процитировать один и тот же кусок дважды или прислать фрагмент,
+ * которого в переводе нет вовсе, — и в обоих случаях сумма длин завысила
+ * бы потерю, а игрок недосчитался бы баллов за нашу арифметику.
+ */
+function missingLength(correct: string, missing: string[]): number {
+  const haystack = correct.toLowerCase();
+  // Отмечаем покрытые символы, поэтому повторная цитата ничего не добавит.
+  const covered = new Array<boolean>(correct.length).fill(false);
+  for (const raw of missing) {
+    const needle = raw.replace(/\s+/g, " ").trim().toLowerCase();
+    if (needle.length === 0) continue;
+    let from = 0;
+    for (;;) {
+      const at = haystack.indexOf(needle, from);
+      if (at < 0) break;
+      for (let i = at; i < at + needle.length && i < covered.length; i++) covered[i] = true;
+      from = at + needle.length;
+    }
+  }
+  return covered.filter(Boolean).length;
 }
 
 const DEFAULT_BASE = "https://dashscope-intl.aliyuncs.com/compatible-mode/v1";
@@ -94,42 +151,82 @@ const LANGUAGE_NAMES: Record<string, string> = {
   es: "Spanish",
 };
 
+/**
+ * Название языка НА НЁМ САМОМ.
+ *
+ * Нужно рядом с английским названием, и это не украшение. Инструкция
+ * «explain in Russian» модель однажды прочитала как пожелание и ответила
+ * по-испански — игрок с русским в паре получил разбор на языке, которого
+ * не выбирал. Самоназвание работает как второй, независимый указатель: его
+ * трудно перепутать, потому что оно написано той же письменностью, что и
+ * требуемый ответ.
+ */
+const LANGUAGE_ENDONYMS: Record<string, string> = {
+  en: "English",
+  ru: "русский",
+  es: "español",
+};
+
 function languageName(code: string): string {
   return LANGUAGE_NAMES[code.toLowerCase()] ?? code;
+}
+
+function languageEndonym(code: string): string {
+  return LANGUAGE_ENDONYMS[code.toLowerCase()] ?? code;
 }
 
 /**
  * Инструкция модели.
  *
  * Написана по-английски намеренно: язык инструкции не должен подсказывать
- * модели, на каком языке ждут ОТВЕТ, — иначе объяснения начинают сползать
- * на язык промпта. Нужный язык объяснений называется отдельно и явно.
+ * модели, на каком языке ждут ОТВЕТ, — иначе объяснения сползают на язык
+ * промпта. Нужный язык объяснений называется отдельно, дважды и с
+ * самоназванием.
+ *
+ * ЧТО МОДЕЛЬ ДЕЛАЕТ ПО ПОРЯДКУ. Сначала переводит задание сама — у неё на
+ * руках ровно то же, что у игрока, и ничего больше. Потом слушает запись и
+ * сравнивает со СВОИМ переводом. Такой порядок важен: модель, которой
+ * сразу дали слушать «ошибки», начинает их искать и находит на ровном
+ * месте; модель, у которой уже есть собственный перевод, сравнивает два
+ * текста и молчит там, где сравнивать нечего.
+ *
+ * БАЛЛ МОДЕЛЬ НЕ СТАВИТ. Его считает программа: доля несказанного плюс по
+ * баллу за ошибку. Числовая оценка от модели была самой шаткой частью
+ * ответа — на одной и той же записи она гуляла на два-три балла, — а
+ * арифметика по её же разбору повторяема и объяснима игроку.
  */
 function systemPrompt(nativeLanguage: string, targetLanguage: string, level: string): string {
   const native = languageName(nativeLanguage);
+  const nativeSelf = languageEndonym(nativeLanguage);
   const target = languageName(targetLanguage);
   return [
-    `You are a ${target} teacher assessing a spoken translation by a ${native}-speaking learner at CEFR level ${level}.`,
-    `You will hear an audio recording. The learner was asked to say a given ${native} sentence in ${target}.`,
+    `You are a ${target} teacher. A ${native}-speaking learner at CEFR level ${level} was given a sentence`,
+    `in ${native} and asked to say it aloud in ${target}. You get that sentence and the recording.`,
     "",
-    "Judge the translation on its own merits. There is NO reference answer, and you must not invent one:",
-    `a sentence can be translated into ${target} in several correct ways, and a different wording is not an error.`,
-    "Mark something as an error only when it is genuinely wrong: wrong meaning, wrong grammar, a missing or",
-    "invented part of the message, or a word that does not exist. Do not mark stylistic preferences.",
+    "Work in this order:",
+    `1. Translate the ${native} sentence into ${target} yourself. This is your reference — you have no other.`,
+    "2. Listen to the recording and transcribe it exactly as spoken, mistakes included. Do not fix anything.",
+    "3. Compare the recording with your own translation.",
     "",
-    "Group errors by MEANING, not by word: everything that goes wrong for one reason is a single error.",
-    `For each error quote the exact fragment of what the learner SAID (in ${target}, verbatim from the audio),`,
-    `explain in ${native} why it is wrong and what the rule is, and give the corrected form of that fragment.`,
-    `Write explanations for a ${level} learner: concrete and short, no grammar jargon they would not know.`,
+    "A different wording is NOT an error: a sentence can be translated in several correct ways, and you must",
+    "accept any wording that conveys the same meaning correctly. Mark an error only when something is genuinely",
+    "wrong — wrong meaning, wrong grammar, an invented word. Never mark stylistic preference.",
+    "Group errors by MEANING: everything that goes wrong for one reason is a single error.",
     "",
-    "Scoring, 1 to 10: 10 — the message is conveyed accurately and naturally; 7-9 — understandable with minor",
-    "slips; 4-6 — understandable but with errors that change or blur the meaning; 2-3 — barely conveys the",
-    "message; 1 — wrong language, silence, or unrelated speech.",
+    "Also list the parts of your translation whose meaning the learner did not convey at all — skipped or lost.",
+    "Quote them verbatim from your own translation so they can be found in it character for character.",
+    "",
+    `LANGUAGE OF EXPLANATIONS: every "why" field must be written in ${native} (${nativeSelf}) and in no other`,
+    `language. This is not a preference — the learner reads only ${nativeSelf}. Everything else (the translation,`,
+    `the transcription, the quoted fragments, the corrections) stays in ${target}.`,
+    `Explain at ${level} level: short and concrete, no grammar jargon the learner would not know.`,
     "",
     "Reply with a single JSON object and nothing else — no markdown, no commentary:",
-    '{"heard": string, "score": integer 1-10, "summary": string, "errors": [{"text": string, "message": string, "correction": string}]}',
-    `"heard" is what you heard, transcribed in ${target} exactly as spoken, including mistakes — do not fix them.`,
-    `"summary" is one short sentence in ${native}. If there are no errors, "errors" is an empty array.`,
+    '{"correct": string, "heard": string, "missing": [string],',
+    ' "errors": [{"said": string, "fix": string, "why": string}]}',
+    `"correct" — your translation. "heard" — the transcription. "missing" — fragments of "correct" the learner`,
+    `did not convey. "said" — the exact fragment of "heard" that is wrong, "fix" — how it should sound in ${target},`,
+    `"why" — the explanation in ${nativeSelf}. Empty arrays when there is nothing to report.`,
   ].join("\n");
 }
 
@@ -223,8 +320,11 @@ function asErrors(raw: unknown): OmniError[] {
   for (const item of raw) {
     if (!item || typeof item !== "object") continue;
     const row = item as Record<string, unknown>;
-    const text = typeof row.text === "string" ? row.text.trim() : "";
-    const message = typeof row.message === "string" ? row.message.trim() : "";
+    // Ключи короткие (said/fix/why): каждый повторяется в ответе столько
+    // раз, сколько нашлось ошибок, и на длинном разборе это заметные
+    // токены за нулевую пользу.
+    const text = typeof row.said === "string" ? row.said.trim() : "";
+    const message = typeof row.why === "string" ? row.why.trim() : "";
     // Ошибка без фрагмента показывается не к чему: плашка в разборе — это
     // и есть фрагмент. Ошибка без объяснения — пустая плашка, за которой
     // ничего нет; такую лучше не показывать вовсе, чем обещать разбор.
@@ -232,16 +332,10 @@ function asErrors(raw: unknown): OmniError[] {
     out.push({
       text,
       message,
-      correction: typeof row.correction === "string" ? row.correction.trim() : "",
+      correction: typeof row.fix === "string" ? row.fix.trim() : "",
     });
   }
   return out;
-}
-
-function clampScore(raw: unknown): number | null {
-  const value = typeof raw === "number" ? raw : Number(raw);
-  if (!Number.isFinite(value)) return null;
-  return Math.max(1, Math.min(10, Math.round(value)));
 }
 
 export interface OmniRequest {
@@ -274,9 +368,9 @@ export async function omniEvaluate(req: OmniRequest): Promise<OmniResult> {
   const started = Date.now();
   const fail = (reason: string, extra: Record<string, unknown> = {}): OmniResult => ({
     heard: "",
-    score: 0,
+    correct: "",
+    missing: [],
     errors: [],
-    summary: "",
     degraded: true,
     failureReason: reason,
     debug: { ...omniConfigDebug(), status: "failed", reason, ms: Date.now() - started, ...extra },
@@ -374,31 +468,34 @@ export async function omniEvaluate(req: OmniRequest): Promise<OmniResult> {
   };
 
   if (!req.wantJudgement) {
-    // Балл не запрашивали — 0 здесь значит «не оценивали», и вызывающий
-    // обязан посчитать его сам. Пустой транскрипт при этом не ошибка:
-    // игрок мог промолчать, и это отдельное состояние, а не сбой.
-    return { heard, score: 0, errors: [], summary: "", degraded: false, debug };
+    // Разбора не просили. Пустой транскрипт при этом не ошибка: игрок мог
+    // промолчать, и это отдельное состояние, а не сбой.
+    return { heard, correct: "", missing: [], errors: [], degraded: false, debug };
   }
 
-  const score = clampScore(parsed.score);
-  if (score === null) {
-    return fail(`в ответе нет балла: ${raw.slice(0, 300)}`, { heard });
+  const correct = typeof parsed.correct === "string" ? parsed.correct.trim() : "";
+  if (correct.length === 0) {
+    // Без собственного перевода модели не с чем сравнивать, и «Разбор:»
+    // показать нечем. Это сбой ответа, а не пустой результат.
+    return fail(`в ответе нет перевода: ${raw.slice(0, 300)}`, { heard });
   }
 
+  const missing = Array.isArray(parsed.missing)
+    ? parsed.missing
+      .filter((m): m is string => typeof m === "string")
+      .map((m) => m.trim())
+      .filter((m) => m.length > 0)
+    : [];
   const errors = asErrors(parsed.errors);
-  debug.score = score;
+
+  debug.correct = correct;
+  debug.missing = missing;
   debug.errors = errors.length;
   // Сколько ошибок модель назвала и сколько мы оставили — расхождение
   // означает, что часть пришла без фрагмента или без объяснения, и это
   // видно только здесь.
   debug.errors_raw = Array.isArray(parsed.errors) ? parsed.errors.length : 0;
+  debug.score_formula = `10 - доля несказанного - ${errors.length}`;
 
-  return {
-    heard,
-    score,
-    errors,
-    summary: typeof parsed.summary === "string" ? parsed.summary.trim() : "",
-    degraded: false,
-    debug,
-  };
+  return { heard, correct, missing, errors, degraded: false, debug };
 }
