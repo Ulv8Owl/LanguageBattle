@@ -38,27 +38,54 @@ export interface OmniError {
   correction: string;
 }
 
+/** Вид куска в разборе. */
+export type SpanKind =
+  /** Сказано верно — обычный текст. */
+  | "ok"
+  /** Сказано, но не так — зачёркивается. Это слова ИГРОКА. */
+  | "bad"
+  /** Не сказано вовсе — красным. Это слова правильного перевода. */
+  | "miss";
+
+/** Один кусок разбора: текст и что с ним не так. */
+export interface ReviewSpan {
+  text: string;
+  kind: SpanKind;
+}
+
 export interface OmniResult {
   /**
-   * Перевод, сделанный САМОЙ моделью. Он же — «Разбор:» на экране.
+   * Разбор одной лентой: правильный перевод, в который вплетено то, что
+   * игрок сказал не так.
    *
-   * Это не эталон из датасета: эталона модель не видела. Она переводила
-   * то же задание, что и игрок, и сравнивала с собственным результатом.
+   * ПОЧЕМУ ОДНОЙ ЛЕНТОЙ, А НЕ ДВУМЯ СПИСКАМИ. Раньше модель отдавала
+   * отдельно перевод и отдельно список пропущенных кусков, а приложение
+   * искало вторые в первом подстрокой. Поиск промахивался на каждой мелочи
+   * — модель цитировала неточно, меняла регистр, — и подсветка молча
+   * пропадала. Здесь границы уже проведены самой моделью: приложению
+   * остаётся покрасить, а не догадываться.
    */
-  correct: string;
-  /**
-   * Куски [correct], смысл которых игрок не передал вовсе.
-   *
-   * Цитаты из [correct] дословно — по ним приложение красит несказанное и
-   * по ним же считается доля потерянного.
-   */
-  missing: string[];
+  review: ReviewSpan[];
   /** Ошибки, найденные моделью. Пустой список — сказано верно. */
   errors: OmniError[];
+  /**
+   * Слышна ли в записи речь.
+   *
+   * Стоит одного слова в ответе и ловит самый опасный сбой: модель, до
+   * которой аудио не доехало, отвечает СВОИМ переводом без единой ошибки —
+   * то есть игрок получает десятку за что угодно, и по ответу этого не
+   * видно. Явный вопрос превращает молчаливую ложь в честный отказ.
+   */
+  audible: boolean;
   /** Модель не ответила или ответила не тем. Балл тогда нейтральный. */
   degraded: boolean;
   failureReason?: string;
   debug: Record<string, unknown>;
+}
+
+/** Правильный перевод — всё, кроме сказанного игроком неверно. */
+export function correctText(review: ReviewSpan[]): string {
+  return review.filter((s) => s.kind !== "bad").map((s) => s.text).join("");
 }
 
 /**
@@ -73,39 +100,15 @@ export interface OmniResult {
  * и по баллу за каждую отдельную ошибку. Ниже единицы не опускаемся:
  * единица и есть «ничего не получилось», отрицательных баллов в игре нет.
  */
-export function scoreFor(correct: string, missing: string[], errorCount: number): number {
-  const total = correct.replace(/\s+/g, " ").trim().length;
+export function scoreFor(review: ReviewSpan[], errorCount: number): number {
+  const len = (kind: SpanKind) =>
+    review.filter((s) => s.kind === kind).reduce((sum, s) => sum + s.text.trim().length, 0);
+  const total = len("ok") + len("miss");
   // Перевода нет — считать долю не от чего. Тогда единственное, что у нас
   // есть, это ошибки: пусть отвечают только они.
-  const share = total === 0 ? 0 : Math.min(1, missingLength(correct, missing) / total);
+  const share = total === 0 ? 0 : Math.min(1, len("miss") / total);
   const score = 10 - Math.round(10 * share) - errorCount;
   return Math.max(1, Math.min(10, score));
-}
-
-/**
- * Сколько символов [correct] покрыто пропусками.
- *
- * Считаем ПО ВХОЖДЕНИЯМ в текст перевода, а не суммой длин цитат. Модель
- * может процитировать один и тот же кусок дважды или прислать фрагмент,
- * которого в переводе нет вовсе, — и в обоих случаях сумма длин завысила
- * бы потерю, а игрок недосчитался бы баллов за нашу арифметику.
- */
-function missingLength(correct: string, missing: string[]): number {
-  const haystack = correct.toLowerCase();
-  // Отмечаем покрытые символы, поэтому повторная цитата ничего не добавит.
-  const covered = new Array<boolean>(correct.length).fill(false);
-  for (const raw of missing) {
-    const needle = raw.replace(/\s+/g, " ").trim().toLowerCase();
-    if (needle.length === 0) continue;
-    let from = 0;
-    for (;;) {
-      const at = haystack.indexOf(needle, from);
-      if (at < 0) break;
-      for (let i = at; i < at + needle.length && i < covered.length; i++) covered[i] = true;
-      from = at + needle.length;
-    }
-  }
-  return covered.filter(Boolean).length;
 }
 
 const DEFAULT_BASE = "https://dashscope-intl.aliyuncs.com/compatible-mode/v1";
@@ -205,25 +208,36 @@ function systemPrompt(nativeLanguage: string, targetLanguage: string, level: str
     `1. Translate the ${native} sentence into ${target} yourself. This is your reference — you have no other.`,
     "2. Listen to the recording and compare what you hear with your own translation.",
     "",
+    "First say whether you can hear any speech at all in the recording: \"audible\": true or false.",
+    "Answer false when the recording is silent, noise only, or you received no audio. Never guess in that case —",
+    "an invented assessment is worse than none.",
+    "",
     "A different wording is NOT an error: a sentence can be translated in several correct ways, and you must",
     "accept any wording that conveys the same meaning correctly. Mark an error only when something is genuinely",
     "wrong — wrong meaning, wrong grammar, an invented word. Never mark stylistic preference.",
     "Group errors by MEANING: everything that goes wrong for one reason is a single error.",
     "",
-    "Also list the parts of your translation whose meaning the learner did not convey at all — skipped or lost.",
-    "Quote them verbatim from your own translation so they can be found in it character for character.",
+    'Then build "review" — your translation with the learner\'s mistakes woven into it, as an ordered list of',
+    "pieces that reads left to right like one sentence. Each piece is one of:",
+    `  {"k": "ok",   "t": "..."} — part of your translation the learner conveyed correctly;`,
+    `  {"k": "bad",  "t": "..."} — what the learner said instead, quoted from the recording verbatim,`,
+    "                             mistakes included; it will be shown struck through;",
+    `  {"k": "miss", "t": "..."} — part of your translation the learner did not convey at all;`,
+    "                             it will be shown in red.",
+    'Put a "bad" piece where the learner said it, right next to the "miss" or "ok" piece it replaces.',
+    'Keep spacing inside "t" so that joining all pieces reads naturally. Reading the "ok" and "miss" pieces',
+    "in order must give exactly your translation, word for word.",
     "",
     `LANGUAGE OF EXPLANATIONS: every "why" field must be written in ${native} (${nativeSelf}) and in no other`,
     `language. This is not a preference — the learner reads only ${nativeSelf}. Everything else (the translation,`,
-    `the transcription, the quoted fragments, the corrections) stays in ${target}.`,
+    `the quoted fragments, the corrections) stays in ${target}.`,
     `Explain at ${level} level: short and concrete, no grammar jargon the learner would not know.`,
     "",
     "Reply with a single JSON object and nothing else — no markdown, no commentary:",
-    '{"correct": string, "missing": [string], "errors": [{"said": string, "fix": string, "why": string}]}',
-    `"correct" — your translation. "missing" — fragments of "correct" the learner did not convey.`,
-    `"said" — what the learner actually said at that point, quoted from the recording verbatim,`,
-    `mistakes included; do not correct it there. "fix" — how it should sound in ${target}.`,
-    `"why" — the explanation in ${nativeSelf}. Empty arrays when there is nothing to report.`,
+    '{"audible": boolean, "review": [{"k": "ok"|"bad"|"miss", "t": string}],',
+    ' "errors": [{"said": string, "fix": string, "why": string}]}',
+    `"said" — the fragment of the recording that is wrong, quoted verbatim; "fix" — how it should sound in`,
+    `${target}; "why" — the explanation in ${nativeSelf}. Empty "errors" when there is nothing to report.`,
   ].join("\n");
 }
 
@@ -325,6 +339,22 @@ function asErrors(raw: unknown): OmniError[] {
   return out;
 }
 
+/** Сегменты разбора: только известные виды и только непустой текст. */
+function asReview(raw: unknown): ReviewSpan[] {
+  if (!Array.isArray(raw)) return [];
+  const out: ReviewSpan[] = [];
+  for (const item of raw) {
+    if (!item || typeof item !== "object") continue;
+    const row = item as Record<string, unknown>;
+    const text = typeof row.t === "string" ? row.t : "";
+    const kind = typeof row.k === "string" ? row.k : "";
+    if (text.length === 0) continue;
+    if (kind !== "ok" && kind !== "bad" && kind !== "miss") continue;
+    out.push({ text, kind });
+  }
+  return out;
+}
+
 export interface OmniRequest {
   audio: Uint8Array;
   /** Контейнер записи: wav, mp3, m4a — как есть у нас в хранилище. */
@@ -348,9 +378,9 @@ export interface OmniRequest {
 export async function omniEvaluate(req: OmniRequest): Promise<OmniResult> {
   const started = Date.now();
   const fail = (reason: string, extra: Record<string, unknown> = {}): OmniResult => ({
-    correct: "",
-    missing: [],
+    review: [],
     errors: [],
+    audible: false,
     degraded: true,
     failureReason: reason,
     debug: { ...omniConfigDebug(), status: "failed", reason, ms: Date.now() - started, ...extra },
@@ -437,29 +467,36 @@ export async function omniEvaluate(req: OmniRequest): Promise<OmniResult> {
     audio_format: req.audioFormat,
   };
 
-  const correct = typeof parsed.correct === "string" ? parsed.correct.trim() : "";
-  if (correct.length === 0) {
-    // Без собственного перевода модели не с чем сравнивать, и «Разбор:»
-    // показать нечем. Это сбой ответа, а не пустой результат.
-    return fail(`в ответе нет перевода: ${raw.slice(0, 300)}`);
+  // Модель прямо сказала, что речи не слышит. Это НЕ «игрок промолчал»:
+  // ровно так же выглядит запись, которая до модели не доехала, а разница
+  // для игрока огромна — во втором случае десятка за что угодно. Считаем
+  // сбоем и ставим нейтральный балл.
+  if (parsed.audible === false) {
+    return fail("модель не слышит речи в записи (audible=false)", { raw: raw.slice(0, 400) });
   }
 
-  const missing = Array.isArray(parsed.missing)
-    ? parsed.missing
-      .filter((m): m is string => typeof m === "string")
-      .map((m) => m.trim())
-      .filter((m) => m.length > 0)
-    : [];
+  const review = asReview(parsed.review);
+  if (review.length === 0) {
+    return fail(`в ответе нет разбора: ${raw.slice(0, 300)}`);
+  }
+
   const errors = asErrors(parsed.errors);
+  const correct = correctText(review);
 
   debug.correct = correct;
-  debug.missing = missing;
+  debug.spans = {
+    ok: review.filter((s) => s.kind === "ok").length,
+    bad: review.filter((s) => s.kind === "bad").length,
+    miss: review.filter((s) => s.kind === "miss").length,
+  };
   debug.errors = errors.length;
   // Сколько ошибок модель назвала и сколько мы оставили — расхождение
   // означает, что часть пришла без фрагмента или без объяснения, и это
   // видно только здесь.
   debug.errors_raw = Array.isArray(parsed.errors) ? parsed.errors.length : 0;
-  debug.score_formula = `10 - доля несказанного - ${errors.length}`;
+  // Сырой ответ целиком: когда балл выглядит взятым с потолка, спорить
+  // можно только по нему. Обрезан, чтобы не раздувать строку в базе.
+  debug.raw = raw.slice(0, 2000);
 
-  return { correct, missing, errors, degraded: false, debug };
+  return { review, errors, audible: true, degraded: false, debug };
 }

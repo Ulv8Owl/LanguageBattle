@@ -39,9 +39,10 @@ void main() {
   });
 
   test('цитату сказанного модель не чинит', () {
-    // В плашке ошибки должны стоять слова игрока, а не исправленный за
-    // него вариант: иначе он не узнает собственную ошибку.
-    expect(omni(), contains('mistakes included; do not correct it there'));
+    // В плашке ошибки и в зачёркнутом куске должны стоять слова игрока, а
+    // не исправленный за него вариант: иначе он не узнает свою ошибку.
+    expect(omni(), contains('mistakes included'));
+    expect(omni(), contains('quoted verbatim'));
   });
 
   test('ошибки группируются по смыслу, а не по словам', () {
@@ -99,15 +100,32 @@ void main() {
     final s = omni();
     expect(s, contains('export function scoreFor'));
     expect(s.contains('clampScore'), isFalse);
-    expect(worker(), contains('scoreFor(judged.correct, judged.missing, judged.errors.length)'));
+    expect(worker(), contains('scoreFor(judged.review, judged.errors.length)'));
   });
 
-  test('несказанное — отдельная категория, а не ошибка', () {
-    // Как ошибка пропуск дал бы плашку, за которой пусто; как пропуск
-    // ошибка потеряла бы разбор.
-    expect(worker(), contains('category: "missing"'));
-    expect(read('supabase/migrations/0038_missing_spans.sql'), contains("'missing'"));
-    expect(read('lib/features/training/training_screen.dart'), contains('_missingSpans'));
+  test('разбор приходит размеченной лентой, а не двумя списками', () {
+    // Раньше приложение искало пропущенные куски в переводе подстрокой, и
+    // поиск промахивался на каждой неточной цитате — подсветка молча
+    // пропадала. Границы теперь проводит модель.
+    expect(omni(), contains('export type SpanKind'));
+    expect(omni(), contains('"k": "ok"|"bad"|"miss"'));
+    expect(worker(), contains('review_spans: reviewSpans'));
+    expect(read('lib/widgets/correction_text.dart'), contains('List<TextSpan> reviewSpans('));
+  });
+
+  test('модель обязана сказать, слышит ли она речь', () {
+    // Модель, до которой аудио не доехало, отвечает своим переводом без
+    // единой ошибки: игрок получает десятку за что угодно, и по ответу
+    // этого не видно. Явный вопрос превращает молчаливую ложь в отказ.
+    expect(omni(), contains(r'\"audible\": true or false'));
+    expect(omni(), contains('if (parsed.audible === false)'));
+    expect(omni(), contains('audible=false'));
+  });
+
+  test('сырой ответ модели сохраняется', () {
+    // Когда балл выглядит взятым с потолка, спорить можно только по нему.
+    expect(omni(), contains('debug.raw = raw.slice'));
+    expect(read('lib/features/training/training_screen.dart'), contains("judge?['raw']"));
   });
 
   test('один вызов — одно списание', () {

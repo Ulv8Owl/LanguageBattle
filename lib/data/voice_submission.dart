@@ -4,6 +4,7 @@ import 'package:supabase_flutter/supabase_flutter.dart' show FileOptions;
 
 import '../core/audio_format.dart';
 import '../core/supabase_client.dart';
+import '../widgets/correction_text.dart';
 
 /// Итог распознавания речи по одной записи. Значения совпадают со
 /// столбцом voice_recordings.transcript_status (миграция 0013) — клиент
@@ -60,6 +61,10 @@ enum JudgeStatus {
 /// Что сервер в итоге разобрал по загруженной записи.
 class RecordingOutcome {
   final String transcript;
+
+  /// Разбор одной лентой, как его разметила модель: правильный перевод с
+  /// вплетёнными ошибками игрока. Пусто — разбора нет.
+  final List<ReviewSpan> reviewSpans;
   final TranscriptStatus status;
   final JudgeStatus judgeStatus;
 
@@ -90,6 +95,7 @@ class RecordingOutcome {
 
   const RecordingOutcome({
     required this.transcript,
+    this.reviewSpans = const [],
     required this.status,
     this.judgeStatus = JudgeStatus.ok,
     this.corrected = '',
@@ -103,6 +109,7 @@ class RecordingOutcome {
   /// сохраняется: именно в нём обычно и лежит ответ, почему повисло.
   RecordingOutcome withClientFailure(String reason) => RecordingOutcome(
         transcript: transcript,
+        reviewSpans: reviewSpans,
         status: status,
         judgeStatus: judgeStatus,
         corrected: corrected,
@@ -120,7 +127,8 @@ class RecordingOutcome {
   /// говорить игроку «сбой на нашей стороне» в таком случае неверно.
   bool get judgeHitProviderLimit => judgeDebug?['provider_limit'] == true;
 
-  Map<String, dynamic>? get asrDebug => _section('asr');
+  /// Диагностика вызова модели: что и куда отправляли.
+  Map<String, dynamic>? get omniDebug => _section('omni');
   Map<String, dynamic>? get judgeDebug => _section('judge');
 
   /// Какой попыткой сервер счёл эту запись и какой режим разбора выбрал.
@@ -201,7 +209,8 @@ Future<String> submitVoiceRecording({
 Future<RecordingOutcome> fetchRecordingOutcome(String recordingId) async {
   final row = await supabase
       .from('voice_recordings')
-      .select('transcript, transcript_status, judge_status, corrected_text, cleaned_text, pipeline_debug')
+      .select('transcript, transcript_status, judge_status, corrected_text, '
+          'cleaned_text, review_spans, pipeline_debug')
       .eq('id', recordingId)
       .maybeSingle();
   return RecordingOutcome(
@@ -209,6 +218,7 @@ Future<RecordingOutcome> fetchRecordingOutcome(String recordingId) async {
     status: TranscriptStatus.parse(row?['transcript_status'] as String?),
     judgeStatus: JudgeStatus.parse(row?['judge_status'] as String?),
     corrected: ((row?['corrected_text'] as String?) ?? '').trim(),
+    reviewSpans: ReviewSpan.fromJson(row?['review_spans']),
     cleaned: ((row?['cleaned_text'] as String?) ?? '').trim(),
     debug: row?['pipeline_debug'] is Map
         ? Map<String, dynamic>.from(row!['pipeline_debug'] as Map)

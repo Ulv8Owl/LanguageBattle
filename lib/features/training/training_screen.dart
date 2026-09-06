@@ -1303,17 +1303,6 @@ class _ErrorReport extends StatelessWidget {
     this.isExam = false,
   });
 
-  /// Куски правильного перевода, которых игрок не сказал вовсе.
-  ///
-  /// Отдельная категория, а не ошибка: объяснять там нечего, показать надо
-  /// красным. По этому же списку сервер снял баллы, поэтому красим ровно
-  /// его — красить одно, а снимать за другое нельзя.
-  List<String> get _missingSpans => [
-        for (final e in errors)
-          if ((e['category'] as String?) == 'missing')
-            ((e['span_text'] as String?) ?? '').trim(),
-      ]..removeWhere((t) => t.isEmpty);
-
   /// Ошибки, названные мультимодальной моделью.
   ///
   /// Отличаются от поэлементных категорией и тем, что несут собственный
@@ -1407,11 +1396,10 @@ class _ErrorReport extends StatelessWidget {
             const SizedBox(height: 10),
 
             TranscriptReview(
-              corrected: correction,
+              spans: attempt?.reviewSpans ?? const [],
               targetLanguage: targetLanguage,
-              missing: _missingSpans,
             ),
-            if (correction.isNotEmpty) const SizedBox(height: 10),
+            if ((attempt?.reviewSpans ?? const []).isNotEmpty) const SizedBox(height: 10),
 
             if (isSecondAttempt) ...[
               if (noResult || notRecognised || judgeBroken || correction.isEmpty)
@@ -1751,7 +1739,7 @@ class _PipelineDebug extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final asr = outcome.asrDebug;
+    final omni = outcome.omniDebug;
     final judge = outcome.judgeDebug;
 
     return Padding(
@@ -1794,50 +1782,26 @@ class _PipelineDebug extends StatelessWidget {
               ),
               const SizedBox(height: 10),
             ],
-            if (judge?['trivial_probe'] == true) ...[
-              const SelectableText(
-                'ВКЛЮЧЁН ДИАГНОСТИЧЕСКИЙ РЕЖИМ LLM_TRIVIAL_PROBE — судья НЕ оценивает, '
-                'он возвращает один и тот же ответ на что угодно. Выключить: '
-                'npx supabase secrets unset LLM_TRIVIAL_PROBE',
-                style: TextStyle(color: AppColors.danger, fontSize: 11, height: 1.35),
-              ),
-              const SizedBox(height: 10),
-            ],
             _block(
-              'ASR ответил',
-              outcome.transcript.isNotEmpty ? '«${outcome.transcript}»' : _asrFallbackText(),
+              'Модель ответила',
+              _judgeText(judge),
               _meta([
-                if (asr?['provider'] != null) '${asr!['provider']}/${asr['model']}',
-                if (asr?['language'] != null) '${asr!['language']}',
-                if (asr?['audio_seconds'] != null) 'аудио ${asr!['audio_seconds']} с',
-                if (asr?['elapsed_ms'] != null) '${asr!['elapsed_ms']} мс',
-                if (asr?['confidence'] != null) 'уверенность ${asr!['confidence']}',
-                'статус ${outcome.status.name}',
+                if (omni?['model'] != null) '${omni!['model']}',
+                if (omni?['ms'] != null) '${omni!['ms']} мс',
+                if (omni?['audio_bytes'] != null) 'аудио ${omni!['audio_bytes']} Б',
+                if (omni?['audio_format'] != null) '${omni!['audio_format']}',
+                'статус ${outcome.judgeStatus.name}',
               ]),
-              asr?['error']?.toString(),
+              judge?['reason']?.toString(),
             ),
             const SizedBox(height: 10),
             _block(
-              'LLM ответил',
-              _judgeText(judge),
+              'Как посчитан балл',
+              _scoreText(judge),
               _meta([
-                if (judge?['model'] != null) '${judge!['model']}',
-                if (judge?['elapsed_ms'] != null) '${judge!['elapsed_ms']} мс',
-                if (judge?['attempts'] != null) 'попыток ${judge!['attempts']}',
-                if (judge?['errors_count'] != null) 'ошибок ${judge!['errors_count']}',
-                if (judge?['correct_elements'] != null)
-                  'элементов ${judge!['correct_elements']}/${judge['total_elements']}',
-                'статус ${outcome.judgeStatus.name}',
+                if (judge?['scoring'] != null) '${judge!['scoring']}',
               ]),
-              // Разбор ошибок и оценка делаются РАЗНЫМИ вещами: балл
-              // считает подсчёт без модели, объяснения пишет модель.
-              // Поэтому её состояние идёт в той же строке причины — иначе
-              // молчание модели выглядит как «всё в порядке», что уже
-              // однажды осталось незамеченным.
-              [
-                _explainText(judge?['explain']),
-                judge?['reason']?.toString(),
-              ].whereType<String>().join('\n'),
+              null,
             ),
           ],
         ),
@@ -1845,37 +1809,37 @@ class _PipelineDebug extends StatelessWidget {
     );
   }
 
-  String _asrFallbackText() => switch (outcome.status) {
-        TranscriptStatus.empty => '(пусто — речи не услышал)',
-        TranscriptStatus.failed => '(сбой распознавания)',
-        _ => '(нет данных)',
-      };
-
-  /// Для судьи важнее всего СЫРОЙ ответ модели: именно по нему видно,
-  /// прислала ли она JSON не той формы, markdown-обёртку или вообще ничего.
-  /// Состояние разбора ошибок моделью — отдельно от балла.
-  String? _explainText(Object? explain) {
-    if (explain is! Map) return null;
-    final status = explain['status']?.toString() ?? '?';
-    final parts = <String>[
-      'разбор ошибок: $status',
-      if (explain['asked'] != null) 'спрошено ${explain['asked']}',
-      if (explain['answered'] != null) 'отвечено ${explain['answered']}',
-      if (explain['elapsed_ms'] != null) '${explain['elapsed_ms']} мс',
-    ];
-    final reason = explain['reason']?.toString();
-    return [parts.join(' · '), if (reason != null && reason.isNotEmpty) reason].join('\n');
-  }
-
+  /// Сырой ответ модели — главное в этой панели.
+  ///
+  /// Когда балл выглядит взятым с потолка, спорить можно только по нему:
+  /// он показывает, что модель прислала на самом деле, а не что мы из
+  /// этого поняли. Раньше здесь стоял пересказ, и «десятка за что угодно»
+  /// была неотличима от «модель не услышала запись».
   String _judgeText(Map<String, dynamic>? judge) {
     final raw = judge?['raw']?.toString();
     if (raw != null && raw.isNotEmpty) return raw;
     return switch (outcome.judgeStatus) {
-      JudgeStatus.skipped => '(не вызывался — ${judge?['reason'] ?? 'нечего разбирать'})',
       JudgeStatus.degraded => '(ответа нет, см. причину ниже)',
       JudgeStatus.pending => '(ещё не отработал)',
-      JudgeStatus.ok => '(балл посчитан по элементам, без модели)',
+      _ => '(сырой ответ не сохранён)',
     };
+  }
+
+  /// Из чего сложился балл: десять минус доля несказанного минус ошибки.
+  String _scoreText(Map<String, dynamic>? judge) {
+    final spans = judge?['spans'];
+    final score = judge?['score'];
+    if (spans is! Map) {
+      return score == null ? '(нет данных)' : 'балл $score';
+    }
+    return [
+      'балл ${score ?? "?"}',
+      'кусков: верно ${spans['ok'] ?? 0}, '
+          'не так ${spans['bad'] ?? 0}, '
+          'не сказано ${spans['miss'] ?? 0}',
+      'ошибок ${judge?['errors'] ?? 0}'
+          '${judge?['errors_raw'] != null && judge!['errors_raw'] != judge['errors'] ? ' (модель назвала ${judge['errors_raw']})' : ''}',
+    ].join('\n');
   }
 
   String _meta(List<String> parts) => parts.where((p) => p.isNotEmpty).join(' · ');

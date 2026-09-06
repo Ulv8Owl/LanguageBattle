@@ -21,7 +21,7 @@
 
 import { createClient, type SupabaseClient } from "jsr:@supabase/supabase-js@2";
 import { type CefrLevel, NEUTRAL_SCORE } from "../_shared/cefr.ts";
-import { omniEvaluate, type OmniResult, scoreFor } from "../_shared/omniJudge.ts";
+import { correctText, omniEvaluate, type OmniResult, scoreFor } from "../_shared/omniJudge.ts";
 
 /**
  * Лига говорящего приравнена к уровню CEFR (см. supabase/migrations/0023 —
@@ -402,6 +402,9 @@ async function processJob(job_id: string): Promise<void> {
     let judgeStatus: JudgeStatus;
     let correctedText = "";
     let cleanedText = "";
+    // Лента разбора: по ней клиент красит и зачёркивает. null — разбора
+    // нет (модель не ответила), и клиент честно показывает пустоту.
+    let reviewSpans: { k: string; t: string }[] | null = null;
 
     if (omni.degraded) {
       // Модель не ответила. Балл нейтральный, а не единица: единица
@@ -431,11 +434,12 @@ async function processJob(job_id: string): Promise<void> {
         // объяснить её игроку было нечем. Здесь арифметика: доля
         // несказанного плюс по баллу за ошибку, и это проговаривается
         // одной фразой.
-        score = scoreFor(judged.correct, judged.missing, judged.errors.length);
+        score = scoreFor(judged.review, judged.errors.length);
 
         // «Разбор:» — перевод, сделанный САМОЙ моделью. Не эталон из
-        // датасета: его она не видела.
-        correctedText = judged.correct;
+        // датасета: его она не видела. Склеивается из той же ленты, что
+        // рисует подсветку, поэтому разойтись они не могут.
+        correctedText = correctText(judged.review);
 
         // Ошибка привязана к ФРАГМЕНТУ сказанного, а не к элементу
         // эталона: границы модель провела по смыслу, и указывать ими в
@@ -449,23 +453,13 @@ async function processJob(job_id: string): Promise<void> {
           category: "omni",
           spanText: e.text,
         }));
-        // Несказанное живёт в той же таблице, но отдельной категорией: это
-        // не ошибка с объяснением, а кусок перевода, который клиент
-        // покрасит красным. Смешать их в одну категорию значило бы либо
-        // показать плашку без разбора, либо потерять подсветку.
-        errors.push(...judged.missing.map((text) => ({
-          offset: 0,
-          length: 0,
-          message: "",
-          replacement: "",
-          category: "missing",
-          spanText: text,
-        })));
 
+        reviewSpans = judged.review.map((s) => ({ k: s.kind, t: s.text }));
         judgeStatus = "ok";
-        feedback = judged.errors.length === 0 && judged.missing.length === 0
+        const missed = judged.review.filter((s) => s.kind === "miss").length;
+        feedback = judged.errors.length === 0 && missed === 0
           ? "Отлично, ошибок не найдено!"
-          : `Ошибок: ${judged.errors.length}, пропущено кусков: ${judged.missing.length}.`;
+          : `Ошибок: ${judged.errors.length}, пропущено кусков: ${missed}.`;
         pipelineDebug.judge = {
           mode: "мультимодальная модель: переводит сама, сравнивает с услышанным",
           scoring: "программа: доля несказанного + по баллу за ошибку",
@@ -488,6 +482,7 @@ async function processJob(job_id: string): Promise<void> {
         pipeline_debug: pipelineDebug,
         corrected_text: correctedText,
         cleaned_text: cleanedText,
+        review_spans: reviewSpans,
       })
       .eq("id", recording.id);
 
@@ -624,9 +619,9 @@ async function runOmni(
       downloadErr,
     });
     return {
-      correct: "",
-      missing: [],
+      review: [],
       errors: [],
+      audible: false,
       degraded: true,
       failureReason: `не удалось скачать аудио: ${downloadErr?.message ?? downloadErr}`,
       debug: { provider: "omni", status: "failed", error: "аудио не скачалось" },

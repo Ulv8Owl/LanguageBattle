@@ -1,92 +1,59 @@
 import 'package:flutter/material.dart';
 
-import '../core/text_diff.dart';
 import '../core/theme.dart';
 
-/// Разметка правки для блока «Разбор:»: тот же ответ игрока, но с
-/// исправленными ошибками и добавленными пропущенными словами.
+/// Один кусок разбора: текст и что с ним не так.
 ///
-/// Три вида фрагментов различаются так:
-/// * сказано верно — обычный цвет текста;
-/// * сказано неверно — обычный цвет, перечёркнутый красной линией
-///   (слово видно, и видно, что его надо убрать);
-/// * не сказано вовсе — красным (добавлять нечего вычёркивать, это
-///   недостающее).
-///
-/// Вынесено из экрана Одиночной Игры, чтобы правило проверялось тестом, а
-/// не глазами по скриншоту, и чтобы все три режима красили одинаково.
-List<TextSpan> correctionSpans(String spoken, String corrected) {
-  final parts = diffWords(spoken, corrected);
-  final spans = <TextSpan>[];
-  for (var i = 0; i < parts.length; i++) {
-    final part = parts[i];
-    spans.add(TextSpan(
-      text: part.text,
-      style: switch (part.kind) {
-        DiffKind.same => const TextStyle(color: AppColors.cream),
-        DiffKind.wrong => const TextStyle(
-            color: AppColors.cream,
-            decoration: TextDecoration.lineThrough,
-            decorationColor: AppColors.danger,
-            decorationThickness: 2,
-          ),
-        DiffKind.missing => const TextStyle(color: AppColors.danger, fontWeight: FontWeight.w700),
-      },
-    ));
-    if (i != parts.length - 1) spans.add(const TextSpan(text: ' '));
-  }
-  return spans;
-}
+/// Границы провела МОДЕЛЬ, а не мы. Раньше приложение искало пропущенные
+/// куски в правильном переводе подстрокой, и поиск промахивался на каждой
+/// мелочи — неточная цитата, другой регистр, — после чего подсветка молча
+/// пропадала. Теперь красить нечего решать: пришло размеченным.
+class ReviewSpan {
+  /// ok — сказано верно, bad — сказано не так, miss — не сказано вовсе.
+  final String kind;
+  final String text;
 
-/// Разметка «Разбора:» для мультимодального пути.
-///
-/// ЧЕМ ОТЛИЧАЕТСЯ ОТ [correctionSpans]. Та строит правку ДИФФОМ: сравнивает
-/// сказанное с правильным и сама решает, что потеряно. Здесь решать не
-/// нужно — модель уже назвала куски, смысл которых игрок не передал, и
-/// сказала это, СЛУШАЯ речь, а не сравнивая две строки. Диффу такое не под
-/// силу: «he starts» и «he begins his work» отличаются каждым словом, но
-/// потеряно там не всё.
-///
-/// Важнее другое: подсветка и балл обязаны опираться на один и тот же
-/// список. Посчитать балл по словам модели, а покрасить по своему диффу —
-/// значит показать игроку красным одно, а снять баллы за другое.
-///
-/// Совпадения ищутся без учёта регистра: модель цитирует свой же перевод,
-/// но заглавная буква в начале предложения у неё гуляет, а терять из-за
-/// этого подсветку целого куска нельзя.
-List<TextSpan> missingSpans(String corrected, List<String> missing) {
-  if (corrected.isEmpty) return const [];
-  final marked = List<bool>.filled(corrected.length, false);
-  final haystack = corrected.toLowerCase();
-  for (final raw in missing) {
-    final needle = raw.trim().toLowerCase();
-    if (needle.isEmpty) continue;
-    var from = 0;
-    while (true) {
-      final at = haystack.indexOf(needle, from);
-      if (at < 0) break;
-      for (var i = at; i < at + needle.length && i < marked.length; i++) {
-        marked[i] = true;
-      }
-      from = at + needle.length;
+  const ReviewSpan({required this.kind, required this.text});
+
+  static List<ReviewSpan> fromJson(Object? raw) {
+    if (raw is! List) return const [];
+    final out = <ReviewSpan>[];
+    for (final item in raw) {
+      if (item is! Map) continue;
+      final kind = (item['k'] as String?) ?? '';
+      final text = (item['t'] as String?) ?? '';
+      if (text.isEmpty) continue;
+      if (kind != 'ok' && kind != 'bad' && kind != 'miss') continue;
+      out.add(ReviewSpan(kind: kind, text: text));
     }
+    return out;
   }
-
-  // Склеиваем соседние символы одного вида в один span: иначе на фразу из
-  // сорока символов получится сорок TextSpan, и перенос строк начнёт
-  // рваться в произвольных местах.
-  final spans = <TextSpan>[];
-  var start = 0;
-  for (var i = 1; i <= corrected.length; i++) {
-    final boundary = i == corrected.length || marked[i] != marked[start];
-    if (!boundary) continue;
-    spans.add(TextSpan(
-      text: corrected.substring(start, i),
-      style: marked[start]
-          ? const TextStyle(color: AppColors.danger, fontWeight: FontWeight.w700)
-          : const TextStyle(color: AppColors.cream),
-    ));
-    start = i;
-  }
-  return spans;
 }
+
+/// Правильный перевод — всё, кроме сказанного игроком неверно.
+String correctFromSpans(List<ReviewSpan> spans) =>
+    spans.where((s) => s.kind != 'bad').map((s) => s.text).join();
+
+/// Разметка «Разбора:»: правильный перевод с вплетёнными ошибками игрока.
+///
+/// Три вида различаются так же, как различались всегда:
+/// * сказано верно — обычный цвет;
+/// * сказано неверно — перечёркнуто красной линией (слово видно, и видно,
+///   что его надо убрать);
+/// * не сказано вовсе — красным (вычёркивать нечего, это недостающее).
+List<TextSpan> reviewSpans(List<ReviewSpan> spans) => [
+      for (final span in spans)
+        TextSpan(
+          text: span.text,
+          style: switch (span.kind) {
+            'bad' => const TextStyle(
+                color: AppColors.cream,
+                decoration: TextDecoration.lineThrough,
+                decorationColor: AppColors.danger,
+                decorationThickness: 2,
+              ),
+            'miss' => const TextStyle(color: AppColors.danger, fontWeight: FontWeight.w700),
+            _ => const TextStyle(color: AppColors.cream),
+          },
+        ),
+    ];

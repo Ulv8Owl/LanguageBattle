@@ -12,7 +12,7 @@ void main() {
     judgeStatus: JudgeStatus.pending,
     cleaned: 'my brother go to shop',
     debug: {
-      'asr': {'provider': 'google', 'elapsed_ms': 1614},
+      'omni': {'provider': 'omni', 'elapsed_ms': 1614},
     },
   );
 
@@ -21,7 +21,7 @@ void main() {
 
     expect(marked.transcript, 'my brother go to shop');
     expect(marked.status, TranscriptStatus.ok);
-    expect(marked.asrDebug?['provider'], 'google');
+    expect(marked.omniDebug?['provider'], 'omni');
     expect(marked.spokenForDiff, 'my brother go to shop');
   });
 

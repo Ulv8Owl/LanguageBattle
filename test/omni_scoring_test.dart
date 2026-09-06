@@ -4,121 +4,97 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:language_battle/core/theme.dart';
 import 'package:language_battle/widgets/correction_text.dart';
 
-/// Балл считает программа по разбору модели, а подсветка красит ровно тот
-/// же список кусков. Расхождение здесь означало бы, что игроку показывают
-/// красным одно, а снимают баллы за другое, — и заметить это на глаз
-/// невозможно.
+/// Разбор приходит одной лентой: правильный перевод с вплетёнными ошибками
+/// игрока. По этой же ленте считается балл — показать красным одно, а снять
+/// баллы за другое стало невозможно по построению.
 void main() {
-  group('подсветка несказанного', () {
-    List<TextSpan> spans(String corrected, List<String> missing) =>
-        missingSpans(corrected, missing);
+  ReviewSpan ok(String t) => ReviewSpan(kind: 'ok', text: t);
+  ReviewSpan bad(String t) => ReviewSpan(kind: 'bad', text: t);
+  ReviewSpan miss(String t) => ReviewSpan(kind: 'miss', text: t);
 
+  group('разметка ленты', () {
     bool isRed(TextSpan s) => s.style?.color == AppColors.danger;
+    bool isStruck(TextSpan s) => s.style?.decoration == TextDecoration.lineThrough;
 
-    test('красит ровно названные куски', () {
-      final result = spans('My brother works in a big hotel', ['in a big hotel']);
-      final red = result.where(isRed).map((s) => s.text).join();
-      expect(red, 'in a big hotel');
-      final plain = result.where((s) => !isRed(s)).map((s) => s.text).join();
-      expect(plain, 'My brother works ');
+    test('несказанное — красным, сказанное не так — зачёркнуто', () {
+      final spans = reviewSpans([
+        ok('My office is near '),
+        bad('I go'),
+        miss('the station'),
+      ]);
+      expect(spans.where(isRed).map((s) => s.text).join(), 'the station');
+      expect(spans.where(isStruck).map((s) => s.text).join(), 'I go');
+      // Верное — обычным цветом и без зачёркивания.
+      final plain = spans.firstWhere((s) => s.text == 'My office is near ');
+      expect(isRed(plain), isFalse);
+      expect(isStruck(plain), isFalse);
     });
 
-    test('регистр не мешает', () {
-      // Модель цитирует свой же перевод, но заглавная буква в начале
-      // предложения у неё гуляет. Терять из-за этого подсветку целого
-      // куска нельзя.
-      final red = spans('He starts work at six', ['he starts'])
-          .where(isRed)
-          .map((s) => s.text)
-          .join();
-      expect(red, 'He starts');
+    test('правильный вариант — всё, кроме слов игрока', () {
+      // Его и озвучивает динамик: читать вслух ошибку как образец нельзя.
+      expect(
+        correctFromSpans([ok('I '), bad('go'), miss('walk'), ok(' there')]),
+        'I walk there',
+      );
     });
 
-    test('кусок, которого в переводе нет, ничего не красит', () {
-      // Модель может процитировать неточно. Молчание тут лучше, чем
-      // покрасить наугад не то место.
-      final result = spans('He starts work at six', ['совсем другой текст']);
-      expect(result.any(isRed), isFalse);
-      expect(result.map((s) => s.text).join(), 'He starts work at six');
-    });
-
-    test('соседние символы склеены в один фрагмент', () {
-      // Иначе на фразу из сорока символов вышло бы сорок TextSpan, и
-      // перенос строк начал бы рваться в произвольных местах.
-      expect(spans('abcdef', ['cd']).length, 3);
-    });
-
-    test('пустой перевод не роняет разметку', () {
-      expect(spans('', ['что-нибудь']), isEmpty);
+    test('чужие виды кусков отбрасываются', () {
+      // Модель может прислать что угодно; красить наугад хуже, чем не
+      // красить.
+      final parsed = ReviewSpan.fromJson([
+        {'k': 'ok', 't': 'a'},
+        {'k': 'странное', 't': 'b'},
+        {'k': 'miss', 't': ''},
+        'мусор',
+      ]);
+      expect(parsed.length, 1);
+      expect(parsed.single.text, 'a');
     });
   });
 
   group('формула балла', () {
     // Повторяет scoreFor из supabase/functions/_shared/omniJudge.ts.
-    // Дублирование здесь осознанное: тесты Deno в этом проекте не
-    // запускаются, а формула — то, что игрок увидит как «почему шесть», и
-    // проверить её числами важнее, чем избежать копии.
-    int score(String correct, List<String> missing, int errors) {
-      final marked = List<bool>.filled(correct.length, false);
-      final haystack = correct.toLowerCase();
-      for (final raw in missing) {
-        final needle = raw.trim().toLowerCase();
-        if (needle.isEmpty) continue;
-        var from = 0;
-        while (true) {
-          final at = haystack.indexOf(needle, from);
-          if (at < 0) break;
-          for (var i = at; i < at + needle.length && i < marked.length; i++) {
-            marked[i] = true;
-          }
-          from = at + needle.length;
-        }
-      }
-      final total = correct.replaceAll(RegExp(r'\s+'), ' ').trim().length;
-      final share =
-          total == 0 ? 0.0 : (marked.where((m) => m).length / total).clamp(0.0, 1.0);
+    // Дублирование осознанное: тесты Deno в этом проекте не запускаются, а
+    // tools/check_score_formula.ts сверяет копию с оригиналом числами.
+    int score(List<ReviewSpan> review, int errors) {
+      int len(String kind) => review
+          .where((s) => s.kind == kind)
+          .fold(0, (sum, s) => sum + s.text.trim().length);
+      final total = len('ok') + len('miss');
+      final share = total == 0 ? 0.0 : (len('miss') / total).clamp(0.0, 1.0);
       return (10 - (10 * share).round() - errors).clamp(1, 10);
     }
 
     test('сказал всё и без ошибок — десять', () {
-      expect(score('He starts work at six', const [], 0), 10);
+      expect(score([ok('He starts work at six')], 0), 10);
     });
 
     test('не сказал 60% — минус шесть', () {
       // Ровно пример из постановки задачи.
-      const correct = '0123456789';
-      expect(score(correct, const ['012345'], 0), 4);
+      expect(score([ok('0123'), miss('456789')], 0), 4);
     });
 
     test('каждая ошибка снимает по баллу', () {
-      expect(score('He starts work at six', const [], 3), 7);
+      expect(score([ok('He starts work at six')], 3), 7);
     });
 
     test('пропуски и ошибки складываются', () {
-      const correct = '0123456789';
-      expect(score(correct, const ['01234'], 2), 3);
+      expect(score([ok('01234'), miss('56789')], 2), 3);
     });
 
     test('ниже единицы не опускаемся', () {
       // Отрицательных баллов в игре нет: единица и есть «не получилось».
-      expect(score('0123456789', const ['0123456789'], 5), 1);
+      expect(score([miss('0123456789')], 5), 1);
     });
 
-    test('повторная цитата не считается дважды', () {
-      // Иначе доля потерянного превысила бы единицу, и игрок недосчитался
-      // бы баллов за нашу арифметику, а не за свой ответ.
-      //
-      // Число закреплено явно, а не только равенством двух вызовов: сверка
-      // с настоящей scoreFor (tools/check_score_formula.ts) сравнивает
-      // именно значения, и «оба вернули одно и то же неверное» она бы не
-      // поймала.
-      const correct = 'aaaa bbbb';
-      expect(score(correct, const ['aaaa'], 0), 6);
-      expect(score(correct, const ['aaaa', 'aaaa'], 0), 6);
+    test('сказанное не так в знаменатель не идёт', () {
+      // bad — это слова ИГРОКА, а доля считается от правильного перевода.
+      // Иначе длинный неверный ответ улучшал бы балл.
+      expect(score([ok('01234'), bad('очень длинная чушь'), miss('56789')], 0), 5);
     });
 
-    test('перевода нет — отвечают только ошибки', () {
-      expect(score('', const ['что угодно'], 2), 8);
+    test('разбора нет — отвечают только ошибки', () {
+      expect(score(const [], 2), 8);
     });
   });
 }

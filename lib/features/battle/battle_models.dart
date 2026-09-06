@@ -1,3 +1,4 @@
+import '../../widgets/correction_text.dart';
 import '../../data/voice_submission.dart';
 
 class MatchData {
@@ -109,6 +110,9 @@ class VoiceRecordingData {
   /// стримом, что и сама запись, поэтому разбор в бою не стоит ни одного
   /// дополнительного запроса.
   final String transcript;
+
+  /// Разбор одной лентой, как его разметила модель.
+  final List<ReviewSpan> reviewSpans;
   final String correctedText;
   final String cleanedText;
 
@@ -127,6 +131,7 @@ class VoiceRecordingData {
     required this.languageCode,
     required this.audioStoragePath,
     required this.transcript,
+    this.reviewSpans = const [],
     required this.correctedText,
     required this.cleanedText,
     required this.judgeStatus,
@@ -146,6 +151,7 @@ class VoiceRecordingData {
       languageCode: row['language_code'] as String?,
       audioStoragePath: row['audio_storage_path'] as String,
       transcript: ((row['transcript'] as String?) ?? '').trim(),
+      reviewSpans: ReviewSpan.fromJson(row['review_spans']),
       correctedText: ((row['corrected_text'] as String?) ?? '').trim(),
       cleanedText: ((row['cleaned_text'] as String?) ?? '').trim(),
       judgeStatus: JudgeStatus.parse(row['judge_status'] as String?),
