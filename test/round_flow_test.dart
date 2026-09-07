@@ -127,4 +127,68 @@ void main() {
       everAllowed.addAll(checks[path]!);
     }
   });
+
+  group('модель судит перевод, а не стиль', () {
+    test('правка на плашке берётся из перевода самой модели', () {
+      // Настоящий случай: в ленте модель показала «My lessons are on Monday
+      // and Thursday», а на плашке к той же ошибке написала «on Sunday and
+      // Saturday» — предлог поправила, перепутанные дни оставила. Игрок
+      // читает два разных правильных ответа подряд, и второй неверен.
+      final s = judge();
+      expect(s, contains('EVERY "fix" MUST BE COPIED OUT OF YOUR OWN "correct"'));
+      // Промпта мало: расхождение отсеивается и кодом.
+      expect(s, contains('export function groundedIn(fix: string, correct: string): boolean'));
+      expect(s, contains('if (!groundedIn(correction, correct)) continue;'));
+    });
+
+    test('разговорность не повод снимать балл', () {
+      // «After that» вместо «Then» и «seven o'clock» вместо «seven» —
+      // сказано верно, и отнимать за это балл нечестно.
+      final s = judge();
+      expect(s, contains('YOU ARE NOT HERE TO POLISH HIS ENGLISH'));
+      expect(s, contains('Longer is not wrong'));
+      // Прежний пример В САМОМ ПРОМПТЕ учил модели ровно этой придирке:
+      // показывал «After that» → «Then» как образцовую ошибку.
+      expect(s.contains('"errors": [{"said": "After that", "fix": "Then"'), isFalse);
+      expect(s, contains('"errors" is EMPTY here, and that is the whole point of the example'));
+    });
+  });
+
+  group('невнятная запись — ноль, а не нейтральные семь', () {
+    test('«речи не слышу» отделено от «модель не ответила»', () {
+      final s = judge();
+      // Аудио до модели доехало: мы сами его отправили и знаем размер.
+      // Значит это не наш сбой, а ответ — разбирать было нечего.
+      expect(s, contains('silent?: boolean;'));
+      expect(s, contains('silent: true,'));
+      expect(s.contains('return fail("модель не слышит речи'), isFalse);
+    });
+
+    test('воркер ставит ноль и помечает запись пустой', () {
+      final s = worker();
+      expect(s, contains('if (omni.silent) {'));
+      expect(s, contains('score = SILENT_SCORE;'));
+      expect(s, contains('transcriptStatus = "empty";'));
+      expect(s, contains('transcript_status: transcriptStatus,'));
+      expect(read('supabase/functions/_shared/cefr.ts'), contains('export const SILENT_SCORE = 0;'));
+    });
+
+    test('ноль разрешён схемой', () {
+      final sql = read('supabase/migrations/0044_zero_score.sql');
+      expect(sql, contains('check (final_score between 0 and 10)'));
+      expect(sql, contains('check (score between 0 and 10)'));
+    });
+
+    test('формула балла ниже единицы не опускается', () {
+      // Ноль означает «разбирать нечего». Если модель речь разобрала,
+      // игрок что-то сказал, и минимум для него — единица.
+      expect(judge(), contains('return Math.max(1, Math.min(10, score));'));
+    });
+
+    test('экран объясняет нулевой балл', () {
+      final s = screen();
+      expect(s, contains("TranscriptStatus.empty => ('РЕЧИ НЕ РАЗОБРАТЬ', AppColors.danger)"));
+      expect(s, contains('поэтому и балл нулевой'));
+    });
+  });
 }

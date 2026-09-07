@@ -81,6 +81,16 @@ export interface OmniResult {
   audible: boolean;
   /** Модель не ответила или ответила не тем. Балл тогда нейтральный. */
   degraded: boolean;
+  /**
+   * Модель послушала запись и речи в ней не разобрала.
+   *
+   * ОТДЕЛЬНО ОТ degraded, и это главное различие в этом файле. degraded —
+   * наш сбой: мы не знаем, как игрок ответил, и ставим нейтральный балл.
+   * silent — мы знаем: разобрать было нечего. Раньше оба случая шли одной
+   * веткой, и невнятная запись получала те же семь баллов, что и молчащий
+   * провайдер.
+   */
+  silent?: boolean;
   failureReason?: string;
   debug: Record<string, unknown>;
 }
@@ -121,8 +131,13 @@ export function correctText(review: ReviewSpan[]): string {
  * фразой — «половину не сказал и две ошибки».
  *
  * Формула: из десяти вычитаем долю несказанного (не сказал 60% — минус 6)
- * и по баллу за каждую отдельную ошибку. Ниже единицы не опускаемся:
- * единица и есть «ничего не получилось», отрицательных баллов в игре нет.
+ * и по баллу за каждую отдельную ошибку.
+ *
+ * Ниже единицы не опускаемся, и ноль сюда не попадает НИКОГДА: сюда мы
+ * доходим только когда модель речь разобрала, то есть игрок что-то сказал.
+ * Ноль означает другое — «в записи нечего разбирать» (SILENT_SCORE), и
+ * смешать эти два случая в одном числе значило бы снова выдать сбой за
+ * оценку.
  */
 export function scoreFor(review: ReviewSpan[], errorCount: number): number {
   const len = (kind: SpanKind) =>
@@ -249,8 +264,15 @@ function systemPrompt(nativeLanguage: string, targetLanguage: string, level: str
     "",
     "A different wording is NOT an error: a sentence can be translated in several correct ways, and you must",
     "accept any wording that conveys the same meaning correctly. Mark an error only when something is genuinely",
-    "wrong — wrong meaning, wrong grammar, an invented word. Never mark stylistic preference.",
+    "wrong — wrong meaning, wrong grammar, an invented word.",
     "Group errors by MEANING: everything that goes wrong for one reason is a single error.",
+    "",
+    "YOU ARE NOT HERE TO POLISH HIS ENGLISH. If what he said means the same, is grammatical and would be",
+    "understood, it is CORRECT — even when you would say it shorter, or more naturally, or the way a native",
+    "would. Longer is not wrong. Formal is not wrong. Old-fashioned is not wrong. Redundant but correct is not",
+    "wrong. \"After that\" instead of \"Then\", \"seven o\'clock\" instead of \"seven\", \"I would like\" instead of",
+    "\"I want\" — none of these is an error, and taking a point for one of them punishes a learner who was",
+    "right. If your only reason is that your version sounds better, there is no error.",
     "",
     "CHECK THE MEANING PART BY PART before you accept a sentence. Does it describe the same action, the same",
     "place or direction, the same time, the same person? A sentence that reads naturally but says something",
@@ -263,12 +285,20 @@ function systemPrompt(nativeLanguage: string, targetLanguage: string, level: str
     'an "errors" entry is only for words that WERE spoken and were wrong. An entry whose "said" equals its',
     '"fix" is always a mistake on your part.',
     "",
+    'EVERY "fix" MUST BE COPIED OUT OF YOUR OWN "correct". Find the error by comparing "heard" with "correct"',
+    'word by word, then take as the "fix" exactly the words that stand in that place in "correct" — do not',
+    "compose a new phrase for it. Otherwise you end up patching his sentence instead of translating the task:",
+    'the ribbon shows him one right answer and the note under it another, and they contradict each other. If',
+    'the words you want to put in "fix" are not in "correct", then either "correct" is wrong — fix it — or',
+    "this is not an error at all.",
+    "",
     "Example. The learner was asked to say «Я встаю в семь. Потом я варю кофе и читаю новости.» in English",
-    'and said "I get up at seven. After that I make coffee." Correct answer:',
-    '{"audible": true, "heard": "I get up at seven. After that I make coffee.",',
-    ' "correct": "I get up at seven. Then I make coffee and read the news.",',
-    ' "errors": [{"said": "After that", "fix": "Then", "why": "<объяснение>"}]}',
-    'Note that "heard" stops where the learner stopped, and there is no error entry for the missing news.',
+    'and said "I get up at seven o\'clock. After that I make coffee." Correct answer:',
+    '{"audible": true, "heard": "I get up at seven o\'clock. After that I make coffee.",',
+    ' "correct": "I get up at seven. Then I make coffee and read the news.", "errors": []}',
+    '"errors" is EMPTY here, and that is the whole point of the example. "seven o\'clock" and "After that" are',
+    "correct — you would say it shorter, and that is not his problem. The unsaid news is an omission, visible",
+    'from "heard" already, and omissions never go into "errors". Note also that "heard" stops where he stopped.',
     "",
     `LANGUAGE OF EXPLANATIONS: every "why" field must be written in ${native} (${nativeSelf}) and in no other`,
     `language. This is not a preference — the learner reads only ${nativeSelf}. Everything else (the`,
@@ -282,7 +312,8 @@ function systemPrompt(nativeLanguage: string, targetLanguage: string, level: str
     '{"audible": boolean, "heard": string, "correct": string,',
     ' "errors": [{"said": string, "fix": string, "why": string}]}',
     '"said" — the learner\'s own words, quoted verbatim with the mistake left in; never correct them there,',
-    `or the learner will not recognise his own mistake. "fix" — how that fragment should sound in ${target}.`,
+    'or the learner will not recognise his own mistake. "fix" — the words that stand in that place in your',
+    '"correct", copied from it.',
   ].join("\n");
 }
 
@@ -360,7 +391,39 @@ function parseJson(raw: string): Record<string, unknown> | null {
   return null;
 }
 
-function asErrors(raw: unknown): OmniError[] {
+/**
+ * Слова строки в том же виде, в каком их сравнивает лента разбора.
+ * Пунктуация и регистр не считаются: их в речи нет.
+ */
+function wordsOf(text: string): string[] {
+  return text
+    .toLowerCase()
+    .split(/[^\p{L}\p{N}']+/u)
+    .filter((w) => w.length > 0);
+}
+
+/**
+ * Взята ли правка из перевода САМОЙ МОДЕЛИ.
+ *
+ * ЗАЧЕМ. Модель охотно чинит фразу игрока вместо того, чтобы переводить
+ * задание. На «My lesson in Sunday and Saturday» она показала в ленте
+ * правильное «My lessons are on Monday and Thursday», а на плашке к той же
+ * ошибке написала «on Sunday and Saturday»: предлог поправила, а
+ * перепутанные дни оставила. Игрок читает два разных правильных ответа
+ * подряд, и второй — неверный.
+ *
+ * Правка, слов которой нет в переводе, — это правка не туда: либо перевод
+ * у модели другой, либо ошибки нет вовсе. Показывать её нельзя, и снимать
+ * за неё балл тем более.
+ */
+export function groundedIn(fix: string, correct: string): boolean {
+  const words = wordsOf(fix);
+  if (words.length === 0) return true;
+  const reference = new Set(wordsOf(correct));
+  return words.every((w) => reference.has(w));
+}
+
+export function asErrors(raw: unknown, correct: string): OmniError[] {
   if (!Array.isArray(raw)) return [];
   const out: OmniError[] = [];
   for (const item of raw) {
@@ -380,6 +443,8 @@ function asErrors(raw: unknown): OmniError[] {
     // Модель делает так регулярно, и каждый такой ложный пункт снимал бы
     // балл второй раз: доля несказанного его уже учла.
     if (correction.length > 0 && correction === text) continue;
+    // Правка расходится с переводом самой модели — см. groundedIn.
+    if (!groundedIn(correction, correct)) continue;
     out.push({
       text,
       message,
@@ -523,12 +588,30 @@ export async function omniEvaluate(req: OmniRequest): Promise<OmniResult> {
     audio_format: req.audioFormat,
   };
 
-  // Модель прямо сказала, что речи не слышит. Это НЕ «игрок промолчал»:
-  // ровно так же выглядит запись, которая до модели не доехала, а разница
-  // для игрока огромна — во втором случае десятка за что угодно. Считаем
-  // сбоем и ставим нейтральный балл.
+  // Модель послушала запись и речи не разобрала.
+  //
+  // Аудио до неё ДОЕХАЛО — мы его сами скачали из хранилища и знаем его
+  // размер, он в отладке. Значит это не наш сбой, а ответ: разбирать было
+  // нечего. Балл за такую запись минимальный, а не нейтральный: раньше
+  // невнятное бормотание получало те же семь баллов, что и молчащий
+  // провайдер, и это выглядело как оценка за ответ.
   if (parsed.audible === false) {
-    return fail("модель не слышит речи в записи (audible=false)", { raw: raw.slice(0, 400) });
+    return {
+      review: [],
+      errors: [],
+      audible: false,
+      degraded: false,
+      silent: true,
+      debug: {
+        ...omniConfigDebug(),
+        status: "silent",
+        reason: "модель не разобрала речи в записи (audible=false)",
+        ms: Date.now() - started,
+        audio_bytes: req.audio.byteLength,
+        audio_format: req.audioFormat,
+        raw: raw.slice(0, 400),
+      },
+    };
   }
 
   const correct = typeof parsed.correct === "string" ? parsed.correct.trim() : "";
@@ -549,7 +632,7 @@ export async function omniEvaluate(req: OmniRequest): Promise<OmniResult> {
   // арифметика, и арифметику надо считать, а не спрашивать.
   const review = ribbon(diffWords(heard, correct));
 
-  const errors = asErrors(parsed.errors);
+  const errors = asErrors(parsed.errors, correct);
 
   debug.heard = heard;
   debug.correct = correct;

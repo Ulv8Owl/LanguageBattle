@@ -20,7 +20,7 @@
 // одной и той же записи и не объяснялась игроку.
 
 import { createClient, type SupabaseClient } from "jsr:@supabase/supabase-js@2";
-import { type CefrLevel, NEUTRAL_SCORE } from "../_shared/cefr.ts";
+import { type CefrLevel, NEUTRAL_SCORE, SILENT_SCORE } from "../_shared/cefr.ts";
 import { correctText, omniEvaluate, type OmniResult, scoreFor } from "../_shared/omniJudge.ts";
 
 /**
@@ -385,7 +385,8 @@ async function processJob(job_id: string): Promise<void> {
       : { attempt: 1, source: "PvP" };
     const attemptNumber = attempt.attempt;
 
-    // Шаг 2 — что записать. Исходов два: модель ответила или нет.
+    // Шаг 2 — что записать. Исходов три: модель разобрала ответ, модель не
+    // ответила (наш сбой), модель ответила «речи не слышу».
     let score: number;
     let errors: {
       offset: number;
@@ -403,17 +404,33 @@ async function processJob(job_id: string): Promise<void> {
     let feedback: string;
 
     let judgeStatus: JudgeStatus;
+    // Что мы услышали в записи. 'ok' — речь разобрана; 'empty' — модель
+    // послушала и речи не нашла; 'pending' — до разбора дело не дошло.
+    let transcriptStatus: "pending" | "ok" | "empty" = "ok";
     let correctedText = "";
     let cleanedText = "";
     // Лента разбора: по ней клиент красит и зачёркивает. null — разбора
     // нет (модель не ответила), и клиент честно показывает пустоту.
     let reviewSpans: { k: string; t: string }[] | null = null;
 
-    if (omni.degraded) {
+    if (omni.silent) {
+      // Модель послушала запись и речи не разобрала. Это НЕ наш сбой:
+      // аудио до неё доехало, мы сами его отправили и знаем его размер.
+      // Балл минимальный — оценивать нечего. Нейтральные семь здесь были
+      // хуже всего: невнятная запись получала оценку выше половины, и по
+      // экрану это выглядело как «неплохо ответил».
+      score = SILENT_SCORE;
+      transcriptStatus = "empty";
+      feedback = "В записи не разобрать речи — балл минимальный.";
+      // Судью не звали по существу: разбирать было нечего.
+      judgeStatus = "skipped";
+      pipelineDebug.judge = { status: "silent", reason: "речи в записи не разобрать" };
+    } else if (omni.degraded) {
       // Модель не ответила. Балл нейтральный, а не единица: единица
       // означала бы «игрок ответил плохо», а мы просто не знаем, как он
       // ответил, и наказывать за наш сбой нельзя.
       score = NEUTRAL_SCORE;
+      transcriptStatus = "pending";
       feedback = "Не удалось разобрать ответ — балл выставлен нейтральным.";
       judgeStatus = "degraded";
       pipelineDebug.judge = {
@@ -482,6 +499,7 @@ async function processJob(job_id: string): Promise<void> {
       .from("voice_recordings")
       .update({
         judge_status: judgeStatus,
+        transcript_status: transcriptStatus,
         pipeline_debug: pipelineDebug,
         corrected_text: correctedText,
         cleaned_text: cleanedText,

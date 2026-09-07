@@ -1214,7 +1214,7 @@ class _ErrorReport extends StatelessWidget {
       // микрофона дело не дошло, значит увести его от настоящей причины.
       _ when clientFailure != null => ('РЕЗУЛЬТАТ НЕ ПРИШЁЛ', AppColors.danger),
       TranscriptStatus.failed => ('РЕЧЬ НЕ РАСПОЗНАНА', AppColors.muted),
-      TranscriptStatus.empty => ('НИЧЕГО НЕ УСЛЫШАЛ', AppColors.muted),
+      TranscriptStatus.empty => ('РЕЧИ НЕ РАЗОБРАТЬ', AppColors.danger),
       _ when judgeBroken && (attempt?.judgeHitProviderLimit ?? false) =>
         ('ЛИМИТ ПРОВАЙДЕРА ИИ', AppColors.danger),
       _ when judgeBroken => ('РАЗБОР НЕ ПОЛУЧЕН', AppColors.muted),
@@ -1233,7 +1233,8 @@ class _ErrorReport extends StatelessWidget {
       TranscriptStatus.failed =>
         'Не удалось распознать речь — это сбой на нашей стороне, балл за него не снижается. Попробуй сказать фразу ещё раз.',
       TranscriptStatus.empty =>
-        'Похоже, записалась тишина. Говори чётче и ближе к микрофону, удерживая кнопку всё время, пока говоришь.',
+        'В записи не разобрать речи — разбирать было нечего, поэтому и балл нулевой. '
+            'Говори чётче и ближе к микрофону, удерживая кнопку всё время, пока говоришь.',
       _ when judgeBroken && (attempt?.judgeHitProviderLimit ?? false) =>
         'У провайдера ИИ закончился дневной лимит — он отказывается отвечать. Разбора поэтому нет, '
             'и это не признак того, что ошибок не было. Балл не снижается. Лимит снимается на стороне провайдера.',
@@ -1366,7 +1367,7 @@ class _ScoreCard extends StatelessWidget {
                     const Padding(
                       padding: EdgeInsets.only(top: 4),
                       child: Text(
-                        'В записи оказалась тишина',
+                        'В записи не разобрать речи — оценивать было нечего',
                         style: TextStyle(color: AppColors.muted, fontSize: 11, height: 1.3),
                       ),
                     ),

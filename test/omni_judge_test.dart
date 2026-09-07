@@ -152,11 +152,13 @@ void main() {
   });
 
   test('в промпте есть разобранный пример', () {
-    // Пример показывает главное: расшифровка обрывается там, где игрок
-    // замолчал, и пропуск не превращается в запись об ошибке.
+    // Пример показывает три вещи разом: расшифровка обрывается там, где
+    // игрок замолчал; пропуск не превращается в запись об ошибке; более
+    // длинный, но верный оборот ошибкой не считается.
     final s = omni();
     expect(s, contains('Example. The learner was asked to say'));
-    expect(s, contains('"heard" stops where the learner stopped'));
+    expect(s, contains('"heard" stops where he stopped'));
+    expect(s, contains('"errors" is EMPTY here'));
   });
 
   test('сырой ответ модели сохраняется', () {
