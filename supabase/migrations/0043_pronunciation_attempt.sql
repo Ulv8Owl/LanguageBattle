@@ -42,13 +42,22 @@ comment on column training_rounds.final_score is
 
 -- Ошибки произношения — своя категория: разбор перевода и разбор звука
 -- показываются в разных блоках, и различать их по тексту было бы гаданием.
+--
+-- СПИСОК ТОЛЬКО РАСТЁТ. Все прежние значения остаются разрешёнными, даже
+-- те, которые новые записи уже не используют ('element' от поэлементной
+-- оценки, 'missing' от разметки ленты самой моделью). Убрать значение из
+-- CHECK — значит уронить миграцию на первой же строке, которая его несёт,
+-- а строки эти лежат в базе у живого игрока и никому не мешают.
 alter table grammar_errors drop constraint if exists grammar_errors_category_check;
 alter table grammar_errors
   add constraint grammar_errors_category_check
-  check (category in ('grammar', 'spelling', 'style', 'element', 'omni', 'pronunciation'));
+  check (category in (
+    'grammar', 'spelling', 'style', 'element', 'missing', 'omni', 'pronunciation'
+  ));
 
 comment on column grammar_errors.category is
   'omni — ошибка перевода от мультимодальной модели (span_text — фрагмент '
   'речи игрока). pronunciation — ошибка произношения (span_text — слово, '
-  'которое прозвучало не так). Остальные значения остались от прежних '
-  'механик и в новых записях не появляются.';
+  'которое прозвучало не так). grammar/spelling/style/element/missing — '
+  'значения прежних механик: в новых записях не появляются, но остаются '
+  'разрешёнными ради уже накопленных строк.';

@@ -121,4 +121,35 @@ void main() {
       expect(read('lib/data/voice_submission.dart'), contains("'judge_mode': judgeMode,"));
     });
   });
+
+  test('список категорий только растёт', () {
+    // Миграция 0043 упала на живой базе: из CHECK выпало значение
+    // 'missing' (миграция 0038), а строки с ним у игрока уже лежали.
+    // Убирать значение из списка нельзя — оно уронит миграцию на первой
+    // же такой строке, и никакой пользы от сужения нет.
+    final allowed = RegExp(r"'([a-z_]+)'")
+        .allMatches(
+          RegExp(r'check \(category in \(([^)]*)\)\)', dotAll: true)
+              .firstMatch(migration())!
+              .group(1)!,
+        )
+        .map((m) => m.group(1)!)
+        .toSet();
+
+    // Всё, что когда-либо разрешалось прежними миграциями.
+    final everAllowed = <String>{};
+    for (final path in Directory('supabase/migrations').listSync().whereType<File>()) {
+      for (final m in RegExp(r'check \(category in \(([^)]*)\)\)', dotAll: true)
+          .allMatches(path.readAsStringSync())) {
+        everAllowed.addAll(
+          RegExp(r"'([a-z_]+)'").allMatches(m.group(1)!).map((v) => v.group(1)!),
+        );
+      }
+    }
+
+    expect(allowed, containsAll(everAllowed),
+        reason: 'из CHECK нельзя выбрасывать значения: строки с ними уже в базе');
+    expect(allowed, contains('pronunciation'));
+    expect(allowed, contains('missing'));
+  });
 }
