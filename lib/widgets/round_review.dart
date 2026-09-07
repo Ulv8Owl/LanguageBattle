@@ -214,6 +214,10 @@ class RoundReview extends StatelessWidget {
     this.emptyHint = '',
   });
 
+  /// Есть ли в ленте несказанное — куски правильного перевода, которых
+  /// игрок не произнёс.
+  bool get _missedSomething => spans.any((s) => s.kind == 'miss');
+
   @override
   Widget build(BuildContext context) {
     // Ленты может не быть при живом разборе — так устроена проверка
@@ -238,7 +242,14 @@ class RoundReview extends StatelessWidget {
           MistakeBreakdown(mistakes: mistakes, targetLanguage: targetLanguage)
         else
           Text(
-            'Ошибок не найдено — сказано верно',
+            // «Сказано верно» — только если сказано И верно, И целиком.
+            // Половина фразы без ошибок в сказанном это не безупречный
+            // ответ, а недоговорённый: балл за него уже снижен долей
+            // несказанного, и хвалить за него нельзя.
+            _missedSomething
+                ? 'Ошибок в сказанном нет, но фраза сказана не целиком — '
+                    'красным то, что осталось непроизнесённым'
+                : 'Ошибок не найдено — сказано верно',
             style: AppFonts.ui(fontSize: 11, color: AppColors.muted),
           ),
       ],

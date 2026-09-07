@@ -45,6 +45,25 @@ void main() {
       expect(find.text('Ошибок не найдено — сказано верно'), findsOneWidget);
     });
 
+    testWidgets('недоговорённую фразу не хвалим', (tester) async {
+      // Игрок сказал одно предложение из двух без единой ошибки в
+      // сказанном — и видел «Ошибок не найдено» над красным пропуском и
+      // сниженным баллом. Ошибок и правда нет, но ответ неполный.
+      await pump(
+        tester,
+        RoundReview(
+          spans: [ok('I walk there. '), miss('Then I go home.')],
+          mistakes: const [],
+          targetLanguage: 'en',
+        ),
+      );
+      expect(find.text('Ошибок не найдено — сказано верно'), findsNothing);
+      expect(
+        find.textContaining('фраза сказана не целиком'),
+        findsOneWidget,
+      );
+    });
+
     testWidgets('нет ленты — нет и разбора', (tester) async {
       // Балл при этом показывается: за него отвечает не этот виджет.
       await pump(
