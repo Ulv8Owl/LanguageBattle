@@ -13,6 +13,18 @@ void main() {
   String screen() => read('lib/features/matchmaking/matchmaking_screen.dart');
   String migration() => read('supabase/migrations/0041_mm_reason.sql');
 
+  test('очередь живёт дольше одного нажатия', () {
+    // НАСТОЯЩАЯ ПРИЧИНА «никого не находит». Тикет протухал через 35
+    // секунд, экран сдавался через 30: матч был возможен, только если оба
+    // игрока стоят в очереди в одном и том же окне длиной в полминуты.
+    // Два человека, открывшие режим с разницей в минуту, не встречались
+    // никогда — при исправном языковом фильтре и открытом окне рейтинга.
+    expect(read('supabase/migrations/0042_matchmaking_queue_life.sql'),
+        contains("now() + interval '3 minutes'"));
+    expect(screen(), contains('static const _searchLimit = Duration(minutes: 3);'));
+    expect(screen().contains('Duration(seconds: 30)'), isFalse);
+  });
+
   test('окно рейтинга в конце ничем не ограничено', () {
     final s = screen();
     // Первые шаги остаются узкими: равный соперник лучше, если он есть.

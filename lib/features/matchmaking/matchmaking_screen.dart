@@ -34,7 +34,16 @@ class MatchmakingScreen extends StatefulWidget {
 }
 
 class _MatchmakingScreenState extends State<MatchmakingScreen> {
-  static const _searchLimit = Duration(seconds: 30);
+  /// Сколько экран ищет соперника.
+  ///
+  /// БЫЛО ТРИДЦАТЬ СЕКУНД, и это была настоящая причина, по которой
+  /// Состязание «не находило никого». Тикет в очереди жил 35 секунд, экран
+  /// сдавался через 30 — то есть матч мог состояться, только если оба
+  /// игрока стоят в очереди в одном и том же получасовом окне длиной в
+  /// полминуты. Два человека, открывшие режим с разницей в минуту, не
+  /// встречались никогда, хотя подходили друг другу и по языку, и по
+  /// рейтингу. Языковой фильтр при этом исправен — проверено отдельно.
+  static const _searchLimit = Duration(minutes: 3);
   static const _acceptLimit = Duration(seconds: 20);
 
   _Phase _phase = _Phase.searching;
@@ -424,7 +433,12 @@ class _MatchmakingScreenState extends State<MatchmakingScreen> {
                 width: 96,
                 child: CircularProgressIndicator(strokeWidth: 3, color: AppColors.gold),
               ),
-              Text('$left', style: AppFonts.mono(fontSize: 22, weight: FontWeight.w700, color: AppColors.gold)),
+              // Минуты и секунды: трёхзначное число секунд в кружке
+              // читается как что угодно, только не как обратный отсчёт.
+              Text(
+                '${left ~/ 60}:${(left % 60).toString().padLeft(2, '0')}',
+                style: AppFonts.mono(fontSize: 20, weight: FontWeight.w700, color: AppColors.gold),
+              ),
             ],
           ),
         ),

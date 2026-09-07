@@ -33,6 +33,14 @@ const _roundsPerSession = 5;
 /// он проверяет ровно так же (балл судьи 1..10 за раунд).
 const _roundsPerPlacement = 1;
 
+/// Приглашение ко второй попытке — одной строкой, без панели.
+///
+/// Отдельная константа, потому что эта реплика показывается в двух местах
+/// ленты: в текущем раунде и в уже сыгранных. Две копии одного текста
+/// разъехались бы, и игрок читал бы в истории не то, что читал минуту
+/// назад.
+const _pronunciationCall = 'Теперь проверь своё произношение';
+
 enum _Stage {
   starting,
   /// Ждём первую попытку игрока.
@@ -149,7 +157,18 @@ class _TrainingScreenState extends State<TrainingScreen> {
 
   String _myName = 'Ты';
 
-  int? _finalScore;
+  /// Ошибки произношения по ВТОРОЙ попытке. Отдельно от ошибок перевода:
+  /// это разные разборы, и показываются они в разных блоках.
+  List<Map<String, dynamic>> _secondAttemptErrors = [];
+
+  /// Балл за ПЕРЕВОД — по первой попытке. Раньше балл ставился по второй,
+  /// то есть по фразе, которую игрок только что прочитал в разборе:
+  /// проверялась память на один ответ, а не язык.
+  int? _translationScore;
+
+  /// Балл за ПРОИЗНОШЕНИЕ — по второй попытке.
+  int? _pronunciationScore;
+
   int? _earnedCoins;
 
   /// История пройденных раундов сессии — рисуется той же лентой.
@@ -166,7 +185,7 @@ class _TrainingScreenState extends State<TrainingScreen> {
   /// принимает экран выбора уровня: балл судьи 1..10, порог 60%. Две
   /// разные формулы здесь означали бы, что карточка и следующий экран
   /// однажды скажут игроку разное.
-  bool get _examPassed => (_finalScore ?? 0) / 10 >= placementPassRatio;
+  bool get _examPassed => (_translationScore ?? 0) / 10 >= placementPassRatio;
 
   /// Порядок фраз на всю сессию, перемешанный один раз при старте — раунды
   /// соло идут строго локально (одна сессия = один клиент), поэтому, в
@@ -322,11 +341,13 @@ class _TrainingScreenState extends State<TrainingScreen> {
       _nativeTail = PhraseBank.entry(phraseIndex)?.tailFor(_nativeLanguage) ?? '';
       _revealed.clear();
       _firstAttemptErrors = [];
+      _secondAttemptErrors = [];
       _firstAttempt = null;
       _secondAttempt = null;
       _firstAttemptAudio = null;
       _secondAttemptAudio = null;
-      _finalScore = null;
+      _translationScore = null;
+      _pronunciationScore = null;
       _earnedCoins = null;
       _stage = _Stage.awaitingFirst;
     });
@@ -423,6 +444,11 @@ class _TrainingScreenState extends State<TrainingScreen> {
     final attempt = widget.isPlacement
         ? 2
         : (_stage == _Stage.awaitingFirst ? 1 : 2);
+    // ЧТО проверяет запись — отдельно от её номера. На проверке уровня
+    // попытка единственная, и проверяет она перевод; во второй попытке
+    // соло номер тот же, а проверка совсем другая — только звук.
+    final judgeMode =
+        (!widget.isPlacement && attempt == 2) ? 'pronunciation' : 'translation';
 
     final storagePath = trainingRecordingPath(
       sessionId: sessionId,
@@ -441,6 +467,7 @@ class _TrainingScreenState extends State<TrainingScreen> {
         durationSeconds: take.durationSeconds,
         trainingRoundId: roundId,
         attemptNumber: attempt,
+        judgeMode: judgeMode,
       );
 
       if (!mounted) return;
@@ -457,7 +484,9 @@ class _TrainingScreenState extends State<TrainingScreen> {
       _scrollToBottomSoon();
 
       if (attempt == 1) {
-        _watchFirstAttempt(recordingId);
+        _watchFirstAttempt(roundId, recordingId);
+      } else if (judgeMode == 'pronunciation') {
+        _watchPronunciation(roundId, recordingId);
       } else {
         _watchFinalScore(roundId, recordingId);
       }
@@ -496,7 +525,7 @@ class _TrainingScreenState extends State<TrainingScreen> {
 
   /// Попытка №1 даёт только разбор ошибок — балл за неё не ставится
   /// (раздел 2.2). Готовность ловим по статусу задачи в очереди.
-  void _watchFirstAttempt(String recordingId) {
+  void _watchFirstAttempt(String roundId, String recordingId) {
     _jobSub?.cancel();
     _startWatchdog(() => _giveUpOnFirstAttempt(recordingId));
     _jobSub = supabase
@@ -520,8 +549,17 @@ class _TrainingScreenState extends State<TrainingScreen> {
           // они выстроились бы как попало, а не как их назвала модель.
           .order('offset_start')
           .order('created_at');
+      // Балл за перевод воркер уже поставил этой же записью: разбор и
+      // оценка приходят одним ответом модели, и ждать их порознь не за чем.
+      final scored = await supabase
+          .from('training_rounds')
+          .select('final_score')
+          .eq('id', roundId)
+          .maybeSingle();
+
       if (!mounted) return;
       setState(() {
+        _translationScore = scored?['final_score'] as int?;
         _firstAttemptErrors = List<Map<String, dynamic>>.from(errors);
         // Задача упала целиком — разбора не будет, но вторую попытку
         // отбирать у игрока не за что.
@@ -617,7 +655,7 @@ class _TrainingScreenState extends State<TrainingScreen> {
       _secondAttempt = outcome.withClientFailure(
         'Результат не пришёл за ${_resultTimeout.inMinutes} мин. $job',
       );
-      _finalScore = _neutralScore;
+      _pronunciationScore = _neutralScore;
       _earnedCoins = null;
       _stage = _Stage.roundDone;
     });
@@ -628,7 +666,76 @@ class _TrainingScreenState extends State<TrainingScreen> {
   /// (NEUTRAL_SCORE в supabase/functions/_shared/evaluateGrammar.ts).
   static const _neutralScore = 7;
 
-  /// Финальный балл за раунд пишет воркер в training_rounds.final_score.
+  /// Проверка произношения — вторая попытка Одиночной Игры.
+  ///
+  /// Ждёт СВОЮ колонку: перевод уже оценён первой попыткой, и final_score
+  /// к этому моменту стоит. Слушать его здесь значило бы закончить раунд
+  /// раньше, чем модель успеет послушать звук.
+  void _watchPronunciation(String roundId, String recordingId) {
+    _roundSub?.cancel();
+    _startWatchdog(() => _giveUpOnSecondAttempt(recordingId));
+    _roundSub = supabase
+        .from('training_rounds')
+        .stream(primaryKey: ['id'])
+        .eq('id', roundId)
+        .listen((rows) async {
+      if (!mounted || rows.isEmpty) return;
+      final score = rows.first['pronunciation_score'] as int?;
+      if (score == null) return;
+      _roundSub?.cancel();
+      _watchdog?.cancel();
+
+      final outcome = await fetchRecordingOutcome(recordingId);
+      final errors = await supabase
+          .from('grammar_errors')
+          .select()
+          .eq('voice_recording_id', recordingId)
+          .order('created_at');
+      if (mounted) {
+        setState(() {
+          _secondAttempt = outcome;
+          _secondAttemptErrors = List<Map<String, dynamic>>.from(errors);
+        });
+      }
+
+      final coins = await _claimReward(roundId);
+      _playedRoundIds.add(roundId);
+
+      if (!mounted) return;
+      setState(() {
+        _pronunciationScore = score;
+        _earnedCoins = coins;
+        _stage = _Stage.roundDone;
+      });
+      _scrollToBottomSoon();
+    });
+  }
+
+  /// Награда за раунд. Отдельно от обоих наблюдателей: её просят один раз
+  /// за раунд, и просить её в двух местах значило бы однажды начислить
+  /// дважды или не начислить вовсе.
+  Future<int?> _claimReward(String roundId) async {
+    try {
+      final reward = await supabase.rpc('claim_training_reward', params: {
+        'p_training_round_id': roundId,
+        // Доля подсказок — множитель награды. Считает её клиент, потому
+        // что подсказка это действие в интерфейсе, которого сервер не
+        // видит; см. комментарий у training_rounds.hint_ratio.
+        'p_hint_ratio': _hintRatio,
+      });
+      if (reward is Map && reward['coins'] != null) {
+        return (reward['coins'] as num).toInt();
+      }
+    } catch (e) {
+      debugPrint('claim_training_reward failed: $e');
+    }
+    return null;
+  }
+
+  /// Балл за единственную попытку ПРОВЕРКИ УРОВНЯ.
+  ///
+  /// Экзамен произношение не проверяет: он отвечает на один вопрос — с
+  /// какого уровня пускать, — и второй попытки там нет вовсе.
   void _watchFinalScore(String roundId, String recordingId) {
     _roundSub?.cancel();
     _startWatchdog(() => _giveUpOnSecondAttempt(recordingId));
@@ -646,21 +753,7 @@ class _TrainingScreenState extends State<TrainingScreen> {
       final outcome = await fetchRecordingOutcome(recordingId);
       if (mounted) setState(() => _secondAttempt = outcome);
 
-      int? coins;
-      try {
-        final reward = await supabase.rpc('claim_training_reward', params: {
-          'p_training_round_id': roundId,
-          // Доля подсказок — множитель награды. Считает её клиент, потому
-          // что подсказка это действие в интерфейсе, которого сервер не
-          // видит; см. комментарий у training_rounds.hint_ratio.
-          'p_hint_ratio': _hintRatio,
-        });
-        if (reward is Map && reward['coins'] != null) {
-          coins = (reward['coins'] as num).toInt();
-        }
-      } catch (e) {
-        debugPrint('claim_training_reward failed: $e');
-      }
+      final coins = await _claimReward(roundId);
 
       // Удаление аудио отложено до конца сессии: пока игрок в ней, он
       // должен иметь возможность переслушать свои голосовые прямо в ленте.
@@ -671,7 +764,7 @@ class _TrainingScreenState extends State<TrainingScreen> {
 
       if (!mounted) return;
       setState(() {
-        _finalScore = score;
+        _translationScore = score;
         _earnedCoins = coins;
         _stage = _Stage.roundDone;
       });
@@ -737,7 +830,9 @@ class _TrainingScreenState extends State<TrainingScreen> {
       phrase: _phrase,
       phraseIndex: _phraseIndex,
       errors: _firstAttemptErrors,
-      score: _finalScore ?? 0,
+      pronunciationErrors: _secondAttemptErrors,
+      score: _translationScore ?? 0,
+      pronunciationScore: _pronunciationScore,
       firstAttempt: _firstAttempt,
       secondAttempt: _secondAttempt,
       firstAudio: _firstAttemptAudio,
@@ -927,30 +1022,32 @@ class _TrainingScreenState extends State<TrainingScreen> {
       // иначе, шагнув «Дальше», игрок терял и свои голосовые, и разбор.
       // На экзамене первой попытки не было вовсе — её блоки пропускаем.
       if (!widget.isPlacement) {
-        items.addAll(_voiceBubble(done.firstAudio));
+        items.addAll(_voiceBubble(done.firstAudio, score: done.score));
         items.add(_ErrorReport(
             errors: done.errors,
             attempt: done.firstAttempt,
             phraseIndex: done.phraseIndex,
             targetLanguage: _targetLanguage,
             nativeLanguage: _nativeLanguage));
-        items.addAll(_debugPanels('Раунд ${done.roundNumber}, попытка 1', done.firstAttempt));
+        items.addAll(_debugPanels('Раунд ${done.roundNumber}, перевод', done.firstAttempt));
+        items.add(const _AiLine(text: _pronunciationCall));
       }
-      items.addAll(_voiceBubble(done.secondAudio, score: done.score));
+      items.addAll(_voiceBubble(done.secondAudio, score: done.pronunciationScore));
       items.add(_ErrorReport(
-          errors: const [],
+          errors: done.pronunciationErrors,
           attempt: done.secondAttempt,
           phraseIndex: done.phraseIndex,
           targetLanguage: _targetLanguage,
           nativeLanguage: _nativeLanguage,
-          isSecondAttempt: true,
+          isPronunciation: !widget.isPlacement,
           isExam: widget.isPlacement));
       items.add(_ScoreCard(
           score: done.score,
+          pronunciationScore: done.pronunciationScore,
           coins: null,
           attempt: done.secondAttempt,
           examPassed: widget.isPlacement ? done.score / 10 >= placementPassRatio : null));
-      items.addAll(_debugPanels('Раунд ${done.roundNumber}, попытка 2', done.secondAttempt));
+      items.addAll(_debugPanels('Раунд ${done.roundNumber}, произношение', done.secondAttempt));
     }
 
     if (_stage == _Stage.sessionDone) {
@@ -1018,61 +1115,65 @@ class _TrainingScreenState extends State<TrainingScreen> {
         ));
         break;
       case _Stage.awaitingSecond:
-        items.addAll(_voiceBubble(_firstAttemptAudio));
+        items.addAll(_voiceBubble(_firstAttemptAudio, score: _translationScore));
         items.add(_ErrorReport(
             errors: _firstAttemptErrors,
             attempt: _firstAttempt,
             phraseIndex: _phraseIndex,
             targetLanguage: _targetLanguage,
             nativeLanguage: _nativeLanguage));
-        items.addAll(_debugPanels('Попытка 1', _firstAttempt));
+        items.addAll(_debugPanels('Перевод', _firstAttempt));
+        // Ровно одна строка вместо панели: игрок дочитал разбор перевода,
+        // и следующее действие у него одно.
+        items.add(const _AiLine(text: _pronunciationCall));
         break;
       case _Stage.gradingSecond:
         if (!widget.isPlacement) {
-          items.addAll(_voiceBubble(_firstAttemptAudio));
+          items.addAll(_voiceBubble(_firstAttemptAudio, score: _translationScore));
           items.add(_ErrorReport(
               errors: _firstAttemptErrors,
               attempt: _firstAttempt,
               phraseIndex: _phraseIndex,
               targetLanguage: _targetLanguage,
               nativeLanguage: _nativeLanguage));
-          items.addAll(_debugPanels('Попытка 1', _firstAttempt));
+          items.addAll(_debugPanels('Перевод', _firstAttempt));
+          items.add(const _AiLine(text: _pronunciationCall));
         }
         items.addAll(_voiceBubble(_secondAttemptAudio));
-        // На второй попытке судья не объясняет ошибки, а ставит балл —
-        // поэтому и надпись другая.
+        // Вторая попытка слушает звук, а не слова: и ждём мы здесь не
+        // разбор перевода, а замечания по произношению.
         items.add(_Thinking(
-          label: _asrDone
-              ? 'Оценка от ИИ'
-              : recognisingSpeechLabel(_targetLanguage),
+          label: widget.isPlacement ? 'Оценка от ИИ' : 'Слушаем произношение',
         ));
         break;
       case _Stage.roundDone:
         if (!widget.isPlacement) {
-          items.addAll(_voiceBubble(_firstAttemptAudio));
+          items.addAll(_voiceBubble(_firstAttemptAudio, score: _translationScore));
           items.add(_ErrorReport(
               errors: _firstAttemptErrors,
               attempt: _firstAttempt,
               phraseIndex: _phraseIndex,
               targetLanguage: _targetLanguage,
               nativeLanguage: _nativeLanguage));
-          items.addAll(_debugPanels('Попытка 1', _firstAttempt));
+          items.addAll(_debugPanels('Перевод', _firstAttempt));
+          items.add(const _AiLine(text: _pronunciationCall));
         }
-        items.addAll(_voiceBubble(_secondAttemptAudio, score: _finalScore));
+        items.addAll(_voiceBubble(_secondAttemptAudio, score: _pronunciationScore));
         items.add(_ErrorReport(
-            errors: const [],
+            errors: _secondAttemptErrors,
             attempt: _secondAttempt,
             phraseIndex: _phraseIndex,
             targetLanguage: _targetLanguage,
             nativeLanguage: _nativeLanguage,
-            isSecondAttempt: true,
+            isPronunciation: !widget.isPlacement,
             isExam: widget.isPlacement));
         items.add(_ScoreCard(
-            score: _finalScore ?? 0,
+            score: _translationScore ?? 0,
+            pronunciationScore: _pronunciationScore,
             coins: _earnedCoins,
             attempt: _secondAttempt,
             examPassed: widget.isPlacement ? _examPassed : null));
-        items.addAll(_debugPanels('Попытка 2', _secondAttempt));
+        items.addAll(_debugPanels('Произношение', _secondAttempt));
         break;
       default:
         break;
@@ -1121,8 +1222,14 @@ class _CompletedRound {
 
   /// Сквозной индекс фразы — по нему разбор достаёт элементы и пояснения.
   final int phraseIndex;
+  /// Ошибки перевода (первая попытка) и произношения (вторая).
   final List<Map<String, dynamic>> errors;
+  final List<Map<String, dynamic>> pronunciationErrors;
+
+  /// Два балла раунда: за перевод и за произношение. На проверке уровня
+  /// второго нет — там и попытка одна.
   final int score;
+  final int? pronunciationScore;
   final RecordingOutcome? firstAttempt;
   final RecordingOutcome? secondAttempt;
 
@@ -1138,7 +1245,9 @@ class _CompletedRound {
     required this.phrase,
     required this.phraseIndex,
     required this.errors,
+    required this.pronunciationErrors,
     required this.score,
+    required this.pronunciationScore,
     required this.firstAttempt,
     required this.secondAttempt,
     required this.firstAudio,
@@ -1276,10 +1385,12 @@ class _ErrorReport extends StatelessWidget {
   /// пояснение к каждому из них. -1 — фраза неизвестна (старый раунд).
   final int phraseIndex;
 
-  /// Вторая попытка: показываем «Голосовое» и «Разбор» с подсветкой, но без
-  /// текстовых объяснений — их для неё судья и не генерирует (режим
-  /// marksOnly в evaluateGrammar.ts), чтобы не тратить время ответа.
-  final bool isSecondAttempt;
+  /// Вторая попытка соло: это ПРОВЕРКА ПРОИЗНОШЕНИЯ, а не второй перевод.
+  ///
+  /// Ленты разбора у неё нет и быть не может: модель там слушает звук и
+  /// текста не пишет вовсе. Показываются только плашки — по одной на слово,
+  /// прозвучавшее не так.
+  final bool isPronunciation;
 
   /// Проверка уровня. Попытка там одна, и называть её «второй» бессмысленно:
   /// первой не было. Меняется только заголовок и подпись — содержимое то же,
@@ -1298,7 +1409,7 @@ class _ErrorReport extends StatelessWidget {
     required this.targetLanguage,
     required this.nativeLanguage,
     required this.phraseIndex,
-    this.isSecondAttempt = false,
+    this.isPronunciation = false,
     this.isExam = false,
   });
 
@@ -1306,14 +1417,17 @@ class _ErrorReport extends StatelessWidget {
   ///
   /// Раскладывает их тот же код, что и в бою (`mistakesFrom`): две правды
   /// об одном ответе — верный способ развести режимы.
-  List<Mistake> get _mistakes => mistakesFrom(errors);
+  List<Mistake> get _mistakes => mistakesFrom(
+        errors,
+        category: isPronunciation ? 'pronunciation' : 'omni',
+      );
 
   @override
   Widget build(BuildContext context) {
     // Разбора второй попытки без самой попытки не бывает: показывать пустую
     // панель «Вторая попытка засчитана» не за чем — в ленте это был бы шум
     // на каждом сыгранном раунде.
-    if (isSecondAttempt && attempt == null) return const SizedBox.shrink();
+    if (isPronunciation && attempt == null) return const SizedBox.shrink();
 
     final status = attempt?.status ?? TranscriptStatus.ok;
     final judge = attempt?.judgeStatus ?? JudgeStatus.ok;
@@ -1333,8 +1447,12 @@ class _ErrorReport extends StatelessWidget {
       _ when judgeBroken && (attempt?.judgeHitProviderLimit ?? false) =>
         ('ЛИМИТ ПРОВАЙДЕРА ИИ', AppColors.danger),
       _ when judgeBroken => ('РАЗБОР НЕ ПОЛУЧЕН', AppColors.muted),
-      _ when isSecondAttempt => (isExam ? 'РЕЗУЛЬТАТ' : 'РАЗБОР ВТОРОЙ ПОПЫТКИ', AppColors.gold),
-      _ => errors.isEmpty ? ('ОШИБОК НЕ НАЙДЕНО', AppColors.ok) : ('РАЗБОР ПЕРВОЙ ПОПЫТКИ', AppColors.gold),
+      _ when isExam => ('РЕЗУЛЬТАТ', AppColors.gold),
+      // «Произношение», а не «вторая попытка»: попытка здесь не вторая по
+      // счёту, а другая по сути — перевод уже оценён и не пересматривается.
+      _ when isPronunciation =>
+        _mistakes.isEmpty ? ('ПРОИЗНОШЕНИЕ ЧИСТОЕ', AppColors.ok) : ('ПРОИЗНОШЕНИЕ', AppColors.gold),
+      _ => _mistakes.isEmpty ? ('ОШИБОК НЕ НАЙДЕНО', AppColors.ok) : ('РАЗБОР ПЕРЕВОДА', AppColors.gold),
     };
 
     final String hint = switch (status) {
@@ -1350,8 +1468,9 @@ class _ErrorReport extends StatelessWidget {
             'и это не признак того, что ошибок не было. Балл не снижается. Лимит снимается на стороне провайдера.',
       _ when judgeBroken =>
         'ИИ-судья не ответил, поэтому разбора ошибок нет — это сбой на нашей стороне, а не признак того, что ошибок не было. Балл за него не снижается.',
-      _ when isSecondAttempt => isExam ? 'Ответ засчитан.' : 'Вторая попытка засчитана.',
-      _ => 'Скажи фразу ещё раз — вторая попытка идёт в зачёт.',
+      _ when isExam => 'Ответ засчитан.',
+      _ when isPronunciation => 'Замечаний по звуку нет — тебя поймут.',
+      _ => 'Перевод разобран. Теперь проверим, как это звучит.',
     };
 
 
@@ -1380,7 +1499,7 @@ class _ErrorReport extends StatelessWidget {
             // незачем, а игроку важнее всего понять последнюю попытку.
             // Отличается только заголовок и карточка с баллом ниже.
             RoundReview(
-              spans: attempt?.reviewSpans ?? const [],
+              spans: isPronunciation ? const [] : (attempt?.reviewSpans ?? const []),
               mistakes: _mistakes,
               targetLanguage: targetLanguage,
               // Когда разбирать нечего, на его месте — та же подсказка,
@@ -1397,8 +1516,21 @@ class _ErrorReport extends StatelessWidget {
   }
 }
 
+/// ИТОГИ РАУНДА — два балла: за перевод и за произношение.
+///
+/// ПОЧЕМУ ДВА. Один балл за раунд означал, что перевод и звук смешаны в
+/// одно число, и игрок не знает, что именно у него хромает. Проверки
+/// теперь тоже две и по-настоящему разные: перевод оценивается по первой
+/// попытке, произношение — по второй, где модель вообще не смотрит на
+/// слова.
 class _ScoreCard extends StatelessWidget {
+  /// Балл за перевод. На экзамене — единственный, и он же вердикт.
   final int score;
+
+  /// Балл за произношение. null — второй попытки не было (экзамен) или она
+  /// ещё не оценена.
+  final int? pronunciationScore;
+
   final int? coins;
 
   /// Итог распознавания ВТОРОЙ попытки — именно она идёт в зачёт. Нужен,
@@ -1415,6 +1547,7 @@ class _ScoreCard extends StatelessWidget {
 
   const _ScoreCard({
     required this.score,
+    required this.pronunciationScore,
     required this.coins,
     this.attempt,
     this.examPassed,
@@ -1436,32 +1569,39 @@ class _ScoreCard extends StatelessWidget {
         padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 16),
         child: Row(
           children: [
-            Container(
-              height: 44,
-              width: 44,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                color: AppColors.navy3,
-                border: Border.all(color: _accent, width: 2.5),
-              ),
-              child: Center(
-                child: Text('$score', style: AppFonts.ui(fontSize: 17, weight: FontWeight.w800, color: _accent)),
-              ),
-            ),
-            const SizedBox(width: 14),
+            if (examPassed != null) ...[
+              _ScoreDot(score: score, color: _accent),
+              const SizedBox(width: 14),
+            ],
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  // На экзамене это единственная строка: ни «балла за
-                  // раунд», ни разговора про рейтинг и монеты — их там
-                  // просто нет.
+                  // На экзамене это единственная строка: ни «итогов раунда»,
+                  // ни разговора про рейтинг и монеты — их там просто нет.
                   if (examPassed != null)
                     Text(examPassed! ? 'Экзамен сдан' : 'Экзамен не сдан',
                         style: AppFonts.ui(fontSize: 13, weight: FontWeight.w800, color: _accent))
                   else ...[
-                    Text('Балл за раунд', style: AppFonts.ui(fontSize: 13)),
-                    const SizedBox(height: 2),
+                    Text('ИТОГИ РАУНДА',
+                        style: AppFonts.mono(fontSize: 9, weight: FontWeight.w700, color: AppColors.gold)),
+                    const SizedBox(height: 10),
+                    Row(
+                      children: [
+                        _ScoreDot(score: score, color: AppColors.gold),
+                        const SizedBox(width: 10),
+                        Text('Перевод', style: AppFonts.ui(fontSize: 13)),
+                      ],
+                    ),
+                    const SizedBox(height: 8),
+                    Row(
+                      children: [
+                        _ScoreDot(score: pronunciationScore, color: AppColors.cyan),
+                        const SizedBox(width: 10),
+                        Text('Произношение', style: AppFonts.ui(fontSize: 13)),
+                      ],
+                    ),
+                    const SizedBox(height: 8),
                     Text(
                       coins == null ? 'Рейтинг не меняется' : '+$coins монет · рейтинг не меняется',
                       style: const TextStyle(color: AppColors.muted, fontSize: 11),
@@ -1487,7 +1627,7 @@ class _ScoreCard extends StatelessWidget {
                     const Padding(
                       padding: EdgeInsets.only(top: 4),
                       child: Text(
-                        'Во второй попытке записалась тишина',
+                        'В попытке на произношение записалась тишина',
                         style: TextStyle(color: AppColors.muted, fontSize: 11, height: 1.3),
                       ),
                     ),
@@ -1496,6 +1636,76 @@ class _ScoreCard extends StatelessWidget {
             ),
           ],
         ),
+      ),
+    );
+  }
+}
+
+/// Кружок с баллом. Пустой — балла ещё нет.
+class _ScoreDot extends StatelessWidget {
+  final int? score;
+  final Color color;
+
+  const _ScoreDot({required this.score, required this.color});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      height: 40,
+      width: 40,
+      decoration: BoxDecoration(
+        shape: BoxShape.circle,
+        color: AppColors.navy3,
+        border: Border.all(color: score == null ? AppColors.line : color, width: 2.5),
+      ),
+      child: Center(
+        child: Text(
+          score == null ? '—' : '$score',
+          style: AppFonts.ui(
+            fontSize: 16,
+            weight: FontWeight.w800,
+            color: score == null ? AppColors.muted : color,
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Короткая реплика хамелеона в ленте — одна строка без панели разбора.
+class _AiLine extends StatelessWidget {
+  final String text;
+
+  const _AiLine({required this.text});
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: feedGap / 2),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const AiAvatar(),
+          const SizedBox(width: 8),
+          Flexible(
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+              decoration: const BoxDecoration(
+                color: AppColors.navy3,
+                borderRadius: BorderRadius.only(
+                  topLeft: Radius.circular(4),
+                  topRight: Radius.circular(14),
+                  bottomLeft: Radius.circular(14),
+                  bottomRight: Radius.circular(14),
+                ),
+              ),
+              child: Text(
+                text,
+                style: const TextStyle(color: AppColors.cream, fontSize: 13, height: 1.4),
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }

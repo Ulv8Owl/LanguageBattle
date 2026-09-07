@@ -21,7 +21,15 @@
 
 import { createClient, type SupabaseClient } from "jsr:@supabase/supabase-js@2";
 import { type CefrLevel, NEUTRAL_SCORE } from "../_shared/cefr.ts";
-import { correctText, omniEvaluate, type OmniResult, scoreFor } from "../_shared/omniJudge.ts";
+import {
+  correctText,
+  omniEvaluate,
+  type OmniError,
+  omniPronounce,
+  type OmniResult,
+  pronunciationScoreFor,
+  scoreFor,
+} from "../_shared/omniJudge.ts";
 
 /**
  * Лига говорящего приравнена к уровню CEFR (см. supabase/migrations/0023 —
@@ -196,6 +204,16 @@ interface VoiceRecordingRow {
   language_code: string | null;
   audio_storage_path: string;
   attempt_number: number | null;
+  /**
+   * Что проверяет эта запись: перевод или произношение (миграция 0043).
+   *
+   * ОТДЕЛЬНАЯ КОЛОНКА, А НЕ НОМЕР ПОПЫТКИ. Раньше роль записи выводилась
+   * из attempt_number, и проверка уровня присылала «попытку 2» с одной
+   * попыткой в раунде — просто чтобы воркер поставил балл. Теперь ролей
+   * две, и вывести обе из одного числа уже нельзя: экзамен и вторая
+   * попытка соло — это разные вещи с одинаковым номером.
+   */
+  judge_mode: string | null;
   created_at: string;
 }
 
@@ -351,19 +369,40 @@ async function processJob(job_id: string): Promise<void> {
     // слышит запись напрямую; просить у неё вдобавок расшифровку — платить
     // за второй проход по тому же аудио ради текста, который нигде не
     // показывается.
+    // Задание на РОДНОМ языке — единственное, что модель получает кроме
+    // звука. Эталон ей не показывают намеренно: увидев его, она начнёт
+    // сверять с одним вариантом вместо того, чтобы оценивать перевод
+    // (см. omniJudge.ts).
+    const prompt = await roundPrompt(supabase, recording, nativeLanguage);
+    const level = cefrLevelForRating(
+      (await speakerLeagueRating(supabase, recording.user_id, targetLanguage)) ?? 1000,
+    );
+
+    // ВТОРАЯ ПОПЫТКА СОЛО СЛУШАЕТ ТОЛЬКО ЗВУК. Раньше она была той же
+    // проверкой перевода, и игрок, уже прочитавший разбор, повторял по
+    // нему исправленную фразу: проверялась память, а не язык. Перевод
+    // теперь оценивается один раз, по первой попытке.
+    if (recording.judge_mode === "pronunciation") {
+      await judgePronunciation(supabase, {
+        job_id,
+        recording,
+        targetLanguage,
+        nativeLanguage,
+        prompt,
+        level,
+        energy,
+        budgetMs: budgetLeft(),
+      });
+      return;
+    }
+
     const omni = await runOmni(
       supabase,
       recording,
       targetLanguage,
       nativeLanguage,
-      // Задание на РОДНОМ языке — единственное, что модель получает кроме
-      // звука. Эталон ей не показывают намеренно: увидев его, она начнёт
-      // сверять с одним вариантом вместо того, чтобы оценивать перевод
-      // (см. omniJudge.ts).
-      await roundPrompt(supabase, recording, nativeLanguage),
-      cefrLevelForRating(
-        (await speakerLeagueRating(supabase, recording.user_id, targetLanguage)) ?? 1000,
-      ),
+      prompt,
+      level,
       budgetLeft(),
     );
     // Один вызов — одно списание, и только когда модель ответила. Отказ
@@ -507,16 +546,15 @@ async function processJob(job_id: string): Promise<void> {
         { onConflict: "round_id,user_id" },
       );
     } else if (recording.training_round_id) {
-      // Одиночная Игра (раздел 2.2): попытка №1 даёт только разбор ошибок,
-      // финальный балл ставится по попытке №2. Попытки различаются по
-      // порядку created_at внутри одного training_round — как в схеме
-      // (раздел 4), без отдельного поля attempt.
-      if (attemptNumber >= 2) {
-        await supabase
-          .from("training_rounds")
-          .update({ final_score: score })
-          .eq("id", recording.training_round_id);
-      }
+      // Одиночная Игра: балл за ПЕРЕВОД ставится по этой записи и больше не
+      // меняется. Раньше он ставился по второй попытке — по той, где игрок
+      // повторял фразу, только что показанную ему в разборе. Вторая попытка
+      // теперь слушает произношение и пишет свой балл (judgePronunciation),
+      // а перевод оценивается один раз и честно.
+      await supabase
+        .from("training_rounds")
+        .update({ final_score: score })
+        .eq("id", recording.training_round_id);
     }
 
     await markDone(supabase, job_id);
@@ -601,6 +639,134 @@ async function roundPrompt(
  * хранить нечего, — а повтор случается только когда первая попытка не
  * дошла до записи результата, то есть звать модель заново там и надо.
  */
+/**
+ * Проверка произношения — вторая попытка Одиночной Игры.
+ *
+ * Отдельная функция, а не ветка внутри разбора перевода: у неё другой
+ * вопрос к модели, другой ответ и другая колонка с баллом. Общего у них
+ * ровно два места — скачивание аудио и списание энергии.
+ *
+ * ПИШЕТ ВСЁ САМА и закрывает задачу: вернуться в общий путь ей не с чем —
+ * ни ленты разбора, ни перевода у неё нет по замыслу.
+ */
+async function judgePronunciation(
+  supabase: SupabaseClient,
+  args: {
+    job_id: string;
+    recording: VoiceRecordingRow;
+    targetLanguage: string;
+    nativeLanguage: string;
+    prompt: string;
+    level: CefrLevel;
+    energy: { charge(amount: number, reason: string): Promise<void>; debug(): Record<string, unknown> };
+    budgetMs: number;
+  },
+): Promise<void> {
+  const { recording, energy } = args;
+  const audio = await loadAudio(supabase, recording);
+
+  const judged = audio === null
+    ? {
+      errors: [] as OmniError[],
+      audible: false,
+      degraded: true,
+      failureReason: "не удалось скачать аудио",
+      debug: { provider: "omni", mode: "pronunciation", status: "failed" },
+    }
+    : await omniPronounce({
+      audio,
+      audioFormat: audioFormatOf(recording.audio_storage_path),
+      nativeLanguage: args.nativeLanguage,
+      targetLanguage: args.targetLanguage,
+      prompt: args.prompt,
+      level: args.level,
+      budgetMs: args.budgetMs,
+    });
+
+  if (!judged.degraded) {
+    await energy.charge(ENERGY_COST_OMNI, "проверка произношения");
+  }
+
+  // Модель не ответила — балл нейтральный. Единица означала бы «сказано
+  // плохо», а мы просто не знаем, как было сказано, и наказывать за свой
+  // сбой нельзя.
+  const score = judged.degraded
+    ? NEUTRAL_SCORE
+    : pronunciationScoreFor(judged.errors.length);
+
+  const pipelineDebug: Record<string, unknown> = {
+    omni: judged.debug,
+    judge: judged.degraded
+      ? { status: "degraded", reason: judged.failureReason ?? "модель не ответила" }
+      : {
+        mode: "произношение: модель слушает звук, расшифровки не делает",
+        scoring: "программа: по баллу за названное слово",
+        score,
+      },
+  };
+  pipelineDebug.energy = energy.debug();
+
+  await supabase
+    .from("voice_recordings")
+    .update({
+      judge_status: judged.degraded ? "degraded" : "ok",
+      pipeline_debug: pipelineDebug,
+      // Ленты разбора у произношения нет и быть не может: показывать
+      // текст там, где проверяли звук, значило бы снова свести проверку к
+      // словам.
+      review_spans: null,
+      corrected_text: "",
+      cleaned_text: "",
+    })
+    .eq("id", recording.id);
+
+  if (judged.errors.length > 0) {
+    await supabase.from("grammar_errors").insert(
+      judged.errors.map((e) => ({
+        voice_recording_id: recording.id,
+        offset_start: 0,
+        length: 0,
+        message: e.message,
+        replacement: e.correction,
+        category: "pronunciation",
+        span_text: e.text,
+      })),
+    );
+  }
+
+  if (recording.training_round_id) {
+    await supabase
+      .from("training_rounds")
+      .update({ pronunciation_score: score })
+      .eq("id", recording.training_round_id);
+  }
+
+  await markDone(supabase, args.job_id);
+  console.log("evaluate-recording: произношение готово", {
+    job_id: args.job_id,
+    score,
+    errors: judged.errors.length,
+  });
+}
+
+/** Скачивает запись из хранилища. null — не скачалась. */
+async function loadAudio(
+  supabase: SupabaseClient,
+  recording: VoiceRecordingRow,
+): Promise<Uint8Array | null> {
+  const { data: file, error: downloadErr } = await supabase.storage
+    .from("voice-recordings")
+    .download(recording.audio_storage_path);
+  if (downloadErr || !file) {
+    console.error("evaluate-recording: audio download failed", {
+      path: recording.audio_storage_path,
+      downloadErr,
+    });
+    return null;
+  }
+  return new Uint8Array(await file.arrayBuffer());
+}
+
 async function runOmni(
   supabase: SupabaseClient,
   recording: VoiceRecordingRow,
@@ -610,25 +776,18 @@ async function runOmni(
   level: CefrLevel,
   budgetMs: number,
 ): Promise<OmniResult> {
-  const { data: file, error: downloadErr } = await supabase.storage
-    .from("voice-recordings")
-    .download(recording.audio_storage_path);
-  if (downloadErr || !file) {
-    console.error("evaluate-recording: audio download failed", {
-      path: recording.audio_storage_path,
-      downloadErr,
-    });
+  const audio = await loadAudio(supabase, recording);
+  if (audio === null) {
     return {
       review: [],
       errors: [],
       audible: false,
       degraded: true,
-      failureReason: `не удалось скачать аудио: ${downloadErr?.message ?? downloadErr}`,
+      failureReason: "не удалось скачать аудио",
       debug: { provider: "omni", status: "failed", error: "аудио не скачалось" },
     };
   }
 
-  const audio = new Uint8Array(await file.arrayBuffer());
   return await omniEvaluate({
     audio,
     audioFormat: audioFormatOf(recording.audio_storage_path),

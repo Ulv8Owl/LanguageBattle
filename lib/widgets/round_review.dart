@@ -216,7 +216,10 @@ class RoundReview extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    if (spans.isEmpty) {
+    // Ленты может не быть при живом разборе — так устроена проверка
+    // произношения: там оценивают звук, и текста в ответе нет вовсе.
+    // Плашки при этом есть, и показать их обязательно.
+    if (spans.isEmpty && mistakes.isEmpty) {
       if (emptyHint.isEmpty) return const SizedBox.shrink();
       return Text(
         emptyHint,
@@ -227,15 +230,17 @@ class RoundReview extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.start,
       mainAxisSize: MainAxisSize.min,
       children: [
-        TranscriptReview(spans: spans, targetLanguage: targetLanguage),
-        const SizedBox(height: 10),
-        if (mistakes.isEmpty)
+        if (spans.isNotEmpty) ...[
+          TranscriptReview(spans: spans, targetLanguage: targetLanguage),
+          const SizedBox(height: 10),
+        ],
+        if (mistakes.isNotEmpty)
+          MistakeBreakdown(mistakes: mistakes, targetLanguage: targetLanguage)
+        else
           Text(
             'Ошибок не найдено — сказано верно',
             style: AppFonts.ui(fontSize: 11, color: AppColors.muted),
-          )
-        else
-          MistakeBreakdown(mistakes: mistakes, targetLanguage: targetLanguage),
+          ),
       ],
     );
   }
@@ -245,10 +250,16 @@ class RoundReview extends StatelessWidget {
 ///
 /// Разбор ошибок приходит строками grammar_errors, и раскладывать их в двух
 /// экранах по-разному значило бы завести две правды об одном ответе.
-List<Mistake> mistakesFrom(List<Map<String, dynamic>> errors) {
+/// [category] — какой разбор берём: 'omni' это ошибки перевода,
+/// 'pronunciation' — ошибки звука. Обе категории лежат в одной таблице, и
+/// смешать их в одном блоке значило бы снять с игрока баллы дважды за одно.
+List<Mistake> mistakesFrom(
+  List<Map<String, dynamic>> errors, {
+  String category = 'omni',
+}) {
   final out = <Mistake>[];
   for (final e in errors) {
-    if ((e['category'] as String?) != 'omni') continue;
+    if ((e['category'] as String?) != category) continue;
     final span = (e['span_text'] as String?)?.trim() ?? '';
     final message = (e['message'] as String?)?.trim() ?? '';
     // Плашка без фрагмента показывается не к чему, а без объяснения — это

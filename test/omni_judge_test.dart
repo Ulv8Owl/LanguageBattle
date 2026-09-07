@@ -198,7 +198,11 @@ void main() {
     // переехали в общий разбор: тот же виджет показывает бой.
     final review = read('lib/widgets/round_review.dart');
     expect(review, contains('class MistakeBreakdown'));
-    expect(review, contains("if ((e['category'] as String?) != 'omni') continue;"));
+    // Категория теперь параметр: в одной таблице лежат и ошибки перевода,
+    // и ошибки произношения, и смешать их в одном блоке значило бы снять
+    // с игрока баллы дважды за одно.
+    expect(review, contains("if ((e['category'] as String?) != category) continue;"));
+    expect(review, contains("String category = 'omni',"));
     expect(screen, contains('RoundReview('));
     // Поэлементного разбора больше нет: держать рядом две несовместимые
     // механики значило бы поддерживать ту, которой никто не пользуется.

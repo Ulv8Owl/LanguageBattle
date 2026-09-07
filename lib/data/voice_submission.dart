@@ -155,10 +155,16 @@ class RecordingOutcome {
 /// Ровно один из roundId/trainingRoundId должен быть непустым — это же
 /// требование стоит CHECK-constraint'ом на таблице.
 ///
-/// [attemptNumber] — какая это попытка в раунде (в PvP всегда 1). Сервер по
-/// нему решает, просить ли у судьи развёрнутые объяснения, и вычислять его
-/// подсчётом строк оказалось ненадёжно: сбой счётчика молча выдавал вторую
-/// попытку за первую. Клиент этот номер и так знает — он в имени файла.
+/// [attemptNumber] — какая это попытка в раунде (в PvP всегда 1). Вычислять
+/// его подсчётом строк оказалось ненадёжно: сбой счётчика молча выдавал
+/// вторую попытку за первую. Клиент этот номер и так знает — он в имени
+/// файла.
+///
+/// [judgeMode] — ЧТО проверяет запись: 'translation' (перевод) или
+/// 'pronunciation' (только звук). Отдельно от номера попытки, потому что
+/// одно из другого не следует: на проверке уровня попытка единственная и
+/// проверяет перевод, а во второй попытке соло тот же номер означает
+/// проверку произношения.
 Future<String> submitVoiceRecording({
   required String filePath,
   required String storagePath,
@@ -169,6 +175,7 @@ Future<String> submitVoiceRecording({
   String? roundId,
   String? trainingRoundId,
   int attemptNumber = 1,
+  String judgeMode = 'translation',
 }) async {
   assert(
     (roundId == null) != (trainingRoundId == null),
@@ -192,6 +199,7 @@ Future<String> submitVoiceRecording({
         'audio_storage_path': storagePath,
         'duration_seconds': durationSeconds,
         'attempt_number': attemptNumber,
+        'judge_mode': judgeMode,
       })
       .select('id')
       .single();

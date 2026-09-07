@@ -243,10 +243,21 @@ function systemPrompt(nativeLanguage: string, targetLanguage: string, level: str
     "the sentence and stopped, \"heard\" is that half and nothing more. Everything else is decided from this",
     "field, so an invented transcription silently gives him a mark he did not earn.",
     "",
+    "SELF-CORRECTION IS NOT AN ERROR. Learners often say a word, stop, and say it again differently. Keep only",
+    'the version he settled on in "heard", drop the abandoned one, and never list either as an error. He',
+    "corrected himself — that is the skill working, not failing.",
+    "",
     "A different wording is NOT an error: a sentence can be translated in several correct ways, and you must",
     "accept any wording that conveys the same meaning correctly. Mark an error only when something is genuinely",
     "wrong — wrong meaning, wrong grammar, an invented word. Never mark stylistic preference.",
     "Group errors by MEANING: everything that goes wrong for one reason is a single error.",
+    "",
+    "CHECK THE MEANING PART BY PART before you accept a sentence. Does it describe the same action, the same",
+    "place or direction, the same time, the same person? A sentence that reads naturally but says something",
+    "else than the task did is a MEANING error, not an acceptable variant — being fluent is not being right.",
+    "",
+    "NEVER mark punctuation, capitalisation or sentence boundaries. You are listening to speech: commas and",
+    "capital letters are yours, not his, and he cannot hear them. Reporting one is always your own mistake.",
     "",
     'NEVER put an omission in "errors". Something the learner did not say is visible from "heard" already;',
     'an "errors" entry is only for words that WERE spoken and were wrong. An entry whose "said" equals its',
@@ -263,6 +274,9 @@ function systemPrompt(nativeLanguage: string, targetLanguage: string, level: str
     `language. This is not a preference — the learner reads only ${nativeSelf}. Everything else (the`,
     `transcription, the translation, the quoted fragments, the corrections) stays in ${target}.`,
     `Explain at ${level} level: short and concrete, no grammar jargon the learner would not know.`,
+    "EXPLAIN THIS SENTENCE, NOT THE LANGUAGE. Say why your version is right HERE — what this sentence means and",
+    "what his said instead. Do not state a general rule: a rule invented to fit one example is usually false,",
+    "and the learner will believe it. If you cannot say briefly and truthfully why, just say what it should be.",
     "",
     "Reply with a single JSON object and nothing else — no markdown, no commentary:",
     '{"audible": boolean, "heard": string, "correct": string,',
@@ -375,6 +389,80 @@ function asErrors(raw: unknown): OmniError[] {
   return out;
 }
 
+/**
+ * Один HTTP-вызов модели: система + части пользовательского сообщения.
+ *
+ * Вынесен, потому что вызовов теперь два — разбор перевода и проверка
+ * произношения, — а протокол у них общий и капризный (обязательный stream,
+ * modalities, разбор SSE). Две копии этого кода разъехались бы на первой
+ * же правке, и разъехались бы молча.
+ */
+async function requestOmni(
+  system: string,
+  userParts: unknown[],
+  budgetMs: number,
+): Promise<{ raw: string } | { error: string }> {
+  const key = omniKey();
+  if (!key) {
+    return { error: "нет ключа модели: npx supabase secrets set OMNI_API_KEY=<ключ>" };
+  }
+  const timeoutMs = Math.min(TIMEOUT_MS, budgetMs);
+  if (timeoutMs < MIN_SLICE_MS) {
+    return { error: `на вызов осталось ${Math.round(budgetMs / 1000)}с — меньше минимума` };
+  }
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const res = await fetch(`${omniBaseUrl()}/chat/completions`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${key}`,
+      },
+      body: JSON.stringify({
+        model: omniModel(),
+        messages: [
+          { role: "system", content: system },
+          { role: "user", content: userParts },
+        ],
+        // Только текст: озвучка у нас своя, и просить у модели ещё и аудио
+        // значило бы платить за то, что тут же выбросим.
+        modalities: ["text"],
+        // Обязателен для этой модели — без него сервис отвечает ошибкой.
+        stream: true,
+        stream_options: { include_usage: true },
+        temperature: 0.2,
+      }),
+      signal: controller.signal,
+    });
+
+    if (!res.ok) {
+      const body = await res.text().catch(() => "");
+      return { error: `HTTP ${res.status}: ${body.slice(0, 400)}` };
+    }
+    return { raw: await readStream(res) };
+  } catch (e) {
+    if (e instanceof Error && e.name === "AbortError") {
+      return { error: `вызов не уложился в ${Math.round(timeoutMs / 1000)}с` };
+    }
+    return { error: `сбой вызова: ${e}` };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/** Аудио раунда в том виде, в каком его принимает модель. */
+function audioPart(audio: Uint8Array, format: string): unknown {
+  return {
+    type: "input_audio",
+    input_audio: {
+      data: `data:audio/${format};base64,${base64(audio)}`,
+      format,
+    },
+  };
+}
+
 export interface OmniRequest {
   audio: Uint8Array;
   /** Контейнер записи: wav, mp3, m4a — как есть у нас в хранилище. */
@@ -406,73 +494,22 @@ export async function omniEvaluate(req: OmniRequest): Promise<OmniResult> {
     debug: { ...omniConfigDebug(), status: "failed", reason, ms: Date.now() - started, ...extra },
   });
 
-  const key = omniKey();
-  if (!key) {
-    return fail("нет ключа модели: npx supabase secrets set OMNI_API_KEY=<ключ>");
-  }
   if (req.audio.byteLength === 0) return fail("запись пуста");
 
-  const timeoutMs = Math.min(TIMEOUT_MS, req.budgetMs);
-  if (timeoutMs < MIN_SLICE_MS) {
-    return fail(`на вызов осталось ${Math.round(req.budgetMs / 1000)}с — меньше минимума`);
-  }
-
   const system = systemPrompt(req.nativeLanguage, req.targetLanguage, req.level);
-
-  const userParts: unknown[] = [
-    {
-      type: "input_audio",
-      input_audio: {
-        data: `data:audio/${req.audioFormat};base64,${base64(req.audio)}`,
-        format: req.audioFormat,
+  const answer = await requestOmni(
+    system,
+    [
+      audioPart(req.audio, req.audioFormat),
+      {
+        type: "text",
+        text: `The learner was asked to say this in ${languageName(req.targetLanguage)}:\n${req.prompt}`,
       },
-    },
-  ];
-  userParts.push({
-    type: "text",
-    text: `The learner was asked to say this in ${languageName(req.targetLanguage)}:\n${req.prompt}`,
-  });
-
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
-  let raw = "";
-  try {
-    const res = await fetch(`${omniBaseUrl()}/chat/completions`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${key}`,
-      },
-      body: JSON.stringify({
-        model: omniModel(),
-        messages: [
-          { role: "system", content: system },
-          { role: "user", content: userParts },
-        ],
-        // Только текст: озвучка у нас своя, и просить у модели ещё и аудио
-        // значило бы платить за то, что тут же выбросим.
-        modalities: ["text"],
-        // Обязателен для этой модели — без него сервис отвечает ошибкой.
-        stream: true,
-        stream_options: { include_usage: true },
-        temperature: 0.2,
-      }),
-      signal: controller.signal,
-    });
-
-    if (!res.ok) {
-      const body = await res.text().catch(() => "");
-      return fail(`HTTP ${res.status}: ${body.slice(0, 400)}`);
-    }
-    raw = await readStream(res);
-  } catch (e) {
-    if (e instanceof Error && e.name === "AbortError") {
-      return fail(`вызов не уложился в ${Math.round(timeoutMs / 1000)}с`);
-    }
-    return fail(`сбой вызова: ${e}`);
-  } finally {
-    clearTimeout(timer);
-  }
+    ],
+    req.budgetMs,
+  );
+  if ("error" in answer) return fail(answer.error);
+  const raw = answer.raw;
 
   if (raw.trim().length === 0) return fail("модель вернула пустой ответ");
 
@@ -532,4 +569,148 @@ export async function omniEvaluate(req: OmniRequest): Promise<OmniResult> {
   debug.raw = raw.slice(0, 2000);
 
   return { review, errors, audible: true, degraded: false, debug };
+}
+
+/**
+ * Проверка ПРОИЗНОШЕНИЯ — вторая попытка Одиночной Игры.
+ *
+ * ЗАЧЕМ ОТДЕЛЬНЫЙ ВЫЗОВ. Раньше вторая попытка была той же проверкой
+ * перевода: игрок, уже прочитавший разбор, повторял по нему исправленную
+ * фразу — и оценивался за то, что ему только что показали. Проверялась
+ * память, а не язык. Теперь перевод оценивается один раз, по первой
+ * попытке, а вторая слушает только звук.
+ *
+ * МОДЕЛЬ ЗДЕСЬ НЕ РАСШИФРОВЫВАЕТ РЕЧЬ. Расшифровка — это как раз тот шаг,
+ * на котором произношение теряется: распознаватель пишет слово правильно,
+ * даже когда оно сказано неверно. Поэтому в ответе нет ни "heard", ни
+ * "correct" — только список того, что прозвучало не так.
+ *
+ * Задание модель всё-таки получает: без него она не знает, КАКИЕ слова
+ * ожидались, и назвать неверно произнесённое слово ей нечем. Это не
+ * расшифровка — это словарь ожидаемого.
+ */
+export interface OmniPronunciationResult {
+  errors: OmniError[];
+  audible: boolean;
+  degraded: boolean;
+  failureReason?: string;
+  debug: Record<string, unknown>;
+}
+
+/**
+ * Балл за произношение считает программа: по баллу за каждую названную
+ * ошибку, ниже единицы не опускаемся.
+ *
+ * Та же арифметика, что и у перевода, и по той же причине: числовая
+ * оценка от модели на одной записи гуляла на два-три балла, а «минус балл
+ * за каждое слово» игрок может проверить сам.
+ */
+export function pronunciationScoreFor(errorCount: number): number {
+  return Math.max(1, Math.min(10, 10 - errorCount));
+}
+
+function pronunciationPrompt(nativeLanguage: string, targetLanguage: string, level: string): string {
+  const native = languageName(nativeLanguage);
+  const nativeSelf = languageEndonym(nativeLanguage);
+  const target = languageName(targetLanguage);
+  return [
+    `You are a ${target} pronunciation coach. A ${native}-speaking learner at CEFR level ${level} read a`,
+    `sentence aloud in ${target}. You get the recording and the sentence he was working from.`,
+    "",
+    "JUDGE THE SOUND AND NOTHING ELSE. Grammar, word choice and whether the translation is correct were",
+    "already judged by someone else — say nothing about them. Do not transcribe the recording, do not write",
+    "out what he said, do not repeat the sentence back. Listen to how it sounds.",
+    "",
+    "First say whether you can hear any speech at all: \"audible\": true or false. Answer false when the",
+    "recording is silent, noise only, or you received no audio — never guess in that case.",
+    "",
+    "List only what a native speaker would actually notice: a wrong vowel or consonant, a sound left out or",
+    "added, stress on the wrong syllable, a word run together so it stops being that word. One entry per word.",
+    "",
+    "AN ACCENT IS NOT AN ERROR. A learner who is clearly understandable has NO pronunciation errors, and the",
+    "honest answer is then an empty list. Do not invent something to say: an invented error costs him a point",
+    "and teaches him to fix what was never broken.",
+    "",
+    `LANGUAGE OF EXPLANATIONS: every "why" field must be written in ${native} (${nativeSelf}) and in no other`,
+    `language. The learner reads only ${nativeSelf}. The word itself and the hint stay in ${target}.`,
+    `Explain at ${level} level: what sound came out, what sound was needed, in plain words.`,
+    "",
+    "Reply with a single JSON object and nothing else — no markdown, no commentary:",
+    '{"audible": boolean, "errors": [{"said": string, "why": string, "fix": string}]}',
+    `"said" — the word he was trying to say, spelled normally in ${target}.`,
+    '"why" — what sound came out and what was needed, about THIS word in THIS recording, never as a general',
+    "rule about the language.",
+    `"fix" — how that word should sound, written so the learner can read it aloud in ${target}.`,
+    "An empty list is a normal answer, not a failure: it means he was understandable.",
+  ].join("\n");
+}
+
+/**
+ * Один вызов модели ради произношения. НИКОГДА НЕ БРОСАЕТ — по той же
+ * причине, что и omniEvaluate: задача обязана получить конечный статус.
+ */
+export async function omniPronounce(req: OmniRequest): Promise<OmniPronunciationResult> {
+  const started = Date.now();
+  const fail = (
+    reason: string,
+    extra: Record<string, unknown> = {},
+  ): OmniPronunciationResult => ({
+    errors: [],
+    audible: false,
+    degraded: true,
+    failureReason: reason,
+    debug: {
+      ...omniConfigDebug(),
+      mode: "pronunciation",
+      status: "failed",
+      reason,
+      ms: Date.now() - started,
+      ...extra,
+    },
+  });
+
+  if (req.audio.byteLength === 0) return fail("запись пуста");
+
+  const answer = await requestOmni(
+    pronunciationPrompt(req.nativeLanguage, req.targetLanguage, req.level),
+    [
+      audioPart(req.audio, req.audioFormat),
+      {
+        type: "text",
+        text: `He was working from this sentence:\n${req.prompt}`,
+      },
+    ],
+    req.budgetMs,
+  );
+  if ("error" in answer) return fail(answer.error);
+  const raw = answer.raw;
+  if (raw.trim().length === 0) return fail("модель вернула пустой ответ");
+
+  const parsed = parseJson(raw);
+  if (!parsed) return fail(`ответ не разобран как JSON: ${raw.slice(0, 300)}`);
+
+  // Та же защита от «аудио не доехало», что и в разборе перевода: модель
+  // без записи охотно рассказывает, как надо произносить, и на вид это
+  // неотличимо от настоящей проверки.
+  if (parsed.audible === false) {
+    return fail("модель не слышит речи в записи (audible=false)", { raw: raw.slice(0, 400) });
+  }
+
+  const errors = asErrors(parsed.errors);
+  return {
+    errors,
+    audible: true,
+    degraded: false,
+    debug: {
+      ...omniConfigDebug(),
+      mode: "pronunciation",
+      status: "ok",
+      ms: Date.now() - started,
+      audio_bytes: req.audio.byteLength,
+      audio_format: req.audioFormat,
+      errors: errors.length,
+      errors_raw: Array.isArray(parsed.errors) ? parsed.errors.length : 0,
+      raw: raw.slice(0, 2000),
+    },
+  };
 }

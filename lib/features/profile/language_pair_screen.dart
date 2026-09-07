@@ -113,10 +113,30 @@ class _LanguagePairScreenState extends State<LanguagePairScreen> {
       if (!mounted) return;
       if (context.canPop()) context.pop();
     } catch (e) {
-      if (mounted) setState(() => _error = 'Не удалось добавить пару: $e');
+      if (mounted) setState(() => _error = _reasonFor(e));
     } finally {
       if (mounted) setState(() => _saving = false);
     }
+  }
+
+  /// Человеческая причина отказа вместо сырого текста исключения.
+  ///
+  /// ЕДИНСТВЕННЫЙ ЗАПРЕТ НА ИЗУЧАЕМЫЙ ЯЗЫК — совпадение с родным ЭТОЙ ЖЕ
+  /// пары. Язык, который стоит у игрока в родных, изучаемым в другой паре
+  /// быть может: полиглот с русским и английским в родных вправе учить
+  /// английский от русского. Запрещено только ru-ru.
+  static String _reasonFor(Object e) {
+    final text = e.toString();
+    if (text.contains('target_equals_native')) {
+      return 'Нельзя учить язык у самого себя — выбери другой изучаемый '
+          'или другой родной.';
+    }
+    if (text.contains('pair_already_exists')) return 'Такая пара уже есть.';
+    if (text.contains('pair_limit_reached')) return 'Больше четырёх пар не бывает.';
+    if (text.contains('native_not_registered')) {
+      return 'Этот родной язык ещё не добавлен в настройках.';
+    }
+    return 'Не удалось добавить пару: $e';
   }
 
   @override

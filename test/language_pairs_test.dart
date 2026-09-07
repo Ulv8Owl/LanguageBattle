@@ -104,4 +104,22 @@ void main() {
     expect(read('lib/features/profile/profile_screen.dart'),
         contains("isFilter('hidden_at', null)"));
   });
+
+  test('изучаемым может быть язык, который стоит в родных', () {
+    // Запрет ровно один: язык нельзя учить у самого себя (ru-ru). Полиглот
+    // с русским и английским в родных вправе учить английский от русского
+    // — иначе второй родной язык отбирал бы у него целую пару.
+    final sql = migration();
+    expect(sql, contains('if p_target_language = v_native then'));
+    expect(sql, contains("raise exception 'target_equals_native'"));
+    // Проверка идёт против родного ЭТОЙ пары, а не против списка родных.
+    expect(sql.contains('user_native_languages where user_id = v_uid and language_code = p_target_language'),
+        isFalse);
+
+    // Клиент фильтрует так же: убирает только выбранный родной.
+    final pairScreen = read('lib/features/profile/language_pair_screen.dart');
+    expect(pairScreen, contains("ready.where((l) => l != native && !usedPairs.contains('\$native-\$l'))"));
+    // И объясняет отказ словами, а не текстом исключения.
+    expect(pairScreen, contains("text.contains('target_equals_native')"));
+  });
 }
