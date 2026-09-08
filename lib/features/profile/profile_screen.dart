@@ -8,6 +8,8 @@ import '../../core/supabase_client.dart';
 import '../../core/theme.dart';
 import '../../data/native_languages.dart';
 import '../../data/player_rating.dart';
+import '../../data/avatar_parts.dart';
+import '../../widgets/avatar_portrait.dart';
 import '../../widgets/chrolingo_widgets.dart';
 import '../../widgets/trial_countdown_banner.dart';
 
@@ -328,7 +330,16 @@ class _ProfileScreenState extends State<ProfileScreen> {
         children: [
           Row(
             children: [
-              ChAvatar(name: username, size: 58, ringColor: league.color),
+              // Аватар — он же кнопка редактора. Отдельной иконки для
+              // этого больше нет: собранный портрет и есть то, на что
+              // хочется нажать, а иконка рядом только спрашивала «а это
+              // тогда что?».
+              AvatarButton(
+                name: username,
+                avatar: avatarFromJson(_profile?['equipped_avatar']),
+                ringColor: league.color,
+                onDone: _load,
+              ),
               const SizedBox(width: 12),
               Expanded(
                 child: Column(
@@ -349,17 +360,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   ],
                 ),
               ),
-              // Профиль — единственная точка входа в редактор аватара и в
-              // Настройки (раздел 5.1, п.7): отдельного пункта нижней
-              // навигации для настроек нет.
-              IconButton(
-                tooltip: 'Редактор аватара',
-                onPressed: () async {
-                  await context.push('/avatar');
-                  if (mounted) _load();
-                },
-                icon: const Icon(Icons.face_retouching_natural, size: 22, color: AppColors.gold),
-              ),
+              // Настройки открываются отсюда: отдельного пункта нижней
+              // навигации для них нет (раздел 5.1, п.7).
               IconButton(
                 tooltip: 'Настройки',
                 onPressed: () => context.push('/settings'),

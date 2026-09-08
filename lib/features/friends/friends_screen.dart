@@ -6,6 +6,7 @@ import '../../core/supabase_client.dart';
 import '../../core/all_languages.dart';
 import '../../core/theme.dart';
 import '../../data/player_rating.dart';
+import '../../data/avatar_parts.dart';
 import '../../widgets/chrolingo_widgets.dart';
 
 /// Флаг по коду языка. Отдельного поля "страна" в схеме нет (раздел 4),
@@ -19,11 +20,15 @@ class PlayerRef {
   final String? nativeLanguage;
   final PlayerRating rating;
 
+  /// Собранный игроком аватар. Пусто — покажем инициал, как раньше.
+  final Map<String, String> avatar;
+
   const PlayerRef({
     required this.id,
     required this.username,
     required this.nativeLanguage,
     required this.rating,
+    this.avatar = const {},
   });
 
   String get flag => languageFlag(nativeLanguage);
@@ -33,7 +38,10 @@ class PlayerRef {
 Future<Map<String, PlayerRef>> loadPlayers(Iterable<String> ids) async {
   final list = ids.toSet().toList();
   if (list.isEmpty) return {};
-  final users = await supabase.from('users').select('id, username, native_language').inFilter('id', list);
+  final users = await supabase
+      .from('users')
+      .select('id, username, native_language, equipped_avatar')
+      .inFilter('id', list);
   final langs = await supabase
       .from('user_languages')
       .select('user_id, ${PlayerRating.columns}')
@@ -51,6 +59,7 @@ Future<Map<String, PlayerRef>> loadPlayers(Iterable<String> ids) async {
         username: (row['username'] as String?) ?? 'Игрок',
         nativeLanguage: row['native_language'] as String?,
         rating: ratingById[row['id'] as String] ?? PlayerRating.newcomer,
+        avatar: avatarFromJson(row['equipped_avatar']),
       ),
   };
 }
@@ -326,7 +335,8 @@ class _PartyPanel extends StatelessWidget {
                     padding: const EdgeInsets.only(right: 10),
                     child: Column(
                       children: [
-                        ChAvatar(name: m.username, size: 40, ringColor: AppColors.gold),
+                        ChAvatar(
+                            name: m.username, avatar: m.avatar, size: 40, ringColor: AppColors.gold),
                         const SizedBox(height: 4),
                         SizedBox(
                           width: 54,
@@ -381,7 +391,8 @@ class _InviteCard extends StatelessWidget {
       padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 10),
       child: Row(
         children: [
-          ChAvatar(name: name, size: 34, ringColor: AppColors.gold),
+          ChAvatar(
+              name: name, avatar: inviter?.avatar ?? const {}, size: 34, ringColor: AppColors.gold),
           const SizedBox(width: 10),
           Expanded(
             child: Column(
@@ -432,7 +443,11 @@ class PlayerRow extends StatelessWidget {
       child: Row(
         children: [
           if (leading != null) ...[leading!, const SizedBox(width: 6)],
-          ChAvatar(name: player.username, size: 32, ringColor: accent ?? AppColors.lineStrong),
+          ChAvatar(
+              name: player.username,
+              avatar: player.avatar,
+              size: 32,
+              ringColor: accent ?? AppColors.lineStrong),
           const SizedBox(width: 10),
           Expanded(
             child: Row(
@@ -486,7 +501,7 @@ class _LeaderboardTabState extends State<_LeaderboardTab> {
     try {
       final rows = await supabase
           .from('user_languages')
-          .select('${PlayerRating.columns}, users(id, username, native_language)')
+          .select('${PlayerRating.columns}, users(id, username, native_language, equipped_avatar)')
           .eq('role', 'learning')
           .eq('is_active', true)
           // Таблица лидеров идёт по league_rating (rating - 2*RD) — так
@@ -503,6 +518,7 @@ class _LeaderboardTabState extends State<_LeaderboardTab> {
           username: (user['username'] as String?) ?? 'Игрок',
           nativeLanguage: user['native_language'] as String?,
           rating: PlayerRating.fromRow(Map<String, dynamic>.from(row)),
+          avatar: avatarFromJson(user['equipped_avatar']),
         ));
       }
       if (!mounted) return;

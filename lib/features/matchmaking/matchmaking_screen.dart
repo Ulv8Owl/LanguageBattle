@@ -7,6 +7,7 @@ import '../../core/game_access.dart';
 import '../../core/supabase_client.dart';
 import '../../core/theme.dart';
 import '../../data/phrase_bank.dart';
+import '../../data/avatar_parts.dart';
 import '../../data/player_rating.dart';
 import '../battle/battle_models.dart';
 import '../../widgets/chrolingo_widgets.dart';
@@ -50,6 +51,7 @@ class _MatchmakingScreenState extends State<MatchmakingScreen> {
   String? _ticketId;
   String? _matchId;
   String _opponentName = 'Соперник';
+  Map<String, String> _opponentAvatar = const {};
   PlayerRating _opponentRating = PlayerRating.newcomer;
   String? _error;
   bool _accepting = false;
@@ -283,10 +285,11 @@ class _MatchmakingScreenState extends State<MatchmakingScreen> {
       if (opponentId != null) {
         final opp = await supabase
             .from('users')
-            .select('username')
+            .select('username, equipped_avatar')
             .eq('id', opponentId)
             .maybeSingle();
         _opponentName = (opp?['username'] as String?) ?? 'Соперник';
+        _opponentAvatar = avatarFromJson(opp?['equipped_avatar']);
         // Рейтинг соперника ИМЕННО для языка этого матча — у игрока может быть
         // до 4 языковых пар с разным рейтингом, а нас интересует не то,
         // что у него сейчас "активно", а тот конкретный язык, на котором
@@ -485,7 +488,11 @@ class _MatchmakingScreenState extends State<MatchmakingScreen> {
           padding: const EdgeInsets.symmetric(vertical: 18, horizontal: 16),
           child: Row(
             children: [
-              ChAvatar(name: _opponentName, size: 48, ringColor: AppColors.gold),
+              ChAvatar(
+                  name: _opponentName,
+                  avatar: _opponentAvatar,
+                  size: 48,
+                  ringColor: AppColors.gold),
               const SizedBox(width: 14),
               Expanded(
                 child: Column(

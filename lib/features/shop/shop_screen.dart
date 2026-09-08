@@ -33,9 +33,16 @@ class _ShopScreenState extends State<ShopScreen> {
   bool _activating = false;
   int? _buyingWordPack;
 
-  /// Фильтр по категориям: Рамки / Эмоции / Аватар.
-  static const _categories = ['Рамки', 'Эмоции', 'Аватар'];
-  static const _categoryTypes = ['profile_frame', 'emote', 'avatar_skin'];
+  /// Фильтр по категориям: Рамки / Эмоции.
+  ///
+  /// ВКЛАДКИ «АВАТАР» ЗДЕСЬ БОЛЬШЕ НЕТ. Части аватара собираются из
+  /// спрайтов в редакторе и бесплатны все до одной (lib/data/avatar_parts.dart),
+  /// а лежавшие в каталоге avatar_skin — причёски и уши — рисунка под собой
+  /// не имели никогда: купив такую, игрок не увидел бы ничего. Продавать
+  /// это стало прямым обманом в тот момент, когда у аватара появился
+  /// настоящий вид. Платные части начнутся с рисунков, а не с прайса.
+  static const _categories = ['Рамки', 'Эмоции'];
+  static const _categoryTypes = ['profile_frame', 'emote'];
 
   @override
   void initState() {
@@ -437,8 +444,6 @@ class _ShopScreenState extends State<ShopScreen> {
     switch (type) {
       case 'emote':
         return Icons.emoji_emotions;
-      case 'avatar_skin':
-        return Icons.face_retouching_natural;
       default:
         return Icons.circle_outlined;
     }

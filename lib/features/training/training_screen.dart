@@ -10,6 +10,7 @@ import '../../core/game_access.dart';
 import '../../core/languages.dart';
 import '../../core/supabase_client.dart';
 import '../../core/theme.dart';
+import '../../data/avatar_parts.dart';
 import '../../data/phrase_bank.dart';
 import '../../widgets/interactive_phrase.dart';
 import '../../data/player_rating.dart';
@@ -166,6 +167,9 @@ class _TrainingScreenState extends State<TrainingScreen> {
 
   String _myName = 'Ты';
 
+  /// Свой аватар — он же аватарка над каждым своим голосовым в ленте.
+  Map<String, String> _myAvatar = const {};
+
   /// Балл за раунд. Попытка одна, и он окончательный.
   int? _score;
 
@@ -247,13 +251,14 @@ class _TrainingScreenState extends State<TrainingScreen> {
 
       final me = await supabase
           .from('users')
-          .select('username, native_language')
+          .select('username, native_language, equipped_avatar')
           .eq('id', _myId)
           .maybeSingle();
       // native_for — родной язык ИМЕННО этой пары (миграция 0025): у
       // полиглота она может быть anchored не на главном родном из профиля.
       _nativeLanguage = (learning?['native_for'] as String?) ?? (me?['native_language'] as String?) ?? 'ru';
       _myName = (me?['username'] as String?) ?? 'Ты';
+      _myAvatar = avatarFromJson(me?['equipped_avatar']);
 
       await PhraseBank.loadLevel(level);
       // Фразы есть, только если уровень переведён на ОБА языка пары — а
@@ -889,6 +894,7 @@ class _TrainingScreenState extends State<TrainingScreen> {
         key: ValueKey(storagePath),
         audioStoragePath: storagePath,
         name: _myName,
+        avatar: _myAvatar,
         alignRight: true,
         score: score,
       ),

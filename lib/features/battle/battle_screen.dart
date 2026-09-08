@@ -7,6 +7,7 @@ import '../../core/languages.dart';
 import '../../core/stream_rows.dart';
 import '../../core/supabase_client.dart';
 import '../../core/theme.dart';
+import '../../data/avatar_parts.dart';
 import '../../data/phrase_bank.dart';
 import '../../data/player_rating.dart';
 import '../../data/voice_submission.dart';
@@ -57,6 +58,11 @@ class _BattleScreenState extends State<BattleScreen> {
   MatchData? _match;
   String _opponentName = '…';
   String _myName = 'Ты';
+
+  /// Собранные аватары обоих. Приходят вместе с именами: соперник в бою —
+  /// живой человек, и лицо у него должно быть его.
+  Map<String, String> _myAvatar = const {};
+  Map<String, String> _opponentAvatar = const {};
 
   /// Родной язык игрока — на нём показывается фраза раунда. Говорить нужно
   /// на изучаемом: задание в том, чтобы ПЕРЕВЕСТИ фразу вслух, а не
@@ -120,15 +126,21 @@ class _BattleScreenState extends State<BattleScreen> {
       _match = MatchData.fromRow(row);
       final opponentId = _match!.playerAId == _myId ? _match!.playerBId : _match!.playerAId;
       if (opponentId != null) {
-        final opp = await supabase.from('users').select('username').eq('id', opponentId).maybeSingle();
+        final opp = await supabase
+            .from('users')
+            .select('username, equipped_avatar')
+            .eq('id', opponentId)
+            .maybeSingle();
         _opponentName = (opp?['username'] as String?) ?? 'Соперник';
+        _opponentAvatar = avatarFromJson(opp?['equipped_avatar']);
       }
       final me = await supabase
           .from('users')
-          .select('username, native_language')
+          .select('username, native_language, equipped_avatar')
           .eq('id', _myId)
           .maybeSingle();
       _myName = (me?['username'] as String?) ?? 'Ты';
+      _myAvatar = avatarFromJson(me?['equipped_avatar']);
 
       final learning = await supabase
           .from('user_languages')
@@ -568,6 +580,8 @@ class _BattleScreenState extends State<BattleScreen> {
                 opponentWins: opponentWins,
                 myName: _myName,
                 opponentName: _opponentName,
+                myAvatar: _myAvatar,
+                opponentAvatar: _opponentAvatar,
                 myId: _myId,
                 opponentId: opponentId,
                 secondsLeft: _roundSecondsLeft,
@@ -714,6 +728,7 @@ class _BattleScreenState extends State<BattleScreen> {
           key: ValueKey(rec.id),
           audioStoragePath: rec.audioStoragePath,
           name: isMine ? _myName : _opponentName,
+          avatar: isMine ? _myAvatar : _opponentAvatar,
           // Свои сообщения справа, чужие слева — как в любом мессенджере.
           alignRight: isMine,
         ));
@@ -946,6 +961,8 @@ class _ScoreHeader extends StatelessWidget {
   final int opponentWins;
   final String myName;
   final String opponentName;
+  final Map<String, String> myAvatar;
+  final Map<String, String> opponentAvatar;
   final String myId;
   final String? opponentId;
   final int? secondsLeft;
@@ -955,6 +972,8 @@ class _ScoreHeader extends StatelessWidget {
     required this.opponentWins,
     required this.myName,
     required this.opponentName,
+    required this.myAvatar,
+    required this.opponentAvatar,
     required this.myId,
     required this.opponentId,
     required this.secondsLeft,
@@ -975,6 +994,7 @@ class _ScoreHeader extends StatelessWidget {
           Expanded(
             child: _PlayerSide(
               name: opponentName,
+              avatar: opponentAvatar,
               userId: opponentId,
               color: AppColors.cyan,
               isMe: false,
@@ -1009,6 +1029,7 @@ class _ScoreHeader extends StatelessWidget {
           Expanded(
             child: _PlayerSide(
               name: myName,
+              avatar: myAvatar,
               userId: myId,
               color: AppColors.gold,
               isMe: true,
@@ -1025,12 +1046,14 @@ class _ScoreHeader extends StatelessWidget {
 /// приглашение в друзья.
 class _PlayerSide extends StatelessWidget {
   final String name;
+  final Map<String, String> avatar;
   final String? userId;
   final Color color;
   final bool isMe;
 
   const _PlayerSide({
     required this.name,
+    required this.avatar,
     required this.userId,
     required this.color,
     required this.isMe,
@@ -1050,7 +1073,7 @@ class _PlayerSide extends StatelessWidget {
           // и ореол вокруг них размывал границу с сообщениями. У аватарок
           // в самой ленте свечение остаётся — там оно и различает своё
           // сообщение от чужого.
-          ChAvatar(name: name, size: 54, ringColor: color, glow: false),
+          ChAvatar(name: name, avatar: avatar, size: 54, ringColor: color, glow: false),
           const SizedBox(height: 5),
           Text(
             name,

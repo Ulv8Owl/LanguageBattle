@@ -9,6 +9,8 @@ import '../../core/nav_state.dart';
 import '../../core/supabase_client.dart';
 import '../../core/theme.dart';
 import '../../data/player_rating.dart';
+import '../../data/avatar_parts.dart';
+import '../../widgets/avatar_portrait.dart';
 import '../../widgets/chrolingo_widgets.dart';
 
 class ArenaScreen extends StatefulWidget {
@@ -338,10 +340,13 @@ class _ArenaScreenState extends State<ArenaScreen> {
         children: [
           Row(
             children: [
-              ChAvatar(
+              // Тот же размер, что и в Профиле: это одно и то же лицо, и
+              // разный размер читался бы как разные вещи.
+              AvatarButton(
                 name: (_profile?['username'] as String?) ?? '?',
-                size: 40,
+                avatar: avatarFromJson(_profile?['equipped_avatar']),
                 ringColor: league.color,
+                onDone: _load,
               ),
               const SizedBox(width: 10),
               Expanded(

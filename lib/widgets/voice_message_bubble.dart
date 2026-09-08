@@ -18,6 +18,9 @@ class VoiceMessageBubble extends StatefulWidget {
   final String audioStoragePath;
   final String name;
 
+  /// Аватар говорящего. Пусто — кружок с инициалом, как раньше.
+  final Map<String, String> avatar;
+
   /// true — голосовое соперника: пузырь уходит вправо и красится в другой
   /// акцент, как входящее сообщение.
   final bool alignRight;
@@ -34,6 +37,7 @@ class VoiceMessageBubble extends StatefulWidget {
     super.key,
     required this.audioStoragePath,
     required this.name,
+    this.avatar = const {},
     required this.alignRight,
     this.score,
   });
@@ -122,7 +126,11 @@ class _VoiceMessageBubbleState extends State<VoiceMessageBubble> {
       ),
     );
 
-    final avatar = ChAvatar(name: widget.name, size: avatarSize, ringColor: accent.withValues(alpha: 0.6));
+    final avatar = ChAvatar(
+        name: widget.name,
+        avatar: widget.avatar,
+        size: avatarSize,
+        ringColor: accent.withValues(alpha: 0.6));
 
     return Padding(
       // Одинаковый вертикальный ритм со всеми остальными сообщениями ленты:

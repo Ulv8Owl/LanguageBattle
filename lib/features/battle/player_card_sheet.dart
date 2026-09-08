@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../../core/all_languages.dart';
 import '../../core/supabase_client.dart';
 import '../../core/theme.dart';
+import '../../data/avatar_parts.dart';
 import '../../data/player_rating.dart';
 import '../../widgets/chrolingo_widgets.dart';
 
@@ -45,6 +46,7 @@ class _PlayerCardState extends State<_PlayerCard> {
   PlayerRating _rating = PlayerRating.newcomer;
   String _learning = '';
   String _native = '';
+  Map<String, String> _avatar = const {};
 
   /// Уже друзья или заявка отправлена — тогда кнопки приглашения нет.
   bool _friendshipExists = false;
@@ -60,7 +62,7 @@ class _PlayerCardState extends State<_PlayerCard> {
     try {
       final user = await supabase
           .from('users')
-          .select('native_language')
+          .select('native_language, equipped_avatar')
           .eq('id', widget.userId)
           .maybeSingle();
       final learning = await supabase
@@ -88,6 +90,7 @@ class _PlayerCardState extends State<_PlayerCard> {
       if (!mounted) return;
       setState(() {
         _native = (user?['native_language'] as String?) ?? '';
+        _avatar = avatarFromJson(user?['equipped_avatar']);
         _learning = (learning?['language_code'] as String?) ?? '';
         _rating = PlayerRating.fromRow(learning);
         _friendshipExists = exists;
@@ -150,7 +153,7 @@ class _PlayerCardState extends State<_PlayerCard> {
             const SizedBox(height: 18),
             // Аватарка крупно — «рассмотреть поближе» и есть одна из причин
             // сюда заходить.
-            ChAvatar(name: widget.name, size: 96, ringColor: league.color),
+            ChAvatar(name: widget.name, avatar: _avatar, size: 96, ringColor: league.color),
             const SizedBox(height: 12),
             Text(widget.name, style: AppFonts.ui(fontSize: 18, weight: FontWeight.w800, color: AppColors.cream)),
             const SizedBox(height: 16),

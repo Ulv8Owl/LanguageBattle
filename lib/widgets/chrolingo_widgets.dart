@@ -1,12 +1,11 @@
 import 'package:flutter/material.dart';
 
 import '../core/theme.dart';
+import '../data/avatar_parts.dart';
+import 'avatar_portrait.dart';
 
 /// Небольшая библиотека переиспользуемых виджетов Chrolingo, задающих общий
 /// язык макетов Chrolingo (.panel/.pill/.tabbar/.menu-row/...).
-/// Полноценный иллюстрированный аватар-конструктор из макета (экран 03) в
-/// это MVP не входит — вместо лицевых SVG используется простой круглый
-/// плейсхолдер с той же системой рамок/свечения по цвету лиги/редкости.
 
 class ChPanel extends StatelessWidget {
   final Widget child;
@@ -194,10 +193,22 @@ class ChModeIcon extends StatelessWidget {
   }
 }
 
-/// Плейсхолдер аватара — цветной круг с инициалом вместо иллюстрированного
-/// лица из макета (свой конструктор лиц — отдельная задача, не в этом MVP).
+/// Кружок игрока: собранный портрет, а если его нет — инициал имени.
+///
+/// ОДИН ВИДЖЕТ НА ВСЮ ИГРУ. Кружок с буквой стоял в восьми местах, и когда
+/// появились спрайты, подставлять портрет пришлось бы в каждом из них по
+/// отдельности — а забытое место так и осталось бы с буквой навсегда.
+///
+/// Портрет приходит [avatar]-ом: слот -> вариант, как он лежит в
+/// users.equipped_avatar. Пустая карта означает «игрок ещё не собирал
+/// аватар», и тогда показывается прежняя заглушка с инициалом — это честно,
+/// а выдуманное за игрока лицо не было бы.
 class ChAvatar extends StatelessWidget {
   final String name;
+
+  /// Выбранные части. Пусто — рисуем инициал.
+  final Map<String, String> avatar;
+
   final double size;
   final Color ringColor;
   final bool online;
@@ -209,6 +220,7 @@ class ChAvatar extends StatelessWidget {
   const ChAvatar({
     super.key,
     required this.name,
+    this.avatar = const {},
     this.size = 40,
     this.ringColor = AppColors.lineStrong,
     this.online = false,
@@ -233,12 +245,16 @@ class ChAvatar extends StatelessWidget {
                   : null,
               border: Border.all(color: ringColor, width: 2),
             ),
-            child: Center(
-              child: Text(
-                initial,
-                style: AppFonts.ui(fontSize: size * 0.4, weight: FontWeight.w800, color: AppColors.cream),
-              ),
-            ),
+            clipBehavior: Clip.antiAlias,
+            child: hasAvatar(avatar)
+                ? AvatarPortrait(avatar: avatar)
+                : Center(
+                    child: Text(
+                      initial,
+                      style: AppFonts.ui(
+                          fontSize: size * 0.4, weight: FontWeight.w800, color: AppColors.cream),
+                    ),
+                  ),
           ),
           if (online)
             Positioned(
