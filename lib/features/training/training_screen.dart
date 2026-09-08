@@ -33,6 +33,15 @@ const _roundsPerSession = 5;
 /// он проверяет ровно так же (балл судьи 1..10 за раунд).
 const _roundsPerPlacement = 1;
 
+/// Что показать, когда модель не ответила.
+///
+/// БАЛЛА В ЭТОМ СЛУЧАЕ НЕТ ВОВСЕ. Раньше ставились нейтральные семь, и
+/// игрок получал за наш сбой оценку выше половины — по экрану неотличимую
+/// от настоящей. Любое число здесь выдумка, поэтому вместо оценки прямая
+/// просьба ответить ещё раз: раунд не оценён, микрофон возвращается,
+/// энергия за неответ не списывается.
+const _judgeSilentNote = 'Модель не ответила. Попробуй ещё раз или зайди позже.';
+
 enum _Stage {
   starting,
   /// Ждём ответ игрока.
@@ -510,6 +519,23 @@ class _TrainingScreenState extends State<TrainingScreen> {
           .eq('id', roundId)
           .maybeSingle();
 
+      final score = scored?['final_score'] as int?;
+
+      // БАЛЛА НЕТ — значит модель не ответила, и раунд не оценён. Ставить
+      // за наш сбой нейтральные семь мы перестали: игрок получал оценку
+      // выше половины, по экрану неотличимую от настоящей. Вместо неё —
+      // прямая просьба ответить ещё раз, и микрофон возвращается.
+      if (score == null) {
+        if (!mounted) return;
+        setState(() {
+          _attempt = outcome.withClientFailure(_judgeSilentNote);
+          _errors = const [];
+          _stage = _Stage.awaitingAnswer;
+        });
+        _scrollToBottomSoon();
+        return;
+      }
+
       final coins = await _claimReward(roundId);
       // Удаление аудио отложено до конца сессии: пока игрок в ней, он
       // должен иметь возможность переслушать свои голосовые прямо в ленте.
@@ -520,9 +546,7 @@ class _TrainingScreenState extends State<TrainingScreen> {
 
       if (!mounted) return;
       setState(() {
-        // Балла может и не быть: воркер до него не дошёл. Нейтральный
-        // здесь честнее нуля — мы не знаем, как игрок ответил.
-        _score = (scored?['final_score'] as int?) ?? _neutralScore;
+        _score = score;
         _errors = List<Map<String, dynamic>>.from(errors);
         _earnedCoins = coins;
         // Задача упала целиком — но всё, что сервер успел записать до
@@ -561,7 +585,7 @@ class _TrainingScreenState extends State<TrainingScreen> {
   }
 
   /// Результат так и не пришёл. Освобождаем зависшую задачу на сервере и
-  /// закрываем раунд нейтральным баллом: сбой не вина игрока.
+  /// возвращаем микрофон: балл за наш сбой не ставится вовсе.
   Future<void> _giveUpOnRound(String recordingId) async {
     _jobSub?.cancel();
     final outcome = await _outcomeSoFar(recordingId);
@@ -572,12 +596,9 @@ class _TrainingScreenState extends State<TrainingScreen> {
     });
     if (!mounted) return;
     setState(() {
-      _attempt = outcome.withClientFailure(
-        'Результат не пришёл за ${_resultTimeout.inMinutes} мин. $job',
-      );
-      _score = _neutralScore;
-      _earnedCoins = null;
-      _stage = _Stage.roundDone;
+      _attempt = outcome.withClientFailure('$_judgeSilentNote $job');
+      _errors = const [];
+      _stage = _Stage.awaitingAnswer;
     });
     _scrollToBottomSoon();
   }
@@ -616,10 +637,6 @@ class _TrainingScreenState extends State<TrainingScreen> {
     }
     return null;
   }
-
-  /// Тот же нейтральный балл, что ставит сервер при сбое на своей стороне
-  /// (NEUTRAL_SCORE в supabase/functions/_shared/evaluateGrammar.ts).
-  static const _neutralScore = 7;
 
   /// Раунды сессии, аудио которых нужно удалить при выходе с экрана.
   final Set<String> _playedRoundIds = {};
@@ -933,6 +950,20 @@ class _TrainingScreenState extends State<TrainingScreen> {
     ));
 
     switch (_stage) {
+      // Ждём ответ — но если предыдущий не разобрали, на экране должны
+      // остаться и голосовое, и объяснение, почему просим сказать снова.
+      case _Stage.awaitingAnswer:
+        if (_attempt == null) break;
+        items.addAll(_voiceBubble(_attemptAudio));
+        items.add(_ErrorReport(
+            errors: const [],
+            attempt: _attempt,
+            phraseIndex: _phraseIndex,
+            targetLanguage: _targetLanguage,
+            nativeLanguage: _nativeLanguage,
+            isExam: widget.isPlacement));
+        items.addAll(_debugPanels('Раунд $_roundNumber', _attempt));
+        break;
       case _Stage.grading:
         items.addAll(_voiceBubble(_attemptAudio));
         // Два этапа, а не один: сперва сервер распознаёт речь, потом
@@ -1212,7 +1243,7 @@ class _ErrorReport extends StatelessWidget {
       // Порядок важен: результата не было вовсе — это НЕ «речь не
       // распознана». Отправлять игрока чинить микрофон там, где до
       // микрофона дело не дошло, значит увести его от настоящей причины.
-      _ when clientFailure != null => ('РЕЗУЛЬТАТ НЕ ПРИШЁЛ', AppColors.danger),
+      _ when clientFailure != null => ('МОДЕЛЬ НЕ ОТВЕТИЛА', AppColors.danger),
       TranscriptStatus.failed => ('РЕЧЬ НЕ РАСПОЗНАНА', AppColors.muted),
       TranscriptStatus.empty => ('РЕЧИ НЕ РАЗОБРАТЬ', AppColors.danger),
       _ when judgeBroken && (attempt?.judgeHitProviderLimit ?? false) =>
@@ -1227,9 +1258,9 @@ class _ErrorReport extends StatelessWidget {
     };
 
     final String hint = switch (status) {
-      _ when clientFailure != null =>
-        'Сервер не ответил, разбора поэтому нет — это сбой на нашей стороне, '
-            'а не признак того, что ошибок не было. Балл не снижается.\n$clientFailure',
+      // Текст причины приходит в clientFailure целиком: это и есть
+      // сообщение игроку, а не техническая приписка к нему.
+      _ when clientFailure != null => clientFailure,
       TranscriptStatus.failed =>
         'Не удалось распознать речь — это сбой на нашей стороне, балл за него не снижается. Попробуй сказать фразу ещё раз.',
       TranscriptStatus.empty =>

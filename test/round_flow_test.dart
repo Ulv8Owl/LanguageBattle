@@ -154,6 +154,35 @@ void main() {
     });
   });
 
+  group('модель не ответила — балла нет вовсе', () {
+    test('соло не получает балл за наш сбой', () {
+      // Раньше сюда уходили нейтральные семь, и игрок получал за сбой
+      // оценку выше половины — по экрану неотличимую от настоящей.
+      expect(worker(), contains('recording.training_round_id && !omni.degraded'));
+    });
+
+    test('экран просит ответить ещё раз и возвращает микрофон', () {
+      final s = screen();
+      expect(s, contains("const _judgeSilentNote = 'Модель не ответила. Попробуй ещё раз или зайди позже.';"));
+      // Пустой final_score читается как «оцени заново».
+      expect(s, contains('if (score == null) {'));
+      expect(s, contains('_stage = _Stage.awaitingAnswer;'));
+      expect(s, contains("_ when clientFailure != null => ('МОДЕЛЬ НЕ ОТВЕТИЛА', AppColors.danger)"));
+      // Нейтрального балла в соло не осталось ни в одном исходе.
+      expect(s.contains('_neutralScore'), isFalse);
+    });
+
+    test('в бою балл остаётся нейтральным — иначе раунд не сдвинется', () {
+      // Там раунд ждёт оценки обоих, и соперник ждал бы нашего сбоя.
+      final s = worker();
+      expect(s, contains('score = NEUTRAL_SCORE;'));
+      expect(s, contains('.from("round_scores").upsert('));
+      // И игрок видит, почему разбора нет, а не голый балл.
+      expect(read('lib/features/battle/battle_screen.dart'),
+          contains('Модель не ответила — балл нейтральный, не в минус тебе'));
+    });
+  });
+
   group('невнятная запись — ноль, а не нейтральные семь', () {
     test('«речи не слышу» отделено от «модель не ответила»', () {
       final s = judge();

@@ -921,6 +921,13 @@ class _AiVerdict extends StatelessWidget {
                           spans: recording.reviewSpans,
                           mistakes: mistakesFrom(errors),
                           targetLanguage: targetLanguage,
+                          // В бою разбор пустым не оставляем: молчащий
+                          // судья и невнятная запись выглядели бы одинаково
+                          // — просто баллом без единого слова.
+                          emptyHint: recording.judgeStatus == JudgeStatus.degraded
+                              ? 'Модель не ответила — балл нейтральный, не в минус тебе. '
+                                  'Раунд боя из-за нашего сбоя не переигрывается.'
+                              : 'В записи не разобрать речи — разбирать было нечего.',
                         ),
                       ],
                     ),
