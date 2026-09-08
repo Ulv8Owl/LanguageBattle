@@ -42,6 +42,16 @@ const _roundsPerPlacement = 1;
 /// энергия за неответ не списывается.
 const _judgeSilentNote = 'Модель не ответила. Попробуй ещё раз или зайди позже.';
 
+/// То же самое, когда речи в записи не разобрать.
+///
+/// Механика одна: балла нет, раунд отвечается заново. Текст свой — причина
+/// другая, и «модель не ответила» здесь было бы неправдой: она ответила,
+/// просто разбирать оказалось нечего. Ноль тут был не лучше семи: он
+/// закрывал раунд оценкой за то, чего никто не слышал.
+const _speechUnclearNote =
+    'В записи не разобрать речи. Скажи фразу ещё раз — чётче и ближе к '
+    'микрофону, удерживая кнопку всё время, пока говоришь.';
+
 enum _Stage {
   starting,
   /// Ждём ответ игрока.
@@ -521,14 +531,19 @@ class _TrainingScreenState extends State<TrainingScreen> {
 
       final score = scored?['final_score'] as int?;
 
-      // БАЛЛА НЕТ — значит модель не ответила, и раунд не оценён. Ставить
-      // за наш сбой нейтральные семь мы перестали: игрок получал оценку
-      // выше половины, по экрану неотличимую от настоящей. Вместо неё —
-      // прямая просьба ответить ещё раз, и микрофон возвращается.
+      // БАЛЛА НЕТ — значит разбирать было нечего: модель либо не
+      // ответила, либо не нашла в записи речи. Ставить за это число мы
+      // перестали: и семь, и ноль закрывали раунд оценкой за то, чего
+      // никто не слышал. Вместо неё — прямая просьба ответить ещё раз, и
+      // микрофон возвращается.
       if (score == null) {
         if (!mounted) return;
         setState(() {
-          _attempt = outcome.withClientFailure(_judgeSilentNote);
+          _attempt = outcome.withClientFailure(
+            outcome.status == TranscriptStatus.empty
+                ? _speechUnclearNote
+                : _judgeSilentNote,
+          );
           _errors = const [];
           _stage = _Stage.awaitingAnswer;
         });
@@ -1243,9 +1258,12 @@ class _ErrorReport extends StatelessWidget {
       // Порядок важен: результата не было вовсе — это НЕ «речь не
       // распознана». Отправлять игрока чинить микрофон там, где до
       // микрофона дело не дошло, значит увести его от настоящей причины.
+      // Порядок важен: «речи не разобрать» — это ответ модели, а
+      // «модель не ответила» — её молчание. Оба закрывают раунд без
+      // балла, но игроку они говорят разное, и путать их нельзя.
+      TranscriptStatus.empty => ('РЕЧИ НЕ РАЗОБРАТЬ', AppColors.danger),
       _ when clientFailure != null => ('МОДЕЛЬ НЕ ОТВЕТИЛА', AppColors.danger),
       TranscriptStatus.failed => ('РЕЧЬ НЕ РАСПОЗНАНА', AppColors.muted),
-      TranscriptStatus.empty => ('РЕЧИ НЕ РАЗОБРАТЬ', AppColors.danger),
       _ when judgeBroken && (attempt?.judgeHitProviderLimit ?? false) =>
         ('ЛИМИТ ПРОВАЙДЕРА ИИ', AppColors.danger),
       _ when judgeBroken => ('РАЗБОР НЕ ПОЛУЧЕН', AppColors.muted),
@@ -1258,14 +1276,12 @@ class _ErrorReport extends StatelessWidget {
     };
 
     final String hint = switch (status) {
+      TranscriptStatus.empty => _speechUnclearNote,
       // Текст причины приходит в clientFailure целиком: это и есть
       // сообщение игроку, а не техническая приписка к нему.
       _ when clientFailure != null => clientFailure,
       TranscriptStatus.failed =>
         'Не удалось распознать речь — это сбой на нашей стороне, балл за него не снижается. Попробуй сказать фразу ещё раз.',
-      TranscriptStatus.empty =>
-        'В записи не разобрать речи — разбирать было нечего, поэтому и балл нулевой. '
-            'Говори чётче и ближе к микрофону, удерживая кнопку всё время, пока говоришь.',
       _ when judgeBroken && (attempt?.judgeHitProviderLimit ?? false) =>
         'У провайдера ИИ закончился дневной лимит — он отказывается отвечать. Разбора поэтому нет, '
             'и это не признак того, что ошибок не было. Балл не снижается. Лимит снимается на стороне провайдера.',
@@ -1378,30 +1394,11 @@ class _ScoreCard extends StatelessWidget {
                       style: const TextStyle(color: AppColors.muted, fontSize: 11),
                     ),
                   ],
-                  if (attempt?.judgeStatus == JudgeStatus.degraded)
-                    const Padding(
-                      padding: EdgeInsets.only(top: 4),
-                      child: Text(
-                        'ИИ-судья не ответил — балл нейтральный, не в минус тебе',
-                        style: TextStyle(color: AppColors.muted, fontSize: 11, height: 1.3),
-                      ),
-                    )
-                  else if (attempt?.status == TranscriptStatus.failed)
-                    const Padding(
-                      padding: EdgeInsets.only(top: 4),
-                      child: Text(
-                        'Речь распознать не удалось — балл нейтральный, не в минус тебе',
-                        style: TextStyle(color: AppColors.muted, fontSize: 11, height: 1.3),
-                      ),
-                    )
-                  else if (attempt?.status == TranscriptStatus.empty)
-                    const Padding(
-                      padding: EdgeInsets.only(top: 4),
-                      child: Text(
-                        'В записи не разобрать речи — оценивать было нечего',
-                        style: TextStyle(color: AppColors.muted, fontSize: 11, height: 1.3),
-                      ),
-                    ),
+                  // Оговорок про нейтральный балл здесь больше нет, и это
+                  // не упущение: карточка показывается ТОЛЬКО когда балл
+                  // настоящий. Если разбирать было нечего — модель молчит
+                  // или речи в записи нет, — раунд не закрывается вовсе, а
+                  // игрок отвечает заново (см. _judgeSilentNote).
                 ],
               ),
             ),

@@ -154,22 +154,33 @@ void main() {
     });
   });
 
-  group('модель не ответила — балла нет вовсе', () {
-    test('соло не получает балл за наш сбой', () {
-      // Раньше сюда уходили нейтральные семь, и игрок получал за сбой
-      // оценку выше половины — по экрану неотличимую от настоящей.
-      expect(worker(), contains('recording.training_round_id && !omni.degraded'));
+  group('разбирать нечего — балла нет вовсе', () {
+    test('соло не получает балл ни за молчание модели, ни за невнятную речь', () {
+      // Раньше это были нейтральные семь и ноль. Оба числа закрывали
+      // раунд оценкой за то, чего никто не слышал.
+      expect(worker(),
+          contains('recording.training_round_id && !omni.degraded && !omni.silent'));
     });
 
     test('экран просит ответить ещё раз и возвращает микрофон', () {
       final s = screen();
       expect(s, contains("const _judgeSilentNote = 'Модель не ответила. Попробуй ещё раз или зайди позже.';"));
+      expect(s, contains('const _speechUnclearNote ='));
       // Пустой final_score читается как «оцени заново».
       expect(s, contains('if (score == null) {'));
       expect(s, contains('_stage = _Stage.awaitingAnswer;'));
       expect(s, contains("_ when clientFailure != null => ('МОДЕЛЬ НЕ ОТВЕТИЛА', AppColors.danger)"));
+      expect(s, contains("TranscriptStatus.empty => ('РЕЧИ НЕ РАЗОБРАТЬ', AppColors.danger)"));
       // Нейтрального балла в соло не осталось ни в одном исходе.
       expect(s.contains('_neutralScore'), isFalse);
+    });
+
+    test('причина называется своя, а не общая', () {
+      // «Модель не ответила» на невнятной записи было бы неправдой: она
+      // ответила, просто разбирать оказалось нечего.
+      final s = screen();
+      expect(s, contains('outcome.status == TranscriptStatus.empty'));
+      expect(s, contains('? _speechUnclearNote'));
     });
 
     test('в бою балл остаётся нейтральным — иначе раунд не сдвинется', () {
@@ -183,8 +194,8 @@ void main() {
     });
   });
 
-  group('невнятная запись — ноль, а не нейтральные семь', () {
-    test('«речи не слышу» отделено от «модель не ответила»', () {
+  group('«речи не слышу» — ответ модели, а не наш сбой', () {
+    test('отделено от «модель не ответила»', () {
       final s = judge();
       // Аудио до модели доехало: мы сами его отправили и знаем размер.
       // Значит это не наш сбой, а ответ — разбирать было нечего.
@@ -193,7 +204,9 @@ void main() {
       expect(s.contains('return fail("модель не слышит речи'), isFalse);
     });
 
-    test('воркер ставит ноль и помечает запись пустой', () {
+    test('воркер помечает запись пустой, а ноль остаётся только бою', () {
+      // В соло раунд не закрывается вовсе, но бой без оценки обоих не
+      // сдвинется — там ноль и есть честный итог за нерасслышанное.
       final s = worker();
       expect(s, contains('if (omni.silent) {'));
       expect(s, contains('score = SILENT_SCORE;'));
@@ -214,10 +227,12 @@ void main() {
       expect(judge(), contains('return Math.max(1, Math.min(10, score));'));
     });
 
-    test('экран объясняет нулевой балл', () {
+    test('карточка балла показывается только с настоящим баллом', () {
+      // Приписок «балл нейтральный, не в минус тебе» больше нет: раунд, в
+      // котором разбирать было нечего, до карточки не доходит.
       final s = screen();
-      expect(s, contains("TranscriptStatus.empty => ('РЕЧИ НЕ РАЗОБРАТЬ', AppColors.danger)"));
-      expect(s, contains('поэтому и балл нулевой'));
+      expect(s.contains('балл нейтральный, не в минус тебе'), isFalse);
+      expect(s.contains('оценивать было нечего'), isFalse);
     });
   });
 }
