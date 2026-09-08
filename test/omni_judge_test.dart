@@ -2,30 +2,40 @@ import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
 
-/// Мультимодальная модель слушает запись и судит перевод сама. Ключевое
-/// свойство этой замены — она НЕ ВИДИТ ЭТАЛОНА: у фразы почти всегда
-/// несколько верных переводов, и сверка с одним из них наказывала за
-/// правильный ответ, сказанный иначе. Свойство легко потерять одной
-/// строчкой, поэтому оно закреплено здесь.
+/// Мультимодальная модель слушает запись и судит перевод сама. Наш перевод
+/// она получает ОРИЕНТИРОМ, а не эталоном, и разница между этими двумя
+/// словами — вся история этого файла: с эталоном модель требовала
+/// совпадения слово в слово и наказывала за верный перевод, сказанный
+/// иначе; без него ошибалась сама и уносила свою ошибку в разбор.
 void main() {
   String read(String path) => File(path).readAsStringSync();
 
   String omni() => read('supabase/functions/_shared/omniJudge.ts');
+  String prompt() => read('supabase/functions/_shared/prompts/judge.ts');
   String worker() => read('supabase/functions/evaluate-recording/index.ts');
 
-  test('эталон модели не показывают', () {
-    final s = omni();
-    // В запрос уходит задание на родном языке и звук — и всё. Ни
-    // generated_phrase, ни expectedPhrase, ни какого-либо «правильного
-    // ответа» здесь быть не должно.
-    for (final forbidden in ['expectedPhrase', 'generated_phrase', 'markedText']) {
-      expect(s.contains(forbidden), isFalse, reason: forbidden);
-    }
-    expect(s, contains('This is your reference — you have no other'));
-    // И воркер не передаёт эталон в вызов: параметр называется prompt, и
-    // приходит в него roundPrompt. Эталон воркер теперь и не читает.
+  test('наш перевод — ориентир, а не эталон', () {
+    final s = prompt();
+    // Три вещи, без любой из которых образец снова станет эталоном.
+    expect(s, contains('Read it as ONE possible correct answer, not as the answer'));
+    expect(s, contains('never turn a difference in wording into an'));
+    // И то, ради чего он вернулся: неверный перевод самой модели ловится
+    // образцом. «Мы гуляем в парке» превращалось в «we go to the park».
+    expect(s, contains('then YOU are the one who is wrong'));
+    // Без образца блока нет вовсе: пустая строка на его месте читалась бы
+    // как «правильный перевод — пустота».
+    expect(s, contains('if (v.reference.length === 0) return "";'));
+    // Воркер читает образец из того же поля, куда его пишет клиент.
     expect(worker(), contains('await roundPrompt(supabase, recording, nativeLanguage)'));
-    expect(worker().contains('roundPhrase'), isFalse);
+    expect(worker(), contains('await roundReference(supabase, recording)'));
+    expect(worker(), contains('.select("generated_phrase")'));
+  });
+
+  test('промпт лежит отдельным читаемым файлом', () {
+    // Промпт меняют чаще любого кода вокруг, и россыпь строк в середине
+    // адаптера означала, что править его боязно.
+    expect(omni(), contains('import { judgePrompt } from "./prompts/judge.ts";'));
+    expect(prompt(), contains('export function judgePrompt(v: JudgePromptVars): string {'));
   });
 
   test('второго вызова за расшифровкой нет', () {
@@ -38,16 +48,16 @@ void main() {
   test('цитату сказанного модель не чинит', () {
     // В плашке ошибки и в зачёркнутом куске должны стоять слова игрока, а
     // не исправленный за него вариант: иначе он не узнает свою ошибку.
-    expect(omni(), contains('quoted verbatim with the mistake left in'));
-    expect(omni(), contains('never correct them there'));
+    expect(prompt(), contains('quoted verbatim with the mistake left in'));
+    expect(prompt(), contains('never correct them there'));
     // И расшифровка — дословная, а не приглаженная.
-    expect(omni(), contains('with every mistake left in'));
+    expect(prompt(), contains('with every mistake left in'));
   });
 
   test('ошибки группируются по смыслу, а не по словам', () {
     // Это и есть просьба игрока: не привязываться к структуре элементов, а
     // объединять в одну ошибку всё, что пошло не так по одной причине.
-    expect(omni(), contains('Group errors by MEANING'));
+    expect(prompt(), contains('Group errors by MEANING'));
   });
 
   test('поток обязателен, аудио на выходе не просим', () {
@@ -80,8 +90,9 @@ void main() {
     // оно написано той же письменностью, что и требуемый ответ.
     final s = omni();
     expect(s, contains('LANGUAGE_ENDONYMS'));
-    expect(s, contains(r'(${nativeSelf})'));
-    expect(s, contains('and in no other'));
+    expect(prompt(), contains(r'(${v.nativeSelf})'));
+    
+    expect(prompt(), contains('and in no other'));
   });
 
   test('родной язык берётся от активной пары, а не наугад', () {
@@ -112,7 +123,7 @@ void main() {
     // Модель, до которой аудио не доехало, отвечает своим переводом без
     // единой ошибки: игрок получает десятку за что угодно, и по ответу
     // этого не видно. Явный вопрос превращает молчаливую ложь в отказ.
-    expect(omni(), contains(r'\"audible\": true or false'));
+    expect(prompt(), contains('"audible": true or false'));
     expect(omni(), contains('if (parsed.audible === false)'));
     expect(omni(), contains('audible=false'));
   });
@@ -132,7 +143,7 @@ void main() {
     // Она нужна не экрану, а сравнению: без неё модель не представляет
     // сказанное явно и по умолчанию соглашается, что всё верно.
     final s = omni();
-    expect(s, contains('THE TRANSCRIPTION IS THE POINT OF THIS TASK'));
+    expect(prompt(), contains('THE TRANSCRIPTION IS THE POINT OF THIS TASK'));
     expect(s, contains('в ответе нет расшифровки'));
     // На экране её нет: блок «Голосовое:» убран и не возвращается.
     expect(read('lib/widgets/transcript_review.dart').contains('Голосовое'), isFalse);
@@ -142,7 +153,7 @@ void main() {
     // Модель регулярно присылает «сказал X, надо X» с объяснением «эту
     // часть не сказали». Долю несказанного мы уже посчитали по ленте.
     expect(omni(), contains('if (correction.length > 0 && correction === text) continue;'));
-    expect(omni(), contains('NEVER put an omission in'));
+    expect(prompt(), contains('NEVER put an omission in'));
   });
 
   test('пробел на стыке кусков восстанавливается', () {
@@ -155,10 +166,9 @@ void main() {
     // Пример показывает три вещи разом: расшифровка обрывается там, где
     // игрок замолчал; пропуск не превращается в запись об ошибке; более
     // длинный, но верный оборот ошибкой не считается.
-    final s = omni();
-    expect(s, contains('Example. The learner was asked to say'));
-    expect(s, contains('"heard" stops where he stopped'));
-    expect(s, contains('"errors" is EMPTY here'));
+    expect(prompt(), contains('Example. The learner was asked to say'));
+    expect(prompt(), contains('"heard" stops where he stopped'));
+    expect(prompt(), contains('"errors" is EMPTY here'));
   });
 
   test('сырой ответ модели сохраняется', () {

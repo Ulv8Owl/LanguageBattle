@@ -95,9 +95,10 @@ async function checkOmni(): Promise<CheckResult> {
     audioFormat: "wav",
     nativeLanguage: "ru",
     targetLanguage: "en",
-    // Задание пустое: содержимое неважно, важно, что запрос дошёл, ключ
-    // принят и ответ разобрался.
+    // Задание и образец пустые: содержимое неважно, важно, что запрос
+    // дошёл, ключ принят и ответ разобрался.
     prompt: "",
+    reference: "",
     level: "A1",
     budgetMs: 60_000,
   });

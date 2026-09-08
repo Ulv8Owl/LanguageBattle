@@ -8,16 +8,18 @@
  * У фразы почти всегда несколько верных переводов, и сверка с одним из них
  * наказывала за правильный ответ, сказанный иначе.
  *
- * Модель здесь слушает запись напрямую и оценивает перевод сама — как
- * преподаватель, у которого нет перед глазами единственно верного варианта.
- * Поэтому ЭТАЛОН СЮДА НЕ ПЕРЕДАЁТСЯ ВООБЩЕ. Это не экономия токенов и не
- * забывчивость: увидев эталон, модель немедленно начинает сверять с ним, и
- * мы возвращаемся ровно к той проблеме, ради которой всё затевалось.
- * Единственное, что она получает кроме звука, — задание на родном языке
- * игрока, то самое, которое он видел на экране.
+ * Модель здесь слушает запись напрямую и переводит задание сама. Наш
+ * перевод она тоже получает, но ОРИЕНТИРОМ, А НЕ ЭТАЛОНОМ, и разница
+ * между этими двумя словами — вся история этого файла. С эталоном модель
+ * сверяет слово в слово и объявляет ошибкой верный перевод, сказанный
+ * иначе. Без него ошибается сама: «вечером мы гуляем в парке» становилось
+ * «in the evening we go to the park», и неверное направление уходило и в
+ * ленту разбора, и в плашку ошибки. Промпт поэтому трижды повторяет, что
+ * образец решает, ЧТО должно быть сказано, и не решает, КАКИМИ словами
+ * (см. prompts/judge.ts).
  *
  * ГРАНИЦЫ ОШИБОК модель проводит сама, по смыслу: «вот этот кусок сказан
- * не так». Не по элементам эталона — про элементы она не знает и знать не
+ * не так». Не по элементам образца — про элементы она не знает и знать не
  * должна. Элементы остались только у подсказок, где перевод ручной.
  *
  * ПРОТОКОЛ. Сервис OpenAI-совместимый (DashScope), поэтому запрос
@@ -40,6 +42,7 @@ export interface OmniError {
 
 /** Вид куска в разборе. */
 import { type DiffKind, diffWords } from "./textDiff.ts";
+import { judgePrompt } from "./prompts/judge.ts";
 
 export type SpanKind =
   /** Сказано верно — обычный текст. */
@@ -216,134 +219,34 @@ function languageEndonym(code: string): string {
 }
 
 /**
- * Инструкция модели.
+ * Инструкция модели живёт в отдельном файле — prompts/judge.ts.
  *
- * Написана по-английски намеренно: язык инструкции не должен подсказывать
- * модели, на каком языке ждут ОТВЕТ, — иначе объяснения сползают на язык
- * промпта. Нужный язык объяснений называется отдельно, дважды и с
- * самоназванием.
+ * Она там одной большой строкой, которую можно править как обычный текст:
+ * промпт меняют чаще любого кода вокруг, и держать его россыпью строк в
+ * середине адаптера значило, что править его боязно.
  *
- * ЧТО МОДЕЛЬ ДЕЛАЕТ ПО ПОРЯДКУ. Сначала переводит задание сама — у неё на
- * руках ровно то же, что у игрока, и ничего больше. Потом слушает запись и
- * сравнивает со СВОИМ переводом. Такой порядок важен: модель, которой
- * сразу дали слушать «ошибки», начинает их искать и находит на ровном
- * месте; модель, у которой уже есть собственный перевод, сравнивает два
- * текста и молчит там, где сравнивать нечего.
+ * ЧТО МОДЕЛЬ ДЕЛАЕТ ПО ПОРЯДКУ. Переводит задание сама, слушает запись и
+ * сравнивает со своим переводом. Наш перевод из датасета она получает
+ * ориентиром по смыслу — приблизительным, не эталоном: с эталоном она
+ * требует совпадения слово в слово, без него ошибается сама.
  *
  * БАЛЛ МОДЕЛЬ НЕ СТАВИТ. Его считает программа: доля несказанного плюс по
  * баллу за ошибку. Числовая оценка от модели была самой шаткой частью
- * ответа — на одной и той же записи она гуляла на два-три балла, — а
- * арифметика по её же разбору повторяема и объяснима игроку.
+ * ответа — на одной и той же записи она гуляла на два-три балла.
  */
-function systemPrompt(nativeLanguage: string, targetLanguage: string, level: string): string {
-  const native = languageName(nativeLanguage);
-  const nativeSelf = languageEndonym(nativeLanguage);
-  const target = languageName(targetLanguage);
-  return [
-    `You are a ${target} teacher. A ${native}-speaking learner at CEFR level ${level} was given a sentence`,
-    `in ${native} and asked to say it aloud in ${target}. You get that sentence and the recording.`,
-    "",
-    "Work in this order:",
-    `1. Translate the ${native} sentence into ${target} yourself. This is your reference — you have no other.`,
-    `2. Transcribe the recording: write down what the learner actually said, in ${target}, word for word.`,
-    "3. Compare your transcription with your translation and explain what went wrong.",
-    "",
-    "First say whether you can hear any speech at all in the recording: \"audible\": true or false.",
-    "Answer false when the recording is silent, noise only, or you received no audio. Never guess in that case —",
-    "an invented assessment is worse than none.",
-    "",
-    'THE TRANSCRIPTION IS THE POINT OF THIS TASK. Write in "heard" exactly what you hear and nothing else:',
-    "the learner's own words with every mistake left in, and only the part he actually said. Do not complete",
-    "the sentence for him, do not repeat the task back, do not write your translation there. If he said half",
-    "the sentence and stopped, \"heard\" is that half and nothing more. Everything else is decided from this",
-    "field, so an invented transcription silently gives him a mark he did not earn.",
-    "",
-    "SELF-CORRECTION IS NOT AN ERROR. Learners often say a word, stop, and say it again differently. Keep only",
-    'the version he settled on in "heard", drop the abandoned one, and never list either as an error. He',
-    "corrected himself — that is the skill working, not failing.",
-    "",
-    "A different wording is NOT an error: a sentence can be translated in several correct ways, and you must",
-    "accept any wording that conveys the same meaning correctly. Mark an error only when something is genuinely",
-    "wrong — wrong meaning, wrong grammar, an invented word.",
-    "Group errors by MEANING: everything that goes wrong for one reason is a single error.",
-    "",
-    "YOU ARE NOT HERE TO POLISH HIS ENGLISH. If what he said means the same, is grammatical and would be",
-    "understood, it is CORRECT — even when you would say it shorter, or more naturally, or the way a native",
-    "would. Longer is not wrong. Formal is not wrong. Old-fashioned is not wrong. Redundant but correct is not",
-    "wrong. Textbook is not wrong. \"After that\" instead of \"Then\", \"seven o\'clock\" instead of \"seven\",",
-    "\"I would like\" instead of \"I want\" — none of these is an error.",
-    "",
-    "THE WORDS \"MORE NATURAL\" MUST NEVER APPEAR IN YOUR ANSWER, in any language, and neither must \"we usually",
-    'say", "sounds better", "native speakers say", "more common", "better here". They are not reasons — they',
-    "are the sound of marking a correct answer wrong. The moment one of them is the reason, delete the error.",
-    'A note that says "X is okay, but Y is more natural" is an error you should never have written: X was okay,',
-    "so there was nothing to report. Most of these learners studied from textbooks and are grammatically",
-    "right; taking a point for their correct phrasing is the fastest way to teach them that you are unfair.",
-    "",
-    'NAME THE KIND OF EVERY ERROR in its "kind" field, and only these three exist:',
-    '  "meaning" — it says something else than the task did;',
-    '  "grammar" — the form is wrong: tense, article, preposition, agreement, word order;',
-    '  "word" — no such word, or that word does not mean this.',
-    'There is no kind for style, register, naturalness, tone or preference. If the only label that fits your',
-    "objection would be one of those, then it is not an error and it does not go in the list. Deciding the",
-    "kind FIRST, before you write the note, is the check: a fragment you cannot classify is a fragment that",
-    "was fine.",
-    "",
-    'PUT ONLY THE WRONG WORDS IN "said". If half of the fragment was fine, that half does not belong there:',
-    'quoting "after that I do coffee" when only "do coffee" is wrong tells the learner his "after that" was a',
-    "mistake too, and it was not.",
-    "",
-    "CHECK THE MEANING PART BY PART before you accept a sentence. Does it describe the same action, the same",
-    "place or direction, the same time, the same person? A sentence that reads naturally but says something",
-    "else than the task did is a MEANING error, not an acceptable variant — being fluent is not being right.",
-    "",
-    "NEVER mark punctuation, capitalisation or sentence boundaries. You are listening to speech: commas and",
-    "capital letters are yours, not his, and he cannot hear them. Reporting one is always your own mistake.",
-    "",
-    'NEVER put an omission in "errors". Something the learner did not say is visible from "heard" already;',
-    'an "errors" entry is only for words that WERE spoken and were wrong. An entry whose "said" equals its',
-    '"fix" is always a mistake on your part.',
-    "",
-    'EVERY "fix" MUST BE COPIED OUT OF YOUR OWN "correct". Find the error by comparing "heard" with "correct"',
-    'word by word, then take as the "fix" exactly the words that stand in that place in "correct" — do not',
-    "compose a new phrase for it. Otherwise you end up patching his sentence instead of translating the task:",
-    'the ribbon shows him one right answer and the note under it another, and they contradict each other. If',
-    'the words you want to put in "fix" are not in "correct", then either "correct" is wrong — fix it — or',
-    "this is not an error at all.",
-    "",
-    "Example. The learner was asked to say «Я встаю в семь. Потом я варю кофе и читаю новости.» in English",
-    'and said "I get up at seven o\'clock. After that I make coffee." Correct answer:',
-    '{"audible": true, "heard": "I get up at seven o\'clock. After that I make coffee.",',
-    ' "correct": "I get up at seven. Then I make coffee and read the news.", "errors": []}',
-    '"errors" is EMPTY here, and that is the whole point of the example. "seven o\'clock" and "After that" are',
-    "correct — you would say it shorter, and that is not his problem. The unsaid news is an omission, visible",
-    'from "heard" already, and omissions never go into "errors". Note also that "heard" stops where he stopped.',
-    "",
-    'Second example, same task, and he said "I stand up in seven o\'clock. After that I do coffee." Now there',
-    "are real errors, and see how narrowly each one is quoted:",
-    '{"audible": true, "heard": "I stand up in seven o\'clock. After that I do coffee.",',
-    ' "correct": "I get up at seven. Then I make coffee and read the news.",',
-    ' "errors": [{"said": "stand up", "fix": "get up", "kind": "word", "why": "<объяснение>"},',
-    '            {"said": "in seven", "fix": "at seven", "kind": "grammar", "why": "<объяснение>"},',
-    '            {"said": "do coffee", "fix": "make coffee", "kind": "word", "why": "<объяснение>"}]}',
-    '"After that" is again untouched, and "o\'clock" is not quoted either — both were fine. Each "said" holds',
-    "the wrong words and nothing around them.",
-    "",
-    `LANGUAGE OF EXPLANATIONS: every "why" field must be written in ${native} (${nativeSelf}) and in no other`,
-    `language. This is not a preference — the learner reads only ${nativeSelf}. Everything else (the`,
-    `transcription, the translation, the quoted fragments, the corrections) stays in ${target}.`,
-    `Explain at ${level} level: short and concrete, no grammar jargon the learner would not know.`,
-    "EXPLAIN THIS SENTENCE, NOT THE LANGUAGE. Say why your version is right HERE — what this sentence means and",
-    "what his said instead. Do not state a general rule: a rule invented to fit one example is usually false,",
-    "and the learner will believe it. If you cannot say briefly and truthfully why, just say what it should be.",
-    "",
-    "Reply with a single JSON object and nothing else — no markdown, no commentary:",
-    '{"audible": boolean, "heard": string, "correct": string,',
-    ' "errors": [{"said": string, "fix": string, "kind": "meaning"|"grammar"|"word", "why": string}]}',
-    '"said" — the learner\'s own words, quoted verbatim with the mistake left in; never correct them there,',
-    'or the learner will not recognise his own mistake. "fix" — the words that stand in that place in your',
-    '"correct", copied from it.',
-  ].join("\n");
+function systemPrompt(
+  nativeLanguage: string,
+  targetLanguage: string,
+  level: string,
+  reference: string,
+): string {
+  return judgePrompt({
+    native: languageName(nativeLanguage),
+    nativeSelf: languageEndonym(nativeLanguage),
+    target: languageName(targetLanguage),
+    level,
+    reference: reference.trim(),
+  });
 }
 
 function base64(bytes: Uint8Array): string {
@@ -581,6 +484,15 @@ export interface OmniRequest {
   targetLanguage: string;
   /** Задание на РОДНОМ языке — то, что видел игрок. */
   prompt: string;
+  /**
+   * Наш перевод задания на изучаемый язык — ПРИБЛИЗИТЕЛЬНЫЙ ориентир.
+   *
+   * Не эталон: игрок вправе сказать то же самое другими словами, и промпт
+   * говорит об этом трижды. Нужен, потому что без него модель переводила
+   * задание сама и, ошибаясь, уносила ошибку и в ленту разбора, и в плашку
+   * — сверять было не с чем. Пусто — блока с ним в промпте нет вовсе.
+   */
+  reference: string;
   level: string;
   /** Остаток бюджета задачи. Пережить его вызов не имеет права. */
   budgetMs: number;
@@ -606,7 +518,7 @@ export async function omniEvaluate(req: OmniRequest): Promise<OmniResult> {
 
   if (req.audio.byteLength === 0) return fail("запись пуста");
 
-  const system = systemPrompt(req.nativeLanguage, req.targetLanguage, req.level);
+  const system = systemPrompt(req.nativeLanguage, req.targetLanguage, req.level, req.reference);
   const answer = await requestOmni(
     system,
     [

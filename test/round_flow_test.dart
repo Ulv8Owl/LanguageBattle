@@ -12,6 +12,7 @@ void main() {
   String read(String path) => File(path).readAsStringSync();
 
   String judge() => read('supabase/functions/_shared/omniJudge.ts');
+  String prompt() => read('supabase/functions/_shared/prompts/judge.ts');
   String worker() => read('supabase/functions/evaluate-recording/index.ts');
   String screen() => read('lib/features/training/training_screen.dart');
   String review() => read('lib/widgets/round_review.dart');
@@ -90,21 +91,21 @@ void main() {
 
   group('промпт разбора', () {
     test('самоисправление не считается ошибкой', () {
-      expect(judge(), contains('SELF-CORRECTION IS NOT AN ERROR'));
+      expect(prompt(), contains('SELF-CORRECTION IS NOT AN ERROR'));
     });
 
     test('запятые и заглавные буквы не ошибка', () {
       // Их в речи нет: их дописывает сама модель, когда пишет "heard".
-      expect(judge(), contains('NEVER mark punctuation, capitalisation or sentence boundaries'));
+      expect(prompt(), contains('NEVER mark punctuation, capitalisation or sentence boundaries'));
     });
 
     test('смысл проверяется по частям, а не на слух «звучит складно»', () {
-      expect(judge(), contains('CHECK THE MEANING PART BY PART'));
+      expect(prompt(), contains('CHECK THE MEANING PART BY PART'));
     });
 
     test('объяснение — про эту фразу, а не выдуманное правило', () {
-      expect(judge(), contains('EXPLAIN THIS SENTENCE, NOT THE LANGUAGE'));
-      expect(judge(), contains('Do not state a general rule'));
+      expect(prompt(), contains('EXPLAIN THIS SENTENCE, NOT THE LANGUAGE'));
+      expect(prompt(), contains('Do not state a general rule'));
     });
   });
 
@@ -134,9 +135,9 @@ void main() {
       // and Thursday», а на плашке к той же ошибке написала «on Sunday and
       // Saturday» — предлог поправила, перепутанные дни оставила. Игрок
       // читает два разных правильных ответа подряд, и второй неверен.
-      final s = judge();
-      expect(s, contains('EVERY "fix" MUST BE COPIED OUT OF YOUR OWN "correct"'));
+      expect(prompt(), contains('EVERY "fix" MUST BE COPIED OUT OF YOUR OWN "correct"'));
       // Промпта мало: расхождение отсеивается и кодом.
+      final s = judge();
       expect(s, contains('export function groundedIn(fix: string, correct: string): boolean'));
       expect(s, contains('if (!groundedIn(correction, correct)) continue;'));
     });
@@ -146,16 +147,16 @@ void main() {
       // here» и снимала за это балл. Она сама признаёт, что верно, — и всё
       // равно наказывает. Большинство игроков учились по учебникам и
       // грамматически правы.
-      final s = judge();
-      expect(s, contains('THE WORDS \\"MORE NATURAL\\" MUST NEVER APPEAR IN YOUR ANSWER'));
+      final s = prompt();
+      expect(s, contains('THE WORDS "MORE NATURAL" MUST NEVER APPEAR IN YOUR ANSWER'));
       expect(s, contains('Textbook is not wrong'));
     });
 
     test('вид ошибки называется и проверяется кодом', () {
       // Стиля в списке видов нет намеренно: фрагмент, который не удаётся
       // отнести ни к смыслу, ни к грамматике, ни к слову, был в порядке.
+      expect(prompt(), contains('NAME THE KIND OF EVERY ERROR'));
       final s = judge();
-      expect(s, contains('NAME THE KIND OF EVERY ERROR'));
       expect(s, contains('const ERROR_KINDS = new Set(["meaning", "grammar", "word"]);'));
       expect(s, contains('if (kind.length > 0 && !ERROR_KINDS.has(kind)) continue;'));
     });
@@ -163,15 +164,15 @@ void main() {
     test('в ошибку попадают только неверные слова', () {
       // «after that I do coffee» — неверно только «do coffee», а игрок
       // читал плашку так, будто «after that» тоже ошибка.
-      expect(judge(), contains('PUT ONLY THE WRONG WORDS IN "said"'));
+      expect(prompt(), contains('PUT ONLY THE WRONG WORDS IN "said"'));
       // Второй пример показывает это на настоящем разборе.
-      expect(judge(), contains('Second example, same task'));
+      expect(prompt(), contains('Second example, same task'));
     });
 
     test('разговорность не повод снимать балл', () {
       // «After that» вместо «Then» и «seven o'clock» вместо «seven» —
       // сказано верно, и отнимать за это балл нечестно.
-      final s = judge();
+      final s = prompt();
       expect(s, contains('YOU ARE NOT HERE TO POLISH HIS ENGLISH'));
       expect(s, contains('Longer is not wrong'));
       // Прежний пример В САМОМ ПРОМПТЕ учил модели ровно этой придирке:

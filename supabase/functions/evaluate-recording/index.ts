@@ -356,6 +356,18 @@ async function processJob(job_id: string): Promise<void> {
     // сверять с одним вариантом вместо того, чтобы оценивать перевод
     // (см. omniJudge.ts).
     const prompt = await roundPrompt(supabase, recording, nativeLanguage);
+    // Наш перевод задания — ПРИБЛИЗИТЕЛЬНЫЙ ориентир для модели.
+    //
+    // Раньше его не передавали вовсе: с эталоном модель требовала
+    // совпадения слово в слово и наказывала за верный перевод, сказанный
+    // иначе. Но без него ошибалась она сама — «мы гуляем в парке»
+    // превращалось в «we go to the park», и неверное направление уходило и
+    // в ленту разбора, и в плашку ошибки. Сверять было не с чем.
+    //
+    // Промпт трижды говорит, что это один из верных вариантов, а не
+    // единственный: он решает, ЧТО должно быть сказано, и не решает,
+    // КАКИМИ словами (см. prompts/judge.ts).
+    const reference = await roundReference(supabase, recording);
     const level = cefrLevelForRating(
       (await speakerLeagueRating(supabase, recording.user_id, targetLanguage)) ?? 1000,
     );
@@ -366,6 +378,7 @@ async function processJob(job_id: string): Promise<void> {
       targetLanguage,
       nativeLanguage,
       prompt,
+      reference,
       level,
       budgetLeft(),
     );
@@ -591,6 +604,33 @@ async function speakerLeagueRating(
  * случае честнее нейтрального, но и врать про «не тот перевод» она не
  * станет — сравнивать ей будет не с чем.
  */
+/**
+ * Наш перевод задания на изучаемый язык — из датасета фраз.
+ *
+ * Лежит в generated_phrase: клиент пишет его при создании раунда и в соло,
+ * и в бою. Ошибку чтения глушим — без образца модель работает как прежде,
+ * а ронять из-за него задачу нечем.
+ */
+async function roundReference(
+  supabase: SupabaseClient,
+  recording: VoiceRecordingRow,
+): Promise<string> {
+  try {
+    const table = recording.training_round_id ? "training_rounds" : "rounds";
+    const id = recording.training_round_id ?? recording.round_id;
+    if (!id) return "";
+    const { data } = await supabase
+      .from(table)
+      .select("generated_phrase")
+      .eq("id", id)
+      .maybeSingle();
+    return ((data?.generated_phrase as string | null) ?? "").trim();
+  } catch (e) {
+    console.error("evaluate-recording: не удалось прочитать образец раунда", e);
+    return "";
+  }
+}
+
 async function roundPrompt(
   supabase: SupabaseClient,
   recording: VoiceRecordingRow,
@@ -658,6 +698,7 @@ async function runOmni(
   targetLanguage: string,
   nativeLanguage: string,
   prompt: string,
+  reference: string,
   level: CefrLevel,
   budgetMs: number,
 ): Promise<OmniResult> {
@@ -679,6 +720,7 @@ async function runOmni(
     nativeLanguage,
     targetLanguage,
     prompt,
+    reference,
     level,
     budgetMs,
   });
