@@ -160,6 +160,10 @@ class _TrainingScreenState extends State<TrainingScreen> {
   /// прямо в ленте, как в мессенджере.
   String? _attemptAudio;
 
+  /// Сколько раз игрок отправлял запись в этом раунде. Нужен только для
+  /// имени файла: перезаписывать прежний нельзя (см. _sendTake).
+  int _takeNumber = 0;
+
   String _myName = 'Ты';
 
   /// Балл за раунд. Попытка одна, и он окончательный.
@@ -339,6 +343,7 @@ class _TrainingScreenState extends State<TrainingScreen> {
       _errors = [];
       _attempt = null;
       _attemptAudio = null;
+      _takeNumber = 0;
       _score = null;
       _earnedCoins = null;
       _stage = _Stage.awaitingAnswer;
@@ -433,11 +438,22 @@ class _TrainingScreenState extends State<TrainingScreen> {
     // раунду относится голосовое.
     const attempt = 1;
 
+    // Каждая отправка — СВОЙ файл, а не перезапись прежнего.
+    //
+    // Когда разбирать было нечего (модель молчит или речи не разобрать),
+    // игрок отвечает заново — и вторая запись уходила по тому же пути.
+    // Storage считает это обновлением объекта, а политика на бакете
+    // разрешает только вставку: игрок получал 403 «new row violates
+    // row-level security policy» и записать больше ничего не мог.
+    // Отдельный файл на попытку возвращает нас к тому, что политика и так
+    // разрешает. Все они удаляются вместе на выходе с экрана — удаление
+    // идёт по списку записей раунда, а не по одному ожидаемому имени.
     final storagePath = trainingRecordingPath(
       sessionId: sessionId,
       roundId: roundId,
       userId: _myId,
       attempt: attempt,
+      take: ++_takeNumber,
     );
 
     try {

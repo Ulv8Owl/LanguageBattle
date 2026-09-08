@@ -266,10 +266,18 @@ String battleRecordingPath({
 }) =>
     'match/$matchId/$roundId/${userId}_$slot.$voiceFileExtension';
 
+/// [take] — номер отправки в этом раунде.
+///
+/// НЕ ТО ЖЕ, ЧТО [attempt]. Попытка в раунде одна, но отправок может быть
+/// несколько: когда разбирать было нечего, игрок отвечает заново. Каждой
+/// нужен свой файл — политика бакета разрешает вставку и не разрешает
+/// обновление, и повторная запись по тому же пути падала с 403.
 String trainingRecordingPath({
   required String sessionId,
   required String roundId,
   required String userId,
   required int attempt,
+  int take = 1,
 }) =>
-    'training/$sessionId/$roundId/${userId}_$attempt.$voiceFileExtension';
+    'training/$sessionId/$roundId/${userId}_$attempt'
+    '${take > 1 ? '_$take' : ''}.$voiceFileExtension';

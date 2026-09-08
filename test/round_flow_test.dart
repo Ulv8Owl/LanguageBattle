@@ -141,6 +141,33 @@ void main() {
       expect(s, contains('if (!groundedIn(correction, correct)) continue;'));
     });
 
+    test('«естественнее» — запрещённая причина', () {
+      // Модель писала «"After that" is okay, but "Then" is more natural
+      // here» и снимала за это балл. Она сама признаёт, что верно, — и всё
+      // равно наказывает. Большинство игроков учились по учебникам и
+      // грамматически правы.
+      final s = judge();
+      expect(s, contains('THE WORDS \\"MORE NATURAL\\" MUST NEVER APPEAR IN YOUR ANSWER'));
+      expect(s, contains('Textbook is not wrong'));
+    });
+
+    test('вид ошибки называется и проверяется кодом', () {
+      // Стиля в списке видов нет намеренно: фрагмент, который не удаётся
+      // отнести ни к смыслу, ни к грамматике, ни к слову, был в порядке.
+      final s = judge();
+      expect(s, contains('NAME THE KIND OF EVERY ERROR'));
+      expect(s, contains('const ERROR_KINDS = new Set(["meaning", "grammar", "word"]);'));
+      expect(s, contains('if (kind.length > 0 && !ERROR_KINDS.has(kind)) continue;'));
+    });
+
+    test('в ошибку попадают только неверные слова', () {
+      // «after that I do coffee» — неверно только «do coffee», а игрок
+      // читал плашку так, будто «after that» тоже ошибка.
+      expect(judge(), contains('PUT ONLY THE WRONG WORDS IN "said"'));
+      // Второй пример показывает это на настоящем разборе.
+      expect(judge(), contains('Second example, same task'));
+    });
+
     test('разговорность не повод снимать балл', () {
       // «After that» вместо «Then» и «seven o'clock» вместо «seven» —
       // сказано верно, и отнимать за это балл нечестно.
@@ -192,6 +219,20 @@ void main() {
       expect(read('lib/features/battle/battle_screen.dart'),
           contains('Модель не ответила — балл нейтральный, не в минус тебе'));
     });
+  });
+
+  test('повторная запись не перезаписывает прежний файл', () {
+    // Игрок отвечал заново после «речи не разобрать», запись шла по тому
+    // же пути, Storage считал это обновлением — а политика на бакете
+    // разрешала только вставку. Игрок получал 403 и больше ничего
+    // записать не мог.
+    expect(read('lib/data/voice_submission.dart'), contains('int take = 1,'));
+    expect(screen(), contains('take: ++_takeNumber,'));
+    // И сама политика: upsert: true стоит во всех загрузках, и без
+    // разрешения на обновление этот флаг молча работает лишь на новых
+    // объектах.
+    expect(read('supabase/migrations/0045_storage_overwrite.sql'),
+        contains('on storage.objects for update'));
   });
 
   group('«речи не слышу» — ответ модели, а не наш сбой', () {

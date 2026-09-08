@@ -36,5 +36,30 @@ check(
   ["I am student"],
 );
 
+// Вид ошибки — обязательная самопроверка модели. Стиля в списке нет: за
+// «звучит естественнее» балл не снимается.
+check(
+  "придирка по стилю отсеивается",
+  asErrors(
+    [{ said: "After that", fix: "Then", kind: "style", why: "так естественнее" }],
+    correct,
+  ).length,
+  0,
+);
+check(
+  "настоящая ошибка со своим видом остаётся",
+  asErrors(
+    [{ said: "I am student", fix: "I am a student", kind: "grammar", why: "артикль" }],
+    correct,
+  ).map((e) => e.text),
+  ["I am student"],
+);
+check(
+  "вид не назван — ошибку не теряем",
+  asErrors([{ said: "I am student", fix: "I am a student", why: "артикль" }], correct)
+    .map((e) => e.text),
+  ["I am student"],
+);
+
 console.log(failed === 0 ? "\nвсё сходится" : `\nрасхождений: ${failed}`);
 if (failed > 0) Deno.exit(1);

@@ -270,9 +270,28 @@ function systemPrompt(nativeLanguage: string, targetLanguage: string, level: str
     "YOU ARE NOT HERE TO POLISH HIS ENGLISH. If what he said means the same, is grammatical and would be",
     "understood, it is CORRECT — even when you would say it shorter, or more naturally, or the way a native",
     "would. Longer is not wrong. Formal is not wrong. Old-fashioned is not wrong. Redundant but correct is not",
-    "wrong. \"After that\" instead of \"Then\", \"seven o\'clock\" instead of \"seven\", \"I would like\" instead of",
-    "\"I want\" — none of these is an error, and taking a point for one of them punishes a learner who was",
-    "right. If your only reason is that your version sounds better, there is no error.",
+    "wrong. Textbook is not wrong. \"After that\" instead of \"Then\", \"seven o\'clock\" instead of \"seven\",",
+    "\"I would like\" instead of \"I want\" — none of these is an error.",
+    "",
+    "THE WORDS \"MORE NATURAL\" MUST NEVER APPEAR IN YOUR ANSWER, in any language, and neither must \"we usually",
+    'say", "sounds better", "native speakers say", "more common", "better here". They are not reasons — they',
+    "are the sound of marking a correct answer wrong. The moment one of them is the reason, delete the error.",
+    'A note that says "X is okay, but Y is more natural" is an error you should never have written: X was okay,',
+    "so there was nothing to report. Most of these learners studied from textbooks and are grammatically",
+    "right; taking a point for their correct phrasing is the fastest way to teach them that you are unfair.",
+    "",
+    'NAME THE KIND OF EVERY ERROR in its "kind" field, and only these three exist:',
+    '  "meaning" — it says something else than the task did;',
+    '  "grammar" — the form is wrong: tense, article, preposition, agreement, word order;',
+    '  "word" — no such word, or that word does not mean this.',
+    'There is no kind for style, register, naturalness, tone or preference. If the only label that fits your',
+    "objection would be one of those, then it is not an error and it does not go in the list. Deciding the",
+    "kind FIRST, before you write the note, is the check: a fragment you cannot classify is a fragment that",
+    "was fine.",
+    "",
+    'PUT ONLY THE WRONG WORDS IN "said". If half of the fragment was fine, that half does not belong there:',
+    'quoting "after that I do coffee" when only "do coffee" is wrong tells the learner his "after that" was a',
+    "mistake too, and it was not.",
     "",
     "CHECK THE MEANING PART BY PART before you accept a sentence. Does it describe the same action, the same",
     "place or direction, the same time, the same person? A sentence that reads naturally but says something",
@@ -300,6 +319,16 @@ function systemPrompt(nativeLanguage: string, targetLanguage: string, level: str
     "correct — you would say it shorter, and that is not his problem. The unsaid news is an omission, visible",
     'from "heard" already, and omissions never go into "errors". Note also that "heard" stops where he stopped.',
     "",
+    'Second example, same task, and he said "I stand up in seven o\'clock. After that I do coffee." Now there',
+    "are real errors, and see how narrowly each one is quoted:",
+    '{"audible": true, "heard": "I stand up in seven o\'clock. After that I do coffee.",',
+    ' "correct": "I get up at seven. Then I make coffee and read the news.",',
+    ' "errors": [{"said": "stand up", "fix": "get up", "kind": "word", "why": "<объяснение>"},',
+    '            {"said": "in seven", "fix": "at seven", "kind": "grammar", "why": "<объяснение>"},',
+    '            {"said": "do coffee", "fix": "make coffee", "kind": "word", "why": "<объяснение>"}]}',
+    '"After that" is again untouched, and "o\'clock" is not quoted either — both were fine. Each "said" holds',
+    "the wrong words and nothing around them.",
+    "",
     `LANGUAGE OF EXPLANATIONS: every "why" field must be written in ${native} (${nativeSelf}) and in no other`,
     `language. This is not a preference — the learner reads only ${nativeSelf}. Everything else (the`,
     `transcription, the translation, the quoted fragments, the corrections) stays in ${target}.`,
@@ -310,7 +339,7 @@ function systemPrompt(nativeLanguage: string, targetLanguage: string, level: str
     "",
     "Reply with a single JSON object and nothing else — no markdown, no commentary:",
     '{"audible": boolean, "heard": string, "correct": string,',
-    ' "errors": [{"said": string, "fix": string, "why": string}]}',
+    ' "errors": [{"said": string, "fix": string, "kind": "meaning"|"grammar"|"word", "why": string}]}',
     '"said" — the learner\'s own words, quoted verbatim with the mistake left in; never correct them there,',
     'or the learner will not recognise his own mistake. "fix" — the words that stand in that place in your',
     '"correct", copied from it.',
@@ -423,6 +452,17 @@ export function groundedIn(fix: string, correct: string): boolean {
   return words.every((w) => reference.has(w));
 }
 
+/**
+ * Виды ошибок, за которые снимается балл.
+ *
+ * Всё, что сюда не попадает, — придирка. Модель обязана назвать вид ДО
+ * того, как напишет объяснение: фрагмент, который не удаётся отнести ни к
+ * одному из трёх, и был в порядке. Стиля, регистра, «звучит естественнее»
+ * в списке нет намеренно — это и есть та ошибка, за которую нельзя
+ * наказывать.
+ */
+const ERROR_KINDS = new Set(["meaning", "grammar", "word"]);
+
 export function asErrors(raw: unknown, correct: string): OmniError[] {
   if (!Array.isArray(raw)) return [];
   const out: OmniError[] = [];
@@ -445,6 +485,12 @@ export function asErrors(raw: unknown, correct: string): OmniError[] {
     if (correction.length > 0 && correction === text) continue;
     // Правка расходится с переводом самой модели — см. groundedIn.
     if (!groundedIn(correction, correct)) continue;
+    // Модель сама отнесла ошибку к стилю или к чему-то ещё вне списка —
+    // значит по существу претензии нет. Отсутствующий вид пропускаем:
+    // модель могла просто не заполнить поле, и терять из-за этого
+    // настоящие ошибки хуже, чем пропустить одну придирку.
+    const kind = typeof row.kind === "string" ? row.kind.trim().toLowerCase() : "";
+    if (kind.length > 0 && !ERROR_KINDS.has(kind)) continue;
     out.push({
       text,
       message,
