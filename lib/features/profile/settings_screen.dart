@@ -3,19 +3,15 @@ import 'package:go_router/go_router.dart';
 
 import 'package:flutter/services.dart';
 
-import '../../core/all_languages.dart';
 import '../../core/app_events.dart';
 import '../../core/app_locale.dart';
 import '../../core/debug_flags.dart';
 import '../../core/leagues.dart';
 import '../../core/supabase_client.dart';
-import '../../data/content_languages.dart';
-import '../../data/native_languages.dart';
 import '../../data/player_rating.dart';
 import '../../data/training_session.dart';
 import '../../core/theme.dart';
 import '../../widgets/chrolingo_widgets.dart';
-import '../../widgets/language_picker.dart';
 
 /// Настройки (раздел 5.1, п.7 и 5.3). Вход только через Профиль — отдельного
 /// пункта в нижней навигации для настроек нет.
@@ -40,7 +36,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
   /// primary — тот, что раньше был единственным «родным языком» — и он
   /// всегда равен users.native_language: эту связь держит сервер (триггер
   /// + RPC ниже), здесь список только показывается и правится через RPC.
-  List<NativeLanguage> _natives = [];
 
   /// Сколько карточек выдаётся за одну тренировку.
   int _deckSize = defaultTrainingDeckSize;
@@ -78,10 +73,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
           .eq('is_active', true)
           .limit(1)
           .maybeSingle();
-      final natives = await NativeLanguages.fetch(currentUserId);
-      if (!mounted) return;
       setState(() {
-        _natives = natives;
         final size = (row?['training_deck_size'] as num?)?.toInt();
         if (size != null && trainingDeckSizes.contains(size)) _deckSize = size;
         _rating = learning == null ? null : PlayerRating.fromRow(learning);
@@ -89,122 +81,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
     } catch (_) {
       // Не удалось — покажем прочерк, менять язык это не мешает.
     }
-  }
-
-  /// Список родных языков — просмотр, назначение главного, удаление,
-  /// добавление нового. Полиглот может знать до шести языков (миграция
-  /// 0025); главный (звезда) — это то же самое, что раньше было
-  /// единственным «родным языком», и по-прежнему решает, на каком языке
-  /// показываются задания там, где у пары ещё нет своего anchor'а.
-  Future<void> _manageNativeLanguages() async {
-    await showModalBottomSheet<void>(
-      context: context,
-      backgroundColor: AppColors.navy2,
-      isScrollControlled: true,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-      ),
-      builder: (ctx) => StatefulBuilder(
-        builder: (ctx, setSheetState) {
-          Future<void> refresh() async {
-            final natives = await NativeLanguages.fetch(currentUserId);
-            if (mounted) setState(() => _natives = natives);
-            setSheetState(() {});
-          }
-
-          Future<void> makePrimary(String code) async {
-            try {
-              await NativeLanguages.setPrimary(code);
-              await refresh();
-            } catch (e) {
-              if (mounted) {
-                ScaffoldMessenger.of(context)
-                    .showSnackBar(SnackBar(content: Text('Не удалось сделать главным: $e')));
-              }
-            }
-          }
-
-          Future<void> remove(String code) async {
-            try {
-              await NativeLanguages.remove(code);
-              await refresh();
-            } catch (e) {
-              final msg = e.toString().contains('must_keep_one_native')
-                  ? 'Нужен хотя бы один родной язык — сначала добавь другой.'
-                  : 'Не удалось удалить: $e';
-              if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
-            }
-          }
-
-          Future<void> addNew() async {
-            final existing = _natives.map((n) => n.code).toSet();
-            final ready = await ContentLanguages.ready();
-            if (!mounted) return;
-            final picked = await showLanguagePicker(
-              context,
-              title: 'Добавить родной язык',
-              ready: ready,
-              taken: existing,
-              takenNote: 'уже в списке',
-            );
-            if (picked == null) return;
-            try {
-              await NativeLanguages.add(picked);
-              await refresh();
-            } catch (e) {
-              if (mounted) {
-                ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Не удалось добавить: $e')));
-              }
-            }
-          }
-
-          return SafeArea(
-            child: Padding(
-              padding: const EdgeInsets.only(bottom: 12),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  const SizedBox(height: 16),
-                  Text('Родные языки',
-                      style: AppFonts.ui(fontSize: 15, weight: FontWeight.w800, color: AppColors.cream)),
-                  const SizedBox(height: 4),
-                  const Text(
-                    'Звезда — главный: на нём показываются задания, если у пары ещё нет своего.',
-                    textAlign: TextAlign.center,
-                    style: TextStyle(color: AppColors.muted, fontSize: 11, height: 1.3),
-                  ),
-                  const SizedBox(height: 8),
-                  for (final native in _natives)
-                    ListTile(
-                      title: Text(allLanguages[native.code]?.endonym ?? native.code),
-                      leading: IconButton(
-                        icon: Icon(
-                          native.isPrimary ? Icons.star : Icons.star_border,
-                          color: native.isPrimary ? AppColors.gold : AppColors.muted,
-                        ),
-                        onPressed: native.isPrimary ? null : () => makePrimary(native.code),
-                        tooltip: native.isPrimary ? 'Главный родной язык' : 'Сделать главным',
-                      ),
-                      trailing: IconButton(
-                        icon: const Icon(Icons.close, color: AppColors.muted, size: 20),
-                        onPressed: _natives.length <= 1 ? null : () => remove(native.code),
-                        tooltip: 'Убрать из родных',
-                      ),
-                    ),
-                  if (_natives.length < maxNativeLanguages)
-                    ListTile(
-                      leading: const Icon(Icons.add, color: AppColors.gold),
-                      title: const Text('Добавить язык', style: TextStyle(color: AppColors.gold)),
-                      onTap: addNew,
-                    ),
-                  const SizedBox(height: 4),
-                ],
-              ),
-            ),
-          );
-        },
-      ),
-    );
   }
 
   Future<void> _signOut() async {
@@ -499,26 +375,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       style: AppFonts.mono(fontSize: 11, color: AppColors.muted),
                     ),
                     onTap: _pickInterfaceLanguage,
-                  ),
-                  const Divider(height: 1, color: AppColors.line),
-                  _Row(
-                    icon: Icons.translate,
-                    // Множественное число намеренно: полиглот может
-                    // назвать родными до шести языков (миграция 0025), а
-                    // не только один, как было раньше.
-                    title: t.nativeLanguages,
-                    trailing: Text(
-                      _natives.isEmpty
-                          ? '—'
-                          : _natives.length == 1
-                              ? allLanguages[_natives.first.code]?.endonym ?? _natives.first.code
-                              : '${allLanguages[_natives.firstWhere(
-                                    (n) => n.isPrimary,
-                                    orElse: () => _natives.first,
-                                  ).code]?.endonym} +${_natives.length - 1}',
-                      style: AppFonts.mono(fontSize: 11, color: AppColors.muted),
-                    ),
-                    onTap: _manageNativeLanguages,
                   ),
                 ],
               ),

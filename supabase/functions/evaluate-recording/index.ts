@@ -44,7 +44,12 @@ function cefrLevelForRating(leagueRating: number): CefrLevel {
 }
 
 /** Статусы работы судьи — CHECK у voice_recordings (миграции 0014, 0024). */
-type JudgeStatus = "pending" | "ok" | "degraded" | "skipped";
+/// Значения voice_recordings.judge_status (миграции 0014, 0024).
+///
+/// 'wrong_language' вернулся в дело: он был заведён под проверку языка в
+/// распознавании, та проверка ушла вместе с распознавателем, а теперь на
+/// тот же вопрос отвечает сама модель.
+type JudgeStatus = "pending" | "ok" | "degraded" | "skipped" | "wrong_language";
 
 /** Балл за ответ не на том языке: задание не выполнено. */
 
@@ -426,7 +431,20 @@ async function processJob(job_id: string): Promise<void> {
     // нет (модель не ответила), и клиент честно показывает пустоту.
     let reviewSpans: { k: string; t: string }[] | null = null;
 
-    if (omni.silent) {
+    if (omni.wrongLanguage) {
+      // Игрок говорил не на том языке. Разбирать нечего: всё, что «совпало»
+      // с изучаемым языком, — плод ожидания модели, а не его слова.
+      // В соло балла нет и раунд отвечается заново; в бою раунд обязан
+      // сдвинуться, и там это ноль — сказанное не на том языке переводом
+      // не является.
+      score = SILENT_SCORE;
+      feedback = `Ответ прозвучал не на том языке (${omni.spokenLanguage ?? "?"}).`;
+      judgeStatus = "wrong_language";
+      pipelineDebug.judge = {
+        status: "wrong_language",
+        heard_language: omni.spokenLanguage,
+      };
+    } else if (omni.silent) {
       // Модель послушала запись и речи не разобрала. Это НЕ наш сбой:
       // аудио до неё доехало, мы сами его отправили и знаем его размер.
       //
@@ -548,7 +566,9 @@ async function processJob(job_id: string): Promise<void> {
         { round_id: recording.round_id, user_id: recording.user_id, score, ai_feedback: feedback },
         { onConflict: "round_id,user_id" },
       );
-    } else if (recording.training_round_id && !omni.degraded && !omni.silent) {
+    } else if (
+      recording.training_round_id && !omni.degraded && !omni.silent && !omni.wrongLanguage
+    ) {
       // Одиночная Игра: в раунде одна запись, и балл за неё окончательный.
       // Раньше попыток было две, и балл ставился по второй — по той, где
       // игрок повторял фразу, только что показанную ему в разборе. Это

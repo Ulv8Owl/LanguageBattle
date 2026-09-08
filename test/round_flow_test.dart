@@ -207,8 +207,11 @@ void main() {
       // «Модель не ответила» на невнятной записи было бы неправдой: она
       // ответила, просто разбирать оказалось нечего.
       final s = screen();
-      expect(s, contains('outcome.status == TranscriptStatus.empty'));
-      expect(s, contains('? _speechUnclearNote'));
+      expect(s, contains('static String _reasonFor(RecordingOutcome outcome)'));
+      expect(s, contains('return _speechUnclearNote;'));
+      // Чужой язык — своя причина: «модель не ответила» было бы неправдой
+      // и здесь тоже.
+      expect(s, contains('return _wrongLanguageNote;'));
     });
 
     test('в бою балл остаётся нейтральным — иначе раунд не сдвинется', () {

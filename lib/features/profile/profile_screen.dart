@@ -6,21 +6,13 @@ import '../../core/game_access.dart';
 import '../../core/nav_state.dart';
 import '../../core/supabase_client.dart';
 import '../../core/theme.dart';
-import '../../data/native_languages.dart';
+import '../../data/language_pairs.dart';
 import '../../data/player_rating.dart';
 import '../../data/avatar_parts.dart';
 import '../../widgets/avatar_portrait.dart';
 import '../../widgets/chrolingo_widgets.dart';
 import '../../widgets/trial_countdown_banner.dart';
 
-/// Максимум языковых пар на аккаунт. Ограничение фиксируется здесь и
-/// проверяется на сервере (`add_language_pair`), а не только в UI.
-///
-/// Практический потолок сегодня ниже: пару можно завести только на язык с
-/// готовым банком фраз и слов (см. ContentLanguages), а таких пока три —
-/// значит, реально достижимо две пары, а не четыре. Число 4 — потолок
-/// МЕХАНИЗМА, готовый к росту контента без переделок.
-const kMaxLanguagePairs = 4;
 
 class ProfileScreen extends StatefulWidget {
   const ProfileScreen({super.key});
@@ -32,17 +24,9 @@ class ProfileScreen extends StatefulWidget {
 class _ProfileScreenState extends State<ProfileScreen> {
   Map<String, dynamic>? _profile;
 
-  /// Все изучаемые языки аккаунта (до kMaxLanguagePairs), каждый со своим
-  /// рейтингом. Ровно один помечен is_active — он используется везде в
-  /// приложении (Арена, бой, матчмейкинг, Тренировка).
-  List<Map<String, dynamic>> _pairs = [];
-
-  /// Все родные языки аккаунта (миграция 0025) — нужны здесь только для
-  /// одного решения: группировать ли пары по тому, с какого родного языка
-  /// они изучаются. Пока родной один (подавляющее большинство), группировка
-  /// не нужна и не показывается — заголовок над единственной группой был
-  /// бы шумом, а не подсказкой.
-  List<NativeLanguage> _natives = [];
+  /// Все пары аккаунта, каждая со своим рейтингом. Ровно одна активна — ей
+  /// пользуются все режимы (Арена, бой, матчмейкинг, Тренировка).
+  List<LanguagePair> _pairs = [];
   WalletState _wallet = WalletState.empty;
   int _played = 0;
   int _winPct = 0;
@@ -65,13 +49,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
       // Скрытые плашки не показываем, но и не удаляем: hidden_at убирает
       // пару с экрана, оставляя рейтинг, лигу и историю целыми
       // (миграция 0034).
-      final pairs = await supabase
-          .from('user_languages')
-          .select()
-          .eq('user_id', uid)
-          .eq('role', 'learning')
-          .isFilter('hidden_at', null)
-          .order('language_code');
+      final pairs = await fetchLanguagePairs(uid);
       final asA = await supabase.from('matches').select().eq('player_a_id', uid).eq('status', 'completed');
       final asB = await supabase.from('matches').select().eq('player_b_id', uid).eq('status', 'completed');
       final all = [...asA, ...asB]
@@ -96,13 +74,11 @@ class _ProfileScreenState extends State<ProfileScreen> {
       // плашки пробного периода (задача итерации, п.5: плашка переехала
       // сюда из Арены).
       final wallet = await GameAccess.sync();
-      final natives = await NativeLanguages.fetch(uid);
 
       if (!mounted) return;
       setState(() {
         _profile = profile;
-        _pairs = List<Map<String, dynamic>>.from(pairs);
-        _natives = natives;
+        _pairs = pairs;
         _wallet = wallet;
         _played = played;
         _winPct = played == 0 ? 0 : ((wins / played) * 100).round();
@@ -115,22 +91,18 @@ class _ProfileScreenState extends State<ProfileScreen> {
     }
   }
 
-  Widget _pairChip(Map<String, dynamic> pair, String defaultNative) {
-    // native_for — с какого родного языка изучается ИМЕННО эта пара
-    // (миграция 0025); у пар, заведённых до неё, значение null, и тогда
-    // честно берём единственный на тот момент родной. После миграции 0034
-    // null здесь уже невозможен — запасной путь оставлен на случай
-    // клиента, работающего с базой до неё.
-    final anchor = (pair['native_for'] as String?) ?? defaultNative;
+  Widget _pairChip(LanguagePair pair) {
     return _LanguagePairChip(
-      nativeFlag: languageFlag(anchor),
-      targetFlag: languageFlag(pair['language_code'] as String?),
+      nativeFlag: languageFlag(pair.speaks),
+      targetFlag: languageFlag(pair.learns),
+      nativeName: languageName(pair.speaks),
+      targetName: languageName(pair.learns),
       // Подсвечена ВЫБРАННАЯ пара, а не та, по которой сейчас попали
       // пальцем. Подсветка означает «этой парой вы играете», и мигать ею
       // на каждом касании значило бы обесценить единственный признак, по
       // которому активную пару вообще видно.
-      active: pair['is_active'] == true,
-      onTap: () => _openPairMenu(pair, anchor),
+      active: pair.isActive,
+      onTap: () => _openPairMenu(pair),
     );
   }
 
@@ -144,11 +116,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
   /// Тап мимо листа закрывает его, ничего не меняя, — это поведение
   /// showModalBottomSheet по умолчанию, и оно ровно то, что нужно: отмена
   /// должна быть самым доступным действием.
-  Future<void> _openPairMenu(Map<String, dynamic> pair, String anchor) async {
-    final target = pair['language_code'] as String;
-    final isActive = pair['is_active'] == true;
-    final title = '${languageFlag(anchor)} ${languageName(anchor)} → '
-        '${languageFlag(target)} ${languageName(target)}';
+  Future<void> _openPairMenu(LanguagePair pair) async {
+    final isActive = pair.isActive;
+    final title = '${languageFlag(pair.speaks)} ${languageName(pair.speaks)} → '
+        '${languageFlag(pair.learns)} ${languageName(pair.learns)}';
 
     final action = await showModalBottomSheet<String>(
       context: context,
@@ -194,18 +165,15 @@ class _ProfileScreenState extends State<ProfileScreen> {
       ),
     );
 
-    if (action == 'select') await _selectPair(target, anchor);
-    if (action == 'hide') await _hidePair(target, anchor);
+    if (action == 'select') await _selectPair(pair);
+    if (action == 'hide') await _hidePair(pair);
   }
 
   /// Убирает плашку с профиля, не трогая саму пару.
-  Future<void> _hidePair(String targetLanguage, String nativeLanguage) async {
+  Future<void> _hidePair(LanguagePair pair) async {
     setState(() => _switchingPair = true);
     try {
-      await supabase.rpc('hide_language_pair', params: {
-        'p_target_language': targetLanguage,
-        'p_native_language': nativeLanguage,
-      });
+      await hideLanguagePair(speaks: pair.speaks, learns: pair.learns);
       await _load();
     } catch (e) {
       if (mounted) {
@@ -225,60 +193,22 @@ class _ProfileScreenState extends State<ProfileScreen> {
         },
       );
 
-  /// Пары языков — плоским рядом, пока родной язык один (подавляющее
-  /// большинство игроков), и сгруппированными по родному, как только их
-  /// два и больше: полиглот может учить английский от русского и японский
-  /// от китайского одновременно, и это разные, не связанные друг с другом
-  /// траектории — смешивать их в одном ряду без подписи значило бы
-  /// заставлять его каждый раз вспоминать, какая пара с какой стороны.
-  Widget _buildPairs(String defaultNative) {
-    if (_natives.length <= 1) {
-      return Wrap(
-        spacing: 8,
-        runSpacing: 8,
-        children: [
-          for (final pair in _pairs) _pairChip(pair, defaultNative),
-          if (_pairs.length < kMaxLanguagePairs) _addPairChip(),
-        ],
-      );
-    }
-
-    final byNative = <String, List<Map<String, dynamic>>>{};
-    for (final pair in _pairs) {
-      final anchor = (pair['native_for'] as String?) ?? defaultNative;
-      byNative.putIfAbsent(anchor, () => []).add(pair);
-    }
-
-    // Порядок групп: сначала родные языки из списка, потом все остальные,
-    // на которые ещё смотрят пары. Второе — не теория: удалив родной язык
-    // из настроек, игрок НЕ теряет пары, заведённые от него (это правило
-    // всей задачи), и перебор только по _natives молча спрятал бы их с
-    // профиля. Пара, которой не видно, выглядит потерянной.
-    final ordered = [
-      for (final n in _natives)
-        if (byNative.containsKey(n.code)) n.code,
-      ...byNative.keys.where((code) => !_natives.any((n) => n.code == code)),
-    ];
-
+  /// Пары языков — один список сверху вниз, «плюс» всегда последним.
+  ///
+  /// РАНЬШЕ ОНИ ГРУППИРОВАЛИСЬ ПО РОДНОМУ ЯЗЫКУ, а «плюс» стоял в конце
+  /// ряда — то есть у одной пары оказывался справа от неё, а у пяти уезжал
+  /// куда-то в середину экрана. Группы держались на реестре родных языков,
+  /// которого больше нет: пара — это просто два языка, и делить их не по
+  /// чему. Один столбец, и кнопка всегда там, где её ждут.
+  Widget _buildPairs() {
     return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        for (final code in ordered) ...[
-          Padding(
-            padding: const EdgeInsets.only(bottom: 6),
-            child: Text(
-              languageName(code),
-              style: AppFonts.mono(fontSize: 10, weight: FontWeight.w700, color: AppColors.muted),
-            ),
-          ),
-          Wrap(
-            spacing: 8,
-            runSpacing: 8,
-            children: [for (final pair in byNative[code]!) _pairChip(pair, defaultNative)],
-          ),
-          const SizedBox(height: 10),
+        for (final pair in _pairs) ...[
+          _pairChip(pair),
+          const SizedBox(height: 8),
         ],
-        if (_pairs.length < kMaxLanguagePairs) _addPairChip(),
+        _addPairChip(),
       ],
     );
   }
@@ -287,16 +217,13 @@ class _ProfileScreenState extends State<ProfileScreen> {
   /// новой пары — это просто смена того, какая строка сейчас "активна"
   /// (задача итерации: "рейтинг НЕ обнуляется, а записывается для новой
   /// пары... выбрав старую пару рейтинг опять отображается").
-  Future<void> _selectPair(String targetLanguage, String nativeLanguage) async {
+  Future<void> _selectPair(LanguagePair pair) async {
     setState(() => _switchingPair = true);
     try {
-      // Родной язык обязателен: с двух родных можно учить один и тот же
-      // язык (ru-es и en-es), и по одному изучаемому пара больше не
-      // опознаётся однозначно.
-      await supabase.rpc('set_active_language_pair', params: {
-        'p_target_language': targetLanguage,
-        'p_native_language': nativeLanguage,
-      });
+      // Пара адресуется ОБОИМИ языками: с двух разных языков можно учить
+      // один и тот же (ru→es и en→es), и по одному изучаемому она не
+      // опознаётся.
+      await setActiveLanguagePair(speaks: pair.speaks, learns: pair.learns);
       notifyLanguagePairChanged();
       await _load();
     } catch (e) {
@@ -315,12 +242,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
     if (_loading) return const Center(child: CircularProgressIndicator());
 
     final username = (_profile?['username'] as String?) ?? 'Игрок';
-    final native = (_profile?['native_language'] as String?) ?? '?';
-    final activePair = _pairs.cast<Map<String, dynamic>?>().firstWhere(
-          (p) => p?['is_active'] == true,
-          orElse: () => null,
-        );
-    final rating = PlayerRating.fromRow(activePair);
+    // Рейтинг показывается по АКТИВНОЙ паре: у каждой он свой, и «рейтинг
+    // аккаунта» — величина, которой не существует.
+    final active = _pairs.where((p) => p.isActive).firstOrNull ?? _pairs.firstOrNull;
+    final rating = active?.rating ?? PlayerRating.newcomer;
     final league = rating.league;
 
     return RefreshIndicator(
@@ -390,7 +315,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
             opacity: _switchingPair ? 0.5 : 1,
             child: IgnorePointer(
               ignoring: _switchingPair,
-              child: _buildPairs(native),
+              child: _buildPairs(),
             ),
           ),
           const SizedBox(height: 18),
@@ -443,12 +368,20 @@ class _ProfileScreenState extends State<ProfileScreen> {
 class _LanguagePairChip extends StatelessWidget {
   final String nativeFlag;
   final String targetFlag;
+
+  /// Названия языков рядом с флагами: одни флаги игрок читает как ребус, а
+  /// пар теперь может быть сколько угодно, и «🇷🇺 → 🇬🇧» среди шести таких
+  /// же строк не отличить.
+  final String nativeName;
+  final String targetName;
   final bool active;
   final VoidCallback? onTap;
 
   const _LanguagePairChip({
     required this.nativeFlag,
     required this.targetFlag,
+    required this.nativeName,
+    required this.targetName,
     required this.active,
     required this.onTap,
   });
@@ -465,14 +398,28 @@ class _LanguagePairChip extends StatelessWidget {
           border: Border.all(color: active ? AppColors.gold : AppColors.line, width: active ? 1.5 : 1),
           borderRadius: BorderRadius.circular(12),
         ),
-        child: Text('$nativeFlag → $targetFlag', style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
+        child: Row(
+          children: [
+            Expanded(
+              child: Text(
+                '$nativeFlag $nativeName  →  $targetFlag $targetName',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+              ),
+            ),
+            if (active)
+              Text('выбрана',
+                  style: AppFonts.mono(fontSize: 9, weight: FontWeight.w700, color: AppColors.gold)),
+          ],
+        ),
       ),
     );
   }
 }
 
 /// Плашка «+» той же формы и размера, что и обычная пара — появляется
-/// справа от последней, пока пар меньше kMaxLanguagePairs.
+/// последней строкой списка — там, где её и ищут.
 class _AddPairChip extends StatelessWidget {
   final VoidCallback onTap;
 
@@ -490,7 +437,14 @@ class _AddPairChip extends StatelessWidget {
           border: Border.all(color: AppColors.lineStrong, style: BorderStyle.solid),
           borderRadius: BorderRadius.circular(12),
         ),
-        child: const Icon(Icons.add, size: 16, color: AppColors.muted),
+        child: const Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(Icons.add, size: 16, color: AppColors.muted),
+            SizedBox(width: 8),
+            Text('Добавить пару', style: TextStyle(color: AppColors.muted, fontSize: 13)),
+          ],
+        ),
       ),
     );
   }

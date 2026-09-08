@@ -2,15 +2,16 @@ import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
 
-/// Языковая пара — это РОДНОЙ ПЛЮС ИЗУЧАЕМЫЙ. Три поломки выросли из
-/// допущения, что пару достаточно назвать одним изучаемым языком, и все
-/// три выглядели по-разному: пара en-en после смены родного, «языков
-/// больше нет» на непустом списке и отказ завести ru-es рядом с en-es.
-/// Тесты читают сами файлы: инвариант живёт в SQL и в двух экранах.
+/// Языковая пара — ДВА ЯЗЫКА И БОЛЬШЕ НИЧЕГО: язык, с которого игрок
+/// переводит, и язык, который он изучает. Всё, что мешало парам жить —
+/// отдельный реестр «родных языков», потолок в четыре пары, опознание пары
+/// по одному изучаемому языку, — выросло из попыток хранить этот же факт
+/// где-то ещё. Тесты читают сами файлы: инвариант живёт в SQL и в экранах.
 void main() {
   String read(String path) => File(path).readAsStringSync();
 
   String migration() => read('supabase/migrations/0034_pair_identity.sql');
+  String pairsSql() => read('supabase/migrations/0046_pairs_without_registry.sql');
 
   test('пара не может остаться без родного языка', () {
     final sql = migration();
@@ -69,57 +70,94 @@ void main() {
     expect(read('lib/data/signup_rows.dart'), contains("'native_for': nativeLanguage"));
   });
 
-  test('экран добавления не запирает сам себя', () {
-    final screen = read('lib/features/profile/language_pair_screen.dart');
-    // Пустое состояние считалось по ТЕКУЩЕМУ родному и обрывало форму
-    // вместе с выбором родного: игрок с парами en-ru и en-es видел
-    // «языков больше нет» и не мог переключиться на русский.
-    expect(screen, contains('bool get _anythingToAdd'));
-    expect(screen, contains('if (!_anythingToAdd) {'));
-    // Занятость считается парами, а не изучаемыми языками.
-    expect(screen, contains("usedPairs.contains('\$native-\$l')"));
+  group('пары без реестра и без потолка', () {
+    test('добавление упирается только в совпадение языков', () {
+      final sql = pairsSql();
+      // Реестр родных был единственной причиной, по которой часть пар
+      // завести не удавалось, а потолок в четыре пары — числом с потолка.
+      // Проверяем тело, а не комментарий: объяснение, что именно убрано,
+      // в файле остаётся намеренно.
+      expect(sql.contains("raise exception 'native_not_registered'"), isFalse);
+      expect(sql.contains("raise exception 'pair_limit_reached'"), isFalse);
+      // Реестр больше не читается: обращений к таблице в теле нет.
+      expect(sql.contains('from user_native_languages'), isFalse);
+      expect(sql, contains("raise exception 'target_equals_native'"));
+      expect(sql, contains("raise exception 'pair_already_exists'"));
+    });
+
+    test('оба языка пары можно поменять, не заводя вторую', () {
+      // Игрок, ошибившийся с языками при регистрации, до сих пор не мог
+      // это исправить: профиля со списком пар ещё нет, а вторая пара
+      // осталась бы с ним навсегда.
+      final sql = pairsSql();
+      expect(sql, contains('function public.retarget_language_pair'));
+      // Рейтинг и уровень относились к прежнему изучаемому языку.
+      expect(sql, contains('rating = public.elo_default_rating()'));
+      expect(sql, contains('cefr_level = null'));
+    });
+
+    test('в приложении реестра родных языков не осталось', () {
+      // Он хранил тот же факт третьим местом и был лишь ограничителем.
+      expect(File('lib/data/native_languages.dart').existsSync(), isFalse);
+      for (final path in [
+        'lib/features/profile/settings_screen.dart',
+        'lib/features/profile/profile_screen.dart',
+        'lib/features/profile/language_pair_screen.dart',
+      ]) {
+        expect(read(path).contains('NativeLanguages'), isFalse, reason: path);
+      }
+      // И потолка пар тоже нет.
+      expect(read('lib/features/profile/profile_screen.dart').contains('kMaxLanguagePairs'),
+          isFalse);
+    });
+
+    test('оба языка выбираются свободно', () {
+      // Раньше «с какого языка» брали только из реестра, а изучаемый — из
+      // остатка: половина сочетаний была недоступна.
+      final screen = read('lib/features/profile/language_pair_screen.dart');
+      expect(screen, contains('onPickSpeaks'));
+      expect(screen, contains('onPickLearns'));
+      // Недоступен ровно один вариант — второй язык этой же пары.
+      expect(screen, contains('taken: {?other}'));
+    });
+
+    test('«плюс» всегда последней строкой', () {
+      // Раньше он стоял в конце ряда: у одной пары — справа от неё, у
+      // пяти — где-то в середине экрана.
+      final screen = read('lib/features/profile/profile_screen.dart');
+      expect(screen, contains('_addPairChip(),\n      ],'));
+      expect(screen.contains('byNative'), isFalse);
+    });
+
+    test('пара адресуется обоими языками', () {
+      // ru→es и en→es — разные пары с разным рейтингом.
+      final data = read('lib/data/language_pairs.dart');
+      expect(data, contains("'p_target_language': learns"));
+      expect(data, contains("'p_native_language': speaks"));
+      final screen = read('lib/features/profile/profile_screen.dart');
+      expect(screen, contains('setActiveLanguagePair(speaks: pair.speaks, learns: pair.learns)'));
+      expect(screen, contains('hideLanguagePair(speaks: pair.speaks, learns: pair.learns)'));
+    });
+
+    test('скрытые пары не показываются', () {
+      expect(read('lib/data/language_pairs.dart'), contains(".isFilter('hidden_at', null)"));
+    });
   });
 
-  test('плашка открывает меню, а не переключает пару сразу', () {
-    final screen = read('lib/features/profile/profile_screen.dart');
-    // Промах по соседней плашке молча уводил на другой язык, и заметно
-    // это становилось уже в бою.
-    expect(screen, contains('_openPairMenu(pair, anchor)'));
-    expect(screen, contains('Выбрать языковую пару'));
-    expect(screen, contains('Удалить языковую пару'));
-    // Подсвечена выбранная пара, а не та, по которой попали пальцем.
-    expect(screen, contains("active: pair['is_active'] == true"));
-  });
+  group('подбор соперника после отказа от реестра', () {
+    // Тикет собирается из языков АКТИВНОЙ ПАРЫ, а не из профиля: профильный
+    // «родной язык» больше ни на что не влияет.
+    test('в очередь уходят языки активной пары', () {
+      final screen = read('lib/features/matchmaking/matchmaking_screen.dart');
+      expect(screen, contains("'p_native_language': nativeLanguage"));
+      expect(screen, contains("'p_target_language': targetLanguage"));
+    });
 
-  test('переключение и скрытие адресуют пару вместе с родным языком', () {
-    final screen = read('lib/features/profile/profile_screen.dart');
-    for (final call in ['set_active_language_pair', 'hide_language_pair']) {
-      final at = screen.indexOf(call);
-      expect(at, greaterThan(-1), reason: call);
-      expect(screen.substring(at, at + 200), contains('p_native_language'), reason: call);
-    }
-  });
-
-  test('скрытые пары не показываются на профиле', () {
-    expect(read('lib/features/profile/profile_screen.dart'),
-        contains("isFilter('hidden_at', null)"));
-  });
-
-  test('изучаемым может быть язык, который стоит в родных', () {
-    // Запрет ровно один: язык нельзя учить у самого себя (ru-ru). Полиглот
-    // с русским и английским в родных вправе учить английский от русского
-    // — иначе второй родной язык отбирал бы у него целую пару.
-    final sql = migration();
-    expect(sql, contains('if p_target_language = v_native then'));
-    expect(sql, contains("raise exception 'target_equals_native'"));
-    // Проверка идёт против родного ЭТОЙ пары, а не против списка родных.
-    expect(sql.contains('user_native_languages where user_id = v_uid and language_code = p_target_language'),
-        isFalse);
-
-    // Клиент фильтрует так же: убирает только выбранный родной.
-    final pairScreen = read('lib/features/profile/language_pair_screen.dart');
-    expect(pairScreen, contains("ready.where((l) => l != native && !usedPairs.contains('\$native-\$l'))"));
-    // И объясняет отказ словами, а не текстом исключения.
-    expect(pairScreen, contains("text.contains('target_equals_native')"));
+    test('дуэль ищет обратную пару, состязание — общий изучаемый', () {
+      final sql = read('supabase/migrations/0041_mm_reason.sql');
+      expect(sql, contains('b.target_language = a.target_language'));
+      expect(sql, contains('b.target_language = a.native_language'));
+      expect(sql, contains('b.native_language = a.target_language'));
+    });
   });
 }

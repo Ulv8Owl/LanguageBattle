@@ -49,6 +49,10 @@ const _judgeSilentNote = 'Модель не ответила. Попробуй �
 /// другая, и «модель не ответила» здесь было бы неправдой: она ответила,
 /// просто разбирать оказалось нечего. Ноль тут был не лучше семи: он
 /// закрывал раунд оценкой за то, чего никто не слышал.
+const _wrongLanguageNote =
+    'Это был не тот язык. Фразу нужно сказать на изучаемом языке — скажи '
+    'ещё раз.';
+
 const _speechUnclearNote =
     'В записи не разобрать речи. Скажи фразу ещё раз — чётче и ближе к '
     'микрофону, удерживая кнопку всё время, пока говоришь.';
@@ -560,11 +564,7 @@ class _TrainingScreenState extends State<TrainingScreen> {
       if (score == null) {
         if (!mounted) return;
         setState(() {
-          _attempt = outcome.withClientFailure(
-            outcome.status == TranscriptStatus.empty
-                ? _speechUnclearNote
-                : _judgeSilentNote,
-          );
+          _attempt = outcome.withClientFailure(_reasonFor(outcome));
           _errors = const [];
           _stage = _Stage.awaitingAnswer;
         });
@@ -652,6 +652,16 @@ class _TrainingScreenState extends State<TrainingScreen> {
         judgeStatus: JudgeStatus.pending,
       );
     }
+  }
+
+  /// Почему раунд остался без балла — своими словами для каждой причины.
+  ///
+  /// «Модель не ответила» на невнятной записи или на чужом языке было бы
+  /// неправдой: она ответила, просто разбирать оказалось нечего.
+  static String _reasonFor(RecordingOutcome outcome) {
+    if (outcome.judgeStatus == JudgeStatus.wrongLanguage) return _wrongLanguageNote;
+    if (outcome.status == TranscriptStatus.empty) return _speechUnclearNote;
+    return _judgeSilentNote;
   }
 
   /// Награда за раунд. Отдельной функцией, потому что просят её ровно один
@@ -1283,6 +1293,7 @@ class _ErrorReport extends StatelessWidget {
       // Порядок важен: «речи не разобрать» — это ответ модели, а
       // «модель не ответила» — её молчание. Оба закрывают раунд без
       // балла, но игроку они говорят разное, и путать их нельзя.
+      _ when judge == JudgeStatus.wrongLanguage => ('НЕ ТОТ ЯЗЫК', AppColors.danger),
       TranscriptStatus.empty => ('РЕЧИ НЕ РАЗОБРАТЬ', AppColors.danger),
       _ when clientFailure != null => ('МОДЕЛЬ НЕ ОТВЕТИЛА', AppColors.danger),
       TranscriptStatus.failed => ('РЕЧЬ НЕ РАСПОЗНАНА', AppColors.muted),
@@ -1298,6 +1309,7 @@ class _ErrorReport extends StatelessWidget {
     };
 
     final String hint = switch (status) {
+      _ when judge == JudgeStatus.wrongLanguage => _wrongLanguageNote,
       TranscriptStatus.empty => _speechUnclearNote,
       // Текст причины приходит в clientFailure целиком: это и есть
       // сообщение игроку, а не техническая приписка к нему.

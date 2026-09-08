@@ -94,6 +94,21 @@ export interface OmniResult {
    * провайдер.
    */
   silent?: boolean;
+  /**
+   * Игрок говорил не на том языке — и модель это назвала сама.
+   *
+   * ЗАЧЕМ ОТДЕЛЬНЫЙ ВОПРОС. Модель, которой сказали «сейчас будет
+   * английский», в русской речи слышит похожие на английские слова и
+   * записывает их как сказанные: половина «перевода» засчитывалась верной.
+   * Ожидание языка — этого достаточно, чтобы его «услышать». Явный вопрос
+   * «а что за язык ты вообще слышал» ловит это одним словом.
+   *
+   * ВТОРОГО РАСПОЗНАВАТЕЛЯ ЗДЕСЬ НЕТ. Распознаётся по-прежнему один язык —
+   * мы только просим модель честно сказать, тот ли он.
+   */
+  wrongLanguage?: boolean;
+  /** Язык, который модель услышала. Пусто — она его не назвала. */
+  spokenLanguage?: string;
   failureReason?: string;
   debug: Record<string, unknown>;
 }
@@ -247,6 +262,30 @@ function systemPrompt(
     level,
     reference: reference.trim(),
   });
+}
+
+/**
+ * Тот ли язык назвала модель.
+ *
+ * Сравнение по названию, а не по коду: код мы у неё не просим — на вопрос
+ * «какой язык» модель отвечает словом, и просить вместо этого ISO-код
+ * значит добавить ей повод ошибиться на ровном месте. Сравниваем мягко:
+ * "English", "english", "англ. English" — всё это про один язык.
+ *
+ * НЕИЗВЕСТНОЕ НАЗВАНИЕ СЧИТАЕТСЯ СВОИМ. Если мы не знаем языка (реестр
+ * шире, чем список названий), отказать игроку было бы хуже, чем пропустить
+ * редкий случай: он получит разбор, а не отказ ни за что.
+ */
+function sameLanguage(spoken: string, targetCode: string): boolean {
+  const said = spoken.toLowerCase();
+  const target = languageName(targetCode).toLowerCase();
+  if (said.includes(target)) return true;
+  // Название какого-то ДРУГОГО известного языка — значит точно не наш.
+  for (const [code, name] of Object.entries(LANGUAGE_NAMES)) {
+    if (code === targetCode.toLowerCase()) continue;
+    if (said.includes(name.toLowerCase())) return false;
+  }
+  return true;
 }
 
 function base64(bytes: Uint8Array): string {
@@ -545,6 +584,29 @@ export async function omniEvaluate(req: OmniRequest): Promise<OmniResult> {
     audio_bytes: req.audio.byteLength,
     audio_format: req.audioFormat,
   };
+
+  // Модель услышала не тот язык. Это ответ, а не сбой: разбирать чужую
+  // речь как перевод нечем, и любая её часть, «совпавшая» с изучаемым
+  // языком, — плод ожидания, а не того, что игрок сказал.
+  const spoke = typeof parsed.spoke === "string" ? parsed.spoke.trim() : "";
+  if (spoke.length > 0 && !sameLanguage(spoke, req.targetLanguage)) {
+    return {
+      review: [],
+      errors: [],
+      audible: true,
+      degraded: false,
+      wrongLanguage: true,
+      spokenLanguage: spoke,
+      debug: {
+        ...omniConfigDebug(),
+        status: "wrong_language",
+        reason: `модель услышала ${spoke}, ожидался ${languageName(req.targetLanguage)}`,
+        ms: Date.now() - started,
+        audio_bytes: req.audio.byteLength,
+        raw: raw.slice(0, 400),
+      },
+    };
+  }
 
   // Модель послушала запись и речи не разобрала.
   //

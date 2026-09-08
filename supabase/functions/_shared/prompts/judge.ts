@@ -12,7 +12,7 @@
  *    писать можно только те, что там есть.
  *  * Обратные кавычки ` и последовательность ${ внутри самого текста —
  *    они закрывают строку. Если нужны буквально, ставьте \` и \${.
- *  * Формат ответа в конце. Поля said/fix/kind/why и audible/heard/correct
+ *  * Формат ответа в конце. Поля said/fix/kind/why и audible/spoke/heard/correct
  *    читает код (omniJudge.ts); переименуете здесь — перестанет читаться.
  *
  * ЯЗЫК ПРОМПТА — АНГЛИЙСКИЙ, И ЭТО НЕ СЛУЧАЙНОСТЬ. Язык инструкции не
@@ -54,6 +54,13 @@ ${referenceBlock(v)}
 First say whether you can hear any speech at all in the recording: "audible": true or false.
 Answer false when the recording is silent, noise only, or you received no audio. Never guess in that case —
 an invented assessment is worse than none.
+
+Then name the language he actually spoke, in English, in "spoke" — whatever it turns out to be. THIS IS
+NOT A FORMALITY. You are expecting ${v.target}, and expecting a language is enough to hear it: in a
+recording of another language you will catch what sounds like ${v.target} words and write them down as if
+he had said them. Listen to the sounds first and decide what language they are, and only then transcribe.
+If it is not ${v.target}, say so in "spoke" and stop there: leave "heard", "correct" and "errors" empty.
+Half a translation invented out of another language is worse than an honest "that was not ${v.target}".
 
 THE TRANSCRIPTION IS THE POINT OF THIS TASK. Write in "heard" exactly what you hear and nothing else:
 the learner's own words with every mistake left in, and only the part he actually said. Do not complete
@@ -122,7 +129,7 @@ this is not an error at all.
 
 Example. The learner was asked to say «Я встаю в семь. Потом я варю кофе и читаю новости.» in English
 and said "I get up at seven o'clock. After that I make coffee." Correct answer:
-{"audible": true, "heard": "I get up at seven o'clock. After that I make coffee.",
+{"audible": true, "spoke": "${v.target}", "heard": "I get up at seven o'clock. After that I make coffee.",
  "correct": "I get up at seven o'clock. After that I make coffee and read the news.", "errors": []}
 "errors" is EMPTY here, and that is the whole point of the example. "seven o'clock" and "After that" are
 correct — you would say it shorter, and that is not his problem, so "correct" keeps his wording. The
@@ -131,7 +138,7 @@ also that "heard" stops where he stopped.
 
 Second example, same task, and he said "I stand up in seven o'clock. After that I do coffee." Now there
 are real errors, and see how narrowly each one is quoted:
-{"audible": true, "heard": "I stand up in seven o'clock. After that I do coffee.",
+{"audible": true, "spoke": "${v.target}", "heard": "I stand up in seven o'clock. After that I do coffee.",
  "correct": "I get up at seven o'clock. After that I make coffee and read the news.",
  "errors": [{"said": "stand up", "fix": "get up", "kind": "word", "why": "<объяснение>"},
             {"said": "in seven", "fix": "at seven", "kind": "grammar", "why": "<объяснение>"},
@@ -148,8 +155,9 @@ what his said instead. Do not state a general rule: a rule invented to fit one e
 and the learner will believe it. If you cannot say briefly and truthfully why, just say what it should be.
 
 Reply with a single JSON object and nothing else — no markdown, no commentary:
-{"audible": boolean, "heard": string, "correct": string,
+{"audible": boolean, "spoke": string, "heard": string, "correct": string,
  "errors": [{"said": string, "fix": string, "kind": "meaning"|"grammar"|"word", "why": string}]}
+"spoke" — the language you actually heard, in English ("${v.target}", "Russian", "Spanish", …).
 "said" — the learner's own words, quoted verbatim with the mistake left in; never correct them there,
 or the learner will not recognise his own mistake. "fix" — the words that stand in that place in your
 "correct", copied from it.

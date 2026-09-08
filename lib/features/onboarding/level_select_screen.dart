@@ -3,8 +3,13 @@ import 'package:go_router/go_router.dart';
 
 import '../../core/app_locale.dart';
 import '../../core/cefr_levels.dart';
+import '../../core/all_languages.dart';
 import '../../core/supabase_client.dart';
 import '../../core/theme.dart';
+import '../../data/content_languages.dart';
+import '../../data/language_pairs.dart';
+import '../../widgets/language_picker.dart';
+import '../profile/language_pair_screen.dart';
 import '../../widgets/chrolingo_widgets.dart';
 
 /// Третий шаг регистрации: игрок называет свой уровень владения языком, а
@@ -43,8 +48,14 @@ class _LevelSelectScreenState extends State<LevelSelectScreen> {
   bool _busy = false;
   String? _error;
 
-  /// Изучаемый язык активной пары — его и просим подтвердить.
-  String? _targetLanguage;
+  /// Пара, уровень которой подтверждаем.
+  ///
+  /// ЕЁ МОЖНО ПОМЕНЯТЬ ПРЯМО ЗДЕСЬ. Пара заводится на предыдущем шаге
+  /// регистрации, и ошибиться там легко — а исправить было негде: профиля
+  /// со списком пар ещё нет, а завести рядом вторую значило бы навсегда
+  /// остаться с ненужной первой. Плашка ниже открывает выбор обоих языков.
+  LanguagePair? _pair;
+  Set<String> _ready = {};
 
   /// Нужно ли подтверждать выбранный уровень. Не нужно только для самого
   /// нижнего (A0) — см. док-комментарий экрана.
@@ -53,24 +64,97 @@ class _LevelSelectScreenState extends State<LevelSelectScreen> {
   @override
   void initState() {
     super.initState();
-    _loadTargetLanguage();
+    _loadPair();
   }
 
-  Future<void> _loadTargetLanguage() async {
+  Future<void> _loadPair() async {
     try {
-      final row = await supabase
-          .from('user_languages')
-          .select('language_code')
-          .eq('user_id', currentUserId)
-          .eq('role', 'learning')
-          .eq('is_active', true)
-          .limit(1)
-          .maybeSingle();
+      final ready = await ContentLanguages.ready();
+      final pair = await fetchActivePair();
       if (!mounted) return;
-      setState(() => _targetLanguage = row?['language_code'] as String?);
+      setState(() {
+        _ready = ready;
+        _pair = pair;
+      });
     } catch (_) {
       // Молча: кнопка проверки останется недоступной, и это честнее, чем
       // отправить игрока на проверку неизвестно какого языка.
+    }
+  }
+
+  /// Смена языков пары прямо на этом экране.
+  ///
+  /// Меняется существующая пара, а не заводится новая: у игрока она пока
+  /// одна, и вторая, ненужная, осталась бы с ним навсегда. Рейтинг и
+  /// подтверждённый уровень при смене изучаемого языка сбрасываются — они
+  /// относились к прежнему языку (см. retarget_language_pair).
+  Future<void> _editPair() async {
+    final pair = _pair;
+    if (pair == null || _busy) return;
+    var speaks = pair.speaks;
+    var learns = pair.learns;
+
+    final changed = await showModalBottomSheet<bool>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: AppColors.navy2,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setSheet) => SafeArea(
+          child: Padding(
+            padding: EdgeInsets.fromLTRB(
+                20, 18, 20, 18 + MediaQuery.of(ctx).viewInsets.bottom),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Text('Языковая пара',
+                    style: AppFonts.ui(fontSize: 16, weight: FontWeight.w800)),
+                const SizedBox(height: 14),
+                LanguagePairFields(
+                  speaks: speaks,
+                  learns: learns,
+                  onPickSpeaks: () async {
+                    final picked = await showLanguagePicker(ctx,
+                        title: 'С какого языка переводить',
+                        ready: _ready,
+                        taken: {learns},
+                        takenNote: 'это второй язык пары');
+                    if (picked != null) setSheet(() => speaks = picked);
+                  },
+                  onPickLearns: () async {
+                    final picked = await showLanguagePicker(ctx,
+                        title: 'Какой язык изучать',
+                        ready: _ready,
+                        taken: {speaks},
+                        takenNote: 'это второй язык пары');
+                    if (picked != null) setSheet(() => learns = picked);
+                  },
+                ),
+                const SizedBox(height: 18),
+                ElevatedButton(
+                  onPressed: speaks == learns ? null : () => Navigator.pop(ctx, true),
+                  child: const Text('Сохранить'),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+
+    if (changed != true || !mounted) return;
+    if (speaks == pair.speaks && learns == pair.learns) return;
+    setState(() => _busy = true);
+    try {
+      await retargetLanguagePair(pair: pair, speaks: speaks, learns: learns);
+      await _loadPair();
+    } catch (e) {
+      if (mounted) setState(() => _error = languagePairError(e));
+    } finally {
+      if (mounted) setState(() => _busy = false);
     }
   }
 
@@ -88,7 +172,7 @@ class _LevelSelectScreenState extends State<LevelSelectScreen> {
   /// Действие главной кнопки: для всех уровней, кроме A0, — прогнать
   /// проверку и разобрать её результат; для A0 — сразу поставить рейтинг.
   Future<void> _start() async {
-    final language = _targetLanguage;
+    final language = _pair?.learns;
     if (language == null) return;
 
     // A0 проверять нечем и незачем — сразу ставим рейтинг. Процент здесь
@@ -218,6 +302,8 @@ class _LevelSelectScreenState extends State<LevelSelectScreen> {
                     t.levelSelectIntro,
                     style: const TextStyle(color: AppColors.muted, fontSize: 13, height: 1.5),
                   ),
+                  const SizedBox(height: 14),
+                  _PairBanner(pair: _pair, onTap: _busy ? null : _editPair),
                   const SizedBox(height: 18),
                   for (final level in cefrLevels) ...[
                     _LevelTile(
@@ -248,7 +334,7 @@ class _LevelSelectScreenState extends State<LevelSelectScreen> {
                 width: double.infinity,
                 child: ElevatedButton(
                   // Пока не знаем изучаемый язык — идти на проверку некуда.
-                  onPressed: (_busy || _targetLanguage == null) ? null : _start,
+                  onPressed: (_busy || _pair == null) ? null : _start,
                   child: _busy
                       ? const SizedBox(
                           height: 20,
@@ -322,6 +408,59 @@ class _LevelTile extends StatelessWidget {
               ),
             ],
           ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Плашка пары над выбором уровня: с какого языка и какой изучаем.
+///
+/// Не украшение. Уровень подтверждается ДЛЯ КОНКРЕТНОЙ пары, и игрок,
+/// ошибшийся с языками шагом раньше, до сих пор проходил проверку не того
+/// языка, даже не понимая этого: на экране не было написано, о каком языке
+/// вообще речь.
+class _PairBanner extends StatelessWidget {
+  final LanguagePair? pair;
+  final VoidCallback? onTap;
+
+  const _PairBanner({required this.pair, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    final p = pair;
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(12),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+        decoration: BoxDecoration(
+          color: AppColors.navy3,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: AppColors.line),
+        ),
+        child: Row(
+          children: [
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('ЯЗЫКОВАЯ ПАРА',
+                      style: AppFonts.mono(
+                          fontSize: 9, weight: FontWeight.w700, color: AppColors.muted)),
+                  const SizedBox(height: 5),
+                  Text(
+                    p == null
+                        ? 'Загружаем…'
+                        : '${languageFlag(p.speaks)} ${languageName(p.speaks)}'
+                            '  →  ${languageFlag(p.learns)} ${languageName(p.learns)}',
+                    style: AppFonts.ui(fontSize: 15, weight: FontWeight.w700),
+                  ),
+                ],
+              ),
+            ),
+            const Icon(Icons.edit_outlined, size: 18, color: AppColors.gold),
+          ],
         ),
       ),
     );
