@@ -155,16 +155,34 @@ class _Preview extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Container(
+    // Рамка поверх портрета, а не вокруг него: в BoxDecoration она создаёт
+    // отступ, и между картинкой и кольцом оставалась полоска подложки.
+    return SizedBox(
       height: 168,
       width: 168,
-      decoration: BoxDecoration(
-        shape: BoxShape.circle,
-        border: Border.all(color: AppColors.gold.withValues(alpha: 0.5), width: 2),
-        boxShadow: [BoxShadow(color: AppColors.gold.withValues(alpha: 0.18), blurRadius: 28)],
+      child: Stack(
+        children: [
+          Positioned.fill(
+            child: DecoratedBox(
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                boxShadow: [
+                  BoxShadow(color: AppColors.gold.withValues(alpha: 0.18), blurRadius: 28),
+                ],
+              ),
+              child: ClipOval(child: AvatarPortrait(avatar: equipped)),
+            ),
+          ),
+          Positioned.fill(
+            child: DecoratedBox(
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                border: Border.all(color: AppColors.gold.withValues(alpha: 0.5), width: 2),
+              ),
+            ),
+          ),
+        ],
       ),
-      clipBehavior: Clip.antiAlias,
-      child: AvatarPortrait(avatar: equipped),
     );
   }
 }

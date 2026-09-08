@@ -74,6 +74,19 @@ void main() {
       expect(find.byType(Image), findsNothing);
     });
 
+    testWidgets('портрет занимает круг целиком, рамка его не ужимает', (tester) async {
+      // Рамка в BoxDecoration создаёт отступ: картинка ужималась на её
+      // толщину, и между портретом и кольцом оставалась полоска подложки —
+      // те самые полоски по краям аватара.
+      await tester.pumpWidget(MaterialApp(
+        home: Scaffold(
+          body: Center(child: ChAvatar(name: 'Дима', avatar: defaultAvatar(), size: 100)),
+        ),
+      ));
+      final image = tester.getSize(find.byType(Image).first);
+      expect(image, const Size(100, 100));
+    });
+
     testWidgets('с аватаром — слои вместо буквы', (tester) async {
       await tester.pumpWidget(MaterialApp(
         home: Scaffold(body: ChAvatar(name: 'Дима', avatar: defaultAvatar())),
@@ -126,7 +139,7 @@ void main() {
     test('в Профиле и на Арене аватар одного размера', () {
       // Это одно и то же лицо, и разный размер читался бы как разные вещи.
       final widget = read('lib/widgets/avatar_portrait.dart');
-      expect(widget, contains('const double profileAvatarSize = 102;'));
+      expect(widget, contains('const double profileAvatarSize = 75;'));
       // Размер задаётся константой, а не числом на каждом экране.
       expect(read('lib/features/arena/arena_screen.dart').contains('size: 40,\n                ringColor'),
           isFalse);

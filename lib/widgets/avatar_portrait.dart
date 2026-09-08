@@ -44,7 +44,7 @@ class AvatarPortrait extends StatelessWidget {
 /// шапке Арены и аватар в Профиле — это одно и то же лицо, и разный размер
 /// читался бы как разные вещи. Держать два числа значило бы однажды
 /// поправить одно из них.
-const double profileAvatarSize = 102;
+const double profileAvatarSize = 75;
 
 /// Аватар, по которому открывается редактор.
 ///

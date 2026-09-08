@@ -236,25 +236,50 @@ class ChAvatar extends StatelessWidget {
       child: Stack(
         clipBehavior: Clip.none,
         children: [
-          Container(
-            decoration: BoxDecoration(
-              shape: BoxShape.circle,
-              gradient: const LinearGradient(colors: [AppColors.navy4, AppColors.navy2]),
-              boxShadow: glow
-                  ? [BoxShadow(color: ringColor, blurRadius: size * 0.3, spreadRadius: size * 0.045)]
-                  : null,
-              border: Border.all(color: ringColor, width: 2),
+          // РАМКА РИСУЕТСЯ ПОВЕРХ КАРТИНКИ, а не вокруг неё.
+          //
+          // Раньше и рамка, и содержимое жили в одном Container: рамка в
+          // BoxDecoration создаёт отступ, ребёнок ужимался на её толщину, и
+          // между портретом и кольцом оставалось кольцо подложки — те самые
+          // полоски по краям аватара. Теперь портрет занимает круг целиком,
+          // а кольцо ложится сверху и ничего не отодвигает.
+          Positioned.fill(
+            child: DecoratedBox(
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                boxShadow: glow
+                    ? [BoxShadow(color: ringColor, blurRadius: size * 0.3, spreadRadius: size * 0.045)]
+                    : null,
+              ),
+              child: ClipOval(
+                child: hasAvatar(avatar)
+                    ? AvatarPortrait(avatar: avatar)
+                    : DecoratedBox(
+                        decoration: const BoxDecoration(
+                          gradient: LinearGradient(colors: [AppColors.navy4, AppColors.navy2]),
+                        ),
+                        child: Center(
+                          child: Text(
+                            initial,
+                            style: AppFonts.ui(
+                                fontSize: size * 0.4,
+                                weight: FontWeight.w800,
+                                color: AppColors.cream),
+                          ),
+                        ),
+                      ),
+              ),
             ),
-            clipBehavior: Clip.antiAlias,
-            child: hasAvatar(avatar)
-                ? AvatarPortrait(avatar: avatar)
-                : Center(
-                    child: Text(
-                      initial,
-                      style: AppFonts.ui(
-                          fontSize: size * 0.4, weight: FontWeight.w800, color: AppColors.cream),
-                    ),
-                  ),
+          ),
+          Positioned.fill(
+            child: IgnorePointer(
+              child: DecoratedBox(
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  border: Border.all(color: ringColor, width: 2),
+                ),
+              ),
+            ),
           ),
           if (online)
             Positioned(
