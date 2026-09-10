@@ -7,6 +7,16 @@ import 'package:flutter_test/flutter_test.dart';
 /// словами — вся история этого файла: с эталоном модель требовала
 /// совпадения слово в слово и наказывала за верный перевод, сказанный
 /// иначе; без него ошибалась сама и уносила свою ошибку в разбор.
+/// ПОЧЕМУ ЗДЕСЬ НЕТ ДОСЛОВНЫХ ЦИТАТ ИЗ ПРОМПТА. Были — и ломались на каждой
+/// правке формулировки, а промпт правят чаще любого кода вокруг: он для
+/// того и вынесен отдельным файлом, чтобы менять его свободно. Три раза
+/// подряд тесты падали не потому, что что-то сломалось, а потому, что фразу
+/// переписали лучше.
+///
+/// Поэтому проверяется КОНТРАКТ, а не текст: имена полей, которые читает
+/// код, наличие подстановок, поведение при пустом образце — и по одному
+/// устойчивому признаку на каждое правило, которое родилось из настоящего
+/// бага. Признак берётся такой, который переживёт переписывание абзаца.
 void main() {
   String read(String path) => File(path).readAsStringSync();
 
@@ -17,11 +27,11 @@ void main() {
   test('наш перевод — ориентир, а не эталон', () {
     final s = prompt();
     // Три вещи, без любой из которых образец снова станет эталоном.
-    expect(s, contains('Read it as ONE possible correct answer, not as the answer'));
-    expect(s, contains('never turn a difference in wording into an'));
-    // И то, ради чего он вернулся: неверный перевод самой модели ловится
-    // образцом. «Мы гуляем в парке» превращалось в «we go to the park».
-    expect(s, contains('then YOU are the one who is wrong'));
+    // Образец решает СМЫСЛ и не решает СЛОВА — обе половины обязательны.
+    // Без первой модель не видит подмены дня недели и пропущенной половины
+    // фразы; без второй объявляет ошибкой верный перевод, сказанный иначе.
+    expect(s, contains('for the meaning only'));
+    expect(s, contains('It does not tell you WHICH WORDS'));
     // Без образца блока нет вовсе: пустая строка на его месте читалась бы
     // как «правильный перевод — пустота».
     expect(s, contains('if (v.reference.length === 0) return "";'));
@@ -48,16 +58,16 @@ void main() {
   test('цитату сказанного модель не чинит', () {
     // В плашке ошибки и в зачёркнутом куске должны стоять слова игрока, а
     // не исправленный за него вариант: иначе он не узнает свою ошибку.
-    expect(prompt(), contains('quoted verbatim with the mistake left in'));
-    expect(prompt(), contains('never correct them there'));
+    expect(prompt(), contains('quoted exactly as he said them'));
+    expect(prompt(), contains('Never correct them here'));
     // И расшифровка — дословная, а не приглаженная.
-    expect(prompt(), contains('with every mistake left in'));
+    expect(prompt(), contains('every mistake'));
   });
 
   test('ошибки группируются по смыслу, а не по словам', () {
     // Это и есть просьба игрока: не привязываться к структуре элементов, а
     // объединять в одну ошибку всё, что пошло не так по одной причине.
-    expect(prompt(), contains('Group errors by MEANING'));
+    expect(prompt(), contains('Everything wrong for one reason is one error'));
   });
 
   test('поток обязателен, аудио на выходе не просим', () {
@@ -123,7 +133,8 @@ void main() {
     // Модель, до которой аудио не доехало, отвечает своим переводом без
     // единой ошибки: игрок получает десятку за что угодно, и по ответу
     // этого не видно. Явный вопрос превращает молчаливую ложь в отказ.
-    expect(prompt(), contains('"audible": true or false'));
+    expect(prompt(), contains('"audible"'));
+    expect(prompt(), contains('any speech in the recording'));
     expect(omni(), contains('if (parsed.audible === false)'));
     expect(omni(), contains('audible=false'));
   });
@@ -143,7 +154,9 @@ void main() {
     // Она нужна не экрану, а сравнению: без неё модель не представляет
     // сказанное явно и по умолчанию соглашается, что всё верно.
     final s = omni();
-    expect(prompt(), contains('THE TRANSCRIPTION IS THE POINT OF THIS TASK'));
+    expect(prompt(), contains('"heard"'));
+    // Только сказанное и ничего сверх: договаривать за игрока нельзя.
+    expect(prompt(), contains('only the part he'));
     expect(s, contains('в ответе нет расшифровки'));
     // На экране её нет: блок «Голосовое:» убран и не возвращается.
     expect(read('lib/widgets/transcript_review.dart').contains('Голосовое'), isFalse);
@@ -153,7 +166,7 @@ void main() {
     // Модель регулярно присылает «сказал X, надо X» с объяснением «эту
     // часть не сказали». Долю несказанного мы уже посчитали по ленте.
     expect(omni(), contains('if (correction.length > 0 && correction === text) continue;'));
-    expect(prompt(), contains('NEVER put an omission in'));
+    expect(prompt(), contains('Never list what he did NOT say'));
   });
 
   test('пробел на стыке кусков восстанавливается', () {
@@ -162,13 +175,20 @@ void main() {
     expect(omni(), contains('out[i].text += " ";'));
   });
 
-  test('в промпте есть разобранный пример', () {
-    // Пример показывает три вещи разом: расшифровка обрывается там, где
-    // игрок замолчал; пропуск не превращается в запись об ошибке; более
-    // длинный, но верный оборот ошибкой не считается.
-    expect(prompt(), contains('Example. The learner was asked to say'));
-    expect(prompt(), contains('"heard" stops where he stopped'));
-    expect(prompt(), contains('"errors" is EMPTY here'));
+  test('разобранных примеров в промпте НЕТ, и это правило', () {
+    // Пример стоял на «Я встаю в семь. Потом я варю кофе…» — первой фразе
+    // банка A1, которую игроки читают чаще любой другой, — и показывал
+    // готовый список ошибок. Модель его и переписывала: игрок сказал верное
+    // «wake up» и получил «надо get up», а правка «at seven» пришла без
+    // «o'clock» — ровно как в примере. Пример на задании, которое сейчас
+    // проверяют, это не образец рассуждения, а готовый ответ.
+    expect(prompt().contains('Example. The learner was asked to say'), isFalse);
+    expect(prompt().contains('Second example'), isFalse);
+    // И по той же причине запрещённые придирки не перечисляются поимённо:
+    // названная пара становится модели доступной.
+    expect(prompt().contains('"After that" instead of "Then"'), isFalse);
+    // Правило записано в шапке файла, чтобы его не вернули по недосмотру.
+    expect(prompt(), contains('ПОЧЕМУ ЗДЕСЬ НЕТ РАЗОБРАННЫХ ПРИМЕРОВ'));
   });
 
   test('сырой ответ модели сохраняется', () {
