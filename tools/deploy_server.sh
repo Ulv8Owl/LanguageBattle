@@ -18,7 +18,20 @@ require_synced "$BRANCH"
 note "Деплою $(git rev-parse --short HEAD)  $(git log -1 --format=%s)"
 
 step "1/2 Применяю миграции"
-npx supabase db push
+# --include-all нужен из-за веток сравнения, и вот почему.
+#
+# У Omni своя миграция (0047), у LLM своя (0048), и в папке каждой ветки
+# лежит только СВОЯ. База же одна на всех. Стоит применить 0048 с ветки LLM,
+# а потом перейти на Omni — и CLI видит местный файл 0047, которого в базе
+# нет, а номер у него МЕНЬШЕ последнего применённого. Без флага он на этом
+# останавливается с малопонятным «found local migration files to be inserted
+# before the last migration on remote database».
+#
+# Флаг говорит: применяй всё, чего в базе ещё нет, независимо от номера. Для
+# наших миграций это безопасно — они только добавляют колонки, и все через
+# `if not exists`. Ничего чужого ни одна ветка не сносит: обе колонки Omni и
+# LLM спокойно живут в базе рядом.
+npx supabase db push --include-all
 
 step "2/2 Деплою Edge Functions"
 # evaluate-recording — воркер оценки; config-check — диагностика ключей;
