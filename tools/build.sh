@@ -22,32 +22,40 @@ REPO="$(pwd)"
 # shellcheck source=tools/lib.sh
 source tools/lib.sh
 
-step "1/8 Проверяю дерево и что оно совпадает с origin"
+step "1/9 Проверяю дерево и что оно совпадает с origin"
 require_clean_tree
 # Синхронизацией занимается release.sh, и намеренно НЕ занимаемся ей здесь:
 # скрипт, обновляющий сам себя, дальше выполняется уже наполовину устаревшим.
 require_synced "$BRANCH"
 
-step "2/8 Ветка и коммит"
+step "2/9 Ветка и коммит"
 
 BUILD_ID="$(git rev-parse --short HEAD)"
 echo "Ветка: $BRANCH"
 echo "Коммит: $BUILD_ID  $(git log -1 --format=%s)"
 
-step "3/8 Чищу прошлую сборку"
+step "3/9 Чищу прошлую сборку"
 # Без этого Gradle способен отдать старый libapp.so, и APK окажется свежим
 # по дате, но старым по содержимому.
 flutter clean >/dev/null
 
-step "4/8 Ставлю зависимости"
+step "4/9 Ставлю зависимости"
 flutter pub get >/dev/null
+
+step "5/9 Проверяю код перед сборкой"
+# Ошибка в Dart без этой проверки всплывает минуты спустя как невнятный
+# отказ Gradle, и понять по нему, что именно сломано, почти нельзя.
+# Придирки стиля сборку не останавливают — только настоящие ошибки.
+flutter analyze lib test --no-fatal-infos --no-fatal-warnings \
+  || fail "в коде есть ошибки — смотри список выше. Сборку не начинаю:
+собранный APK всё равно оказался бы старым."
 
 APK="$REPO/build/app/outputs/flutter-apk/app-release.apk"
 PKG="$(sed -n 's/.*applicationId = "\(.*\)".*/\1/p' android/app/build.gradle.kts | head -1)"
 [ -n "$PKG" ] || fail "не нашёл applicationId в android/app/build.gradle.kts"
 rm -f "$APK"
 
-step "5/8 Собираю APK с меткой BUILD_ID=$BUILD_ID"
+step "6/9 Собираю APK с меткой BUILD_ID=$BUILD_ID"
 # --build-name кладёт коммит в versionName пакета. Это единственная метка,
 # которую видно СНАРУЖИ приложения: по ней и adb, и «О приложении» в
 # настройках телефона отвечают, что на самом деле установлено.
@@ -55,10 +63,10 @@ flutter build apk --release \
   --dart-define=BUILD_ID="$BUILD_ID" \
   --build-name="1.0.0-$BUILD_ID"
 
-step "6/8 Проверяю, что APK действительно новый"
+step "7/9 Проверяю, что APK действительно новый"
 [ -f "$APK" ] || fail "APK не появился — сборка не прошла. Смотри вывод выше."
 
-step "7/8 Проверяю, что внутрь APK попал именно этот коммит"
+step "8/9 Проверяю, что внутрь APK попал именно этот коммит"
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 SO="$(unzip -Z1 "$APK" 'lib/*/libapp.so' 2>/dev/null | head -1 || true)"
@@ -81,7 +89,7 @@ else
   fi
 fi
 
-step "8/8 Ставлю на телефон и проверяю, что встало именно это"
+step "9/9 Ставлю на телефон и проверяю, что встало именно это"
 # Самое слабое место всей цепочки — установка. Собранный APK легко остаётся
 # лежать на диске: команду не запустили, телефон не подключён, установка
 # отказала по несовпадению подписи. Снаружи это выглядит как «собрал, а
