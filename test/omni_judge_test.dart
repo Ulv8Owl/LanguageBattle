@@ -203,18 +203,19 @@ void main() {
     }
   });
 
-  test('ошибки модели рисуются своими плашками', () {
+  test('плашка — это сам красный текст, а не список под лентой', () {
     final screen = read('lib/features/training/training_screen.dart');
-    // Границы модель провела по смыслу сказанного; разложить их по
-    // элементам эталона нечем — у неё эталона не было вовсе. Сами плашки
-    // переехали в общий разбор: тот же виджет показывает бой.
+    // Отдельного ряда плашек с объяснениями больше нет: они повторяли то,
+    // что видно в ленте, и отвечали на вопрос «почему неверно», который
+    // игрок не задавал — своё зачёркнутое слово он видит рядом с верным.
     final review = read('lib/widgets/round_review.dart');
-    expect(review, contains('class MistakeBreakdown'));
-    // Категория теперь параметр: в одной таблице лежат и ошибки перевода,
-    // и ошибки произношения, и смешать их в одном блоке значило бы снять
-    // с игрока баллы дважды за одно.
-    expect(review, contains("if ((e['category'] as String?) != category) continue;"));
-    expect(review, contains("String category = 'omni',"));
+    expect(review.contains('class MistakeBreakdown'), isFalse);
+    expect(review.contains('mistakesFrom'), isFalse);
+    // Нажимается сам кусок, и перевод едет вместе с ним, а не отдельным
+    // списком: список пришлось бы сводить с лентой по тексту.
+    final ribbon = read('lib/widgets/transcript_review.dart');
+    expect(ribbon, contains('TapGestureRecognizer'));
+    expect(read('lib/widgets/correction_text.dart'), contains("(item['m'] as String?)"));
     expect(screen, contains('RoundReview('));
     // Поэлементного разбора больше нет: держать рядом две несовместимые
     // механики значило бы поддерживать ту, которой никто не пользуется.

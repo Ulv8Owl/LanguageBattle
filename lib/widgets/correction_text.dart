@@ -1,3 +1,4 @@
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 
 import '../core/theme.dart';
@@ -13,7 +14,20 @@ class ReviewSpan {
   final String kind;
   final String text;
 
-  const ReviewSpan({required this.kind, required this.text});
+  /// Перевод куска на родной язык. Только у `miss`, и не всегда.
+  ///
+  /// КРАСНЫЙ ТЕКСТ И ЕСТЬ ПЛАШКА. Раньше под разбором стоял отдельный ряд
+  /// плашек с объяснениями «почему так неверно». Игроку нужно другое: что
+  /// ЗНАЧАТ слова, которых он не сказал, — почему неверно он и так видит,
+  /// его зачёркнутое слово стоит рядом с верным.
+  ///
+  /// Пусто — нажимать не на что. Показать перевод не от того куска хуже,
+  /// чем не показать никакого.
+  final String means;
+
+  const ReviewSpan({required this.kind, required this.text, this.means = ''});
+
+  bool get hasMeaning => kind == 'miss' && means.isNotEmpty;
 
   static List<ReviewSpan> fromJson(Object? raw) {
     if (raw is! List) return const [];
@@ -24,7 +38,11 @@ class ReviewSpan {
       final text = (item['t'] as String?) ?? '';
       if (text.isEmpty) continue;
       if (kind != 'ok' && kind != 'bad' && kind != 'miss') continue;
-      out.add(ReviewSpan(kind: kind, text: text));
+      out.add(ReviewSpan(
+        kind: kind,
+        text: text,
+        means: ((item['m'] as String?) ?? '').trim(),
+      ));
     }
     return out;
   }
@@ -41,14 +59,28 @@ String correctFromSpans(List<ReviewSpan> spans) =>
 /// * сказано неверно — перечёркнуто красной линией (слово видно, и видно,
 ///   что его надо убрать);
 /// * не сказано вовсе — красным (вычёркивать нечего, это недостающее).
-List<TextSpan> reviewSpans(List<ReviewSpan> spans) {
+List<TextSpan> reviewSpans(
+  List<ReviewSpan> spans, {
+  /// Чем нажимать на красный кусок. null — разбор только для чтения.
+  GestureRecognizer? Function(ReviewSpan span)? recognizerFor,
+}) {
   final out = <TextSpan>[];
   for (final span in spans) {
     if (span.kind != 'bad') {
+      final missed = span.kind == 'miss';
+      // Подчёркивание только там, где есть что показать: красный текст без
+      // перевода нажимать не на что, и обещать нажатие нельзя.
+      final tappable = missed && span.hasMeaning;
       out.add(TextSpan(
         text: span.text,
-        style: span.kind == 'miss'
-            ? const TextStyle(color: AppColors.danger, fontWeight: FontWeight.w700)
+        recognizer: tappable ? recognizerFor?.call(span) : null,
+        style: missed
+            ? TextStyle(
+                color: AppColors.danger,
+                fontWeight: FontWeight.w700,
+                decoration: tappable ? TextDecoration.underline : null,
+                decorationColor: AppColors.danger.withValues(alpha: 0.45),
+              )
             : const TextStyle(color: AppColors.cream),
       ));
       continue;

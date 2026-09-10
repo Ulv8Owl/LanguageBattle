@@ -8,6 +8,7 @@
 // Запуск: deno run --allow-env tools/check_error_grounding.ts
 import {
   asErrors,
+  attachMeanings,
   groundedIn,
   nitpickReason,
   reviewErrors,
@@ -203,6 +204,62 @@ check("довод «так говорят» — не довод", nitpickReason(
 check("довод «более употребительно» — не довод", nitpickReason("это более употребительно"), true);
 check("довод «предпочтительнее» — не довод", nitpickReason("этот вариант предпочтительнее"), true);
 check("довод про смысл остаётся доводом", nitpickReason("в задании суббота, а не воскресенье"), false);
+
+// ═══ ПЛАШКА — ЭТО САМ КРАСНЫЙ ТЕКСТ, И К НЕМУ ПРИВЯЗАН ПЕРЕВОД ═══
+//
+// Настоящий раунд: «Мой телефон очень старый, поэтому он медленный. Я хочу
+// новый в следующем году.» Игрок сказал «My phone is old, because he slow.
+// I want new one in new year.» Границы кусков проводит дифф, переводы
+// перечисляет модель — и сходятся эти два перечисления не всегда.
+{
+  const ribbonSpans = [
+    { kind: "ok" as const, text: "My phone is " },
+    { kind: "miss" as const, text: "very " },
+    { kind: "bad" as const, text: "because he " },
+    { kind: "miss" as const, text: "so it is " },
+    { kind: "ok" as const, text: "slow. I want " },
+    { kind: "miss" as const, text: "a " },
+    { kind: "ok" as const, text: "new one " },
+    { kind: "bad" as const, text: "in new " },
+    { kind: "miss" as const, text: "next " },
+    { kind: "ok" as const, text: "year." },
+  ];
+  const withMeanings = attachMeanings(ribbonSpans, [
+    { text: "very", means: "очень" },
+    { text: "so it is", means: "поэтому он" },
+    { text: "a", means: "неопределённый артикль: один из многих" },
+    { text: "next", means: "следующий" },
+  ]);
+  check(
+    "перевод достался всем четырём несказанным кускам",
+    withMeanings.filter((s) => s.kind === "miss").map((s) => s.means),
+    ["очень", "поэтому он", "неопределённый артикль: один из многих", "следующий"],
+  );
+  check(
+    "сказанному и зачёркнутому перевод не достаётся",
+    withMeanings.filter((s) => s.kind !== "miss").every((s) => s.means === undefined),
+    true,
+  );
+
+  // Модель перечислила куски иначе, чем провёл границы дифф.
+  const looser = attachMeanings(ribbonSpans, [
+    { text: "so it is slow", means: "поэтому он медленный" },
+  ]);
+  check(
+    "кусок модели шире нашего — перевод всё равно находится",
+    looser.find((s) => s.text.trim() === "so it is")?.means,
+    "поэтому он медленный",
+  );
+
+  // Ничего похожего не прислали — кусок остаётся красным, но без нажатия.
+  const none = attachMeanings(ribbonSpans, [{ text: "completely other", means: "другое" }]);
+  check(
+    "не нашлось — лучше без перевода, чем чужой",
+    none.filter((s) => s.kind === "miss").every((s) => s.means === undefined),
+    true,
+  );
+  check("пустой список ничего не ломает", attachMeanings(ribbonSpans, null).length, 10);
+}
 
 console.log(failed === 0 ? "\nвсё сходится" : `\nрасхождений: ${failed}`);
 if (failed > 0) Deno.exit(1);

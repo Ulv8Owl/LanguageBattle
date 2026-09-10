@@ -934,7 +934,6 @@ class _AiVerdict extends StatelessWidget {
                         // только в балле над ним — в бою он решает раунд.
                         RoundReview(
                           spans: recording.reviewSpans,
-                          mistakes: mistakesFrom(errors),
                           targetLanguage: targetLanguage,
                           // В бою разбор пустым не оставляем: молчащий
                           // судья и невнятная запись выглядели бы одинаково

@@ -1,5 +1,6 @@
 import 'dart:io';
 
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -14,80 +15,89 @@ import 'package:language_battle/widgets/round_review.dart';
 /// только своему хозяину.
 void main() {
   ReviewSpan ok(String t) => ReviewSpan(kind: 'ok', text: t);
-  ReviewSpan miss(String t) => ReviewSpan(kind: 'miss', text: t);
+  ReviewSpan miss(String t, {String means = ''}) =>
+      ReviewSpan(kind: 'miss', text: t, means: means);
+  ReviewSpan bad(String t) => ReviewSpan(kind: 'bad', text: t);
 
   Future<void> pump(WidgetTester tester, Widget child) => tester.pumpWidget(
         MaterialApp(home: Scaffold(body: SingleChildScrollView(child: child))),
       );
 
   group('RoundReview', () {
-    testWidgets('показывает ленту разбора и плашки ошибок', (tester) async {
+    testWidgets('показывает ленту разбора', (tester) async {
       await pump(
         tester,
         RoundReview(
-          spans: [ok('I '), miss('walk there')],
-          mistakes: const [
-            Mistake(span: 'I go', message: 'После go нужен предлог', correction: 'I walk'),
-          ],
+          spans: [ok('I '), miss('walk there', means: 'хожу туда')],
           targetLanguage: 'en',
         ),
       );
-
       expect(find.text('Разбор:'), findsOneWidget);
-      expect(find.text('I go'), findsOneWidget);
     });
 
-    testWidgets('без ошибок — так и написано, а не пустое место', (tester) async {
-      await pump(
-        tester,
-        RoundReview(spans: [ok('I walk there')], mistakes: const [], targetLanguage: 'en'),
-      );
-      expect(find.text('Ошибок не найдено — сказано верно'), findsOneWidget);
-    });
-
-    testWidgets('недоговорённую фразу не хвалим', (tester) async {
-      // Игрок сказал одно предложение из двух без единой ошибки в
-      // сказанном — и видел «Ошибок не найдено» над красным пропуском и
-      // сниженным баллом. Ошибок и правда нет, но ответ неполный.
-      await pump(
-        tester,
-        RoundReview(
-          spans: [ok('I walk there. '), miss('Then I go home.')],
-          mistakes: const [],
-          targetLanguage: 'en',
-        ),
-      );
+    testWidgets('серых подписей под лентой больше нет', (tester) async {
+      // Плашка теперь — сам красный текст, а подписи говорили о ленте то,
+      // что лента и так показывает.
+      await pump(tester, RoundReview(spans: [ok('I walk there')], targetLanguage: 'en'));
       expect(find.text('Ошибок не найдено — сказано верно'), findsNothing);
-      expect(
-        find.textContaining('фраза сказана не целиком'),
-        findsOneWidget,
-      );
+      expect(find.textContaining('фраза сказана не целиком'), findsNothing);
+      expect(find.textContaining('Нажми на кусок'), findsNothing);
     });
 
     testWidgets('нет ленты — нет и разбора', (tester) async {
       // Балл при этом показывается: за него отвечает не этот виджет.
-      await pump(
-        tester,
-        const RoundReview(spans: [], mistakes: [], targetLanguage: 'en'),
-      );
-      expect(find.byType(MistakeBreakdown), findsNothing);
+      await pump(tester, const RoundReview(spans: [], targetLanguage: 'en'));
       expect(find.text('Разбор:'), findsNothing);
     });
   });
 
-  group('mistakesFrom', () {
-    test('берёт только ошибки судьи и только заполненные', () {
-      final out = mistakesFrom([
-        {'category': 'omni', 'span_text': 'I go', 'message': 'нужен другой глагол', 'replacement': 'I walk'},
-        // Без объяснения плашка обещает разбор, которого нет.
-        {'category': 'omni', 'span_text': 'a', 'message': '  ', 'replacement': ''},
-        // Без фрагмента её не к чему привязать.
-        {'category': 'omni', 'span_text': '', 'message': 'что-то не так', 'replacement': ''},
-        // Чужая категория — не наш разбор.
-        {'category': 'legacy', 'span_text': 'b', 'message': 'старое', 'replacement': ''},
+  group('перевод несказанного', () {
+    test('читается из ленты полем m', () {
+      final spans = ReviewSpan.fromJson([
+        {'k': 'ok', 't': 'My phone is '},
+        {'k': 'miss', 't': 'very ', 'm': 'очень'},
+        {'k': 'bad', 't': 'because he '},
+        {'k': 'miss', 't': 'so it is', 'm': 'поэтому он'},
       ]);
-      expect(out.map((m) => m.span), ['I go']);
-      expect(out.single.correction, 'I walk');
+      expect(spans.length, 4);
+      expect(spans[1].means, 'очень');
+      expect(spans[1].hasMeaning, isTrue);
+      // Перевод бывает только у несказанного: у своих слов игрока его нет.
+      expect(spans[0].hasMeaning, isFalse);
+      expect(spans[2].hasMeaning, isFalse);
+    });
+
+    test('нажимается только красное И только с переводом', () {
+      // Красный кусок без перевода нажимать не на что, и обещать нажатие
+      // подчёркиванием нельзя: игрок будет тыкать в пустоту.
+      var asked = 0;
+      final out = reviewSpans(
+        [
+          ok('My phone is '),
+          miss('very ', means: 'очень'),
+          bad('because he '),
+          miss('so it is'),
+        ],
+        recognizerFor: (_) {
+          asked++;
+          return TapGestureRecognizer();
+        },
+      );
+      expect(asked, 1, reason: 'распознаватель просят только у куска с переводом');
+      final tappable = out.where((s) => s.recognizer != null).toList();
+      expect(tappable.length, 1);
+      expect(tappable.single.text, 'very ');
+    });
+
+    test('подряд идущее несказанное — один кусок, а не по слову', () {
+      // Границы проводит дифф на сервере; здесь закреплено, что клиент их
+      // не дробит: «so it is» — одна плашка, а не три.
+      final spans = ReviewSpan.fromJson([
+        {'k': 'miss', 't': 'so it is', 'm': 'поэтому он'},
+      ]);
+      expect(spans.single.text, 'so it is');
+      final out = reviewSpans(spans, recognizerFor: (_) => TapGestureRecognizer());
+      expect(out.length, 1);
     });
   });
 

@@ -529,7 +529,14 @@ async function processJob(job_id: string): Promise<void> {
           spanText: e.text,
         }));
 
-        reviewSpans = judged.review.map((s) => ({ k: s.kind, t: s.text }));
+        // `m` — перевод несказанного куска. Едет ВМЕСТЕ с куском, а не
+        // отдельным списком: список пришлось бы сводить с лентой по тексту
+        // уже на клиенте, и на первой же неточности плашка потерялась бы.
+        reviewSpans = judged.review.map((s) => ({
+          k: s.kind,
+          t: s.text,
+          ...(s.means && s.means.length > 0 ? { m: s.means } : {}),
+        }));
         judgeStatus = "ok";
         const missed = judged.review.filter((s) => s.kind === "miss").length;
         feedback = judged.errors.length === 0 && missed === 0

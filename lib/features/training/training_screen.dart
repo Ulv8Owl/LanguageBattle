@@ -1256,12 +1256,6 @@ class _ErrorReport extends StatelessWidget {
     this.isExam = false,
   });
 
-  /// Ошибки, названные мультимодальной моделью.
-  ///
-  /// Раскладывает их тот же код, что и в бою (`mistakesFrom`): две правды
-  /// об одном ответе — верный способ развести режимы.
-  List<Mistake> get _mistakes => mistakesFrom(errors);
-
   /// Сказал ли игрок НЕ ВСЁ. Несказанное лежит в ленте разбора кусками
   /// вида miss, и балл за него уже снят долей от длины перевода.
   ///
@@ -1343,8 +1337,8 @@ class _ErrorReport extends StatelessWidget {
             Text(title, style: AppFonts.mono(fontSize: 9, weight: FontWeight.w700, color: titleColor)),
             const SizedBox(height: 10),
 
-            // Разбор — тот же виджет, что и в бою: подсветка ленты плюс
-            // плашки с пояснениями от модели. Вторая попытка показывается
+            // Разбор — тот же виджет, что и в бою: лента с подсветкой,
+            // нажимаемая на красном. Вторая попытка показывается
             // ТАК ЖЕ, как первая. Раньше у неё прятали плашки: разбор для
             // неё не запрашивали, чтобы не ждать лишние секунды. Теперь он
             // приходит тем же единственным вызовом — прятать нечего и
@@ -1352,7 +1346,6 @@ class _ErrorReport extends StatelessWidget {
             // Отличается только заголовок и карточка с баллом ниже.
             RoundReview(
               spans: attempt?.reviewSpans ?? const [],
-              mistakes: _mistakes,
               targetLanguage: targetLanguage,
               // Когда разбирать нечего, на его месте — та же подсказка,
               // что была раньше: почему разбора нет или что делать дальше.
@@ -1574,20 +1567,31 @@ class _PipelineDebug extends StatelessWidget {
     };
   }
 
-  /// Из чего сложился балл: десять минус доля несказанного минус ошибки.
+  /// Из чего сложился балл: десять минус доля несказанного.
+  ///
+  /// Списка ошибок на этой ветке нет — плашка это сам красный текст, —
+  /// поэтому и вычитать за ошибки нечего. Неверное слово всё равно попадает
+  /// в долю несказанного: верного на его месте игрок не произнёс.
+  ///
+  /// Отдельной строкой видно, скольким несказанным кускам достался перевод.
+  /// Расхождение означает, что границы кусков у нас и у модели разошлись, и
+  /// узнать об этом можно только отсюда.
   String _scoreText(Map<String, dynamic>? judge) {
     final spans = judge?['spans'];
     final score = judge?['score'];
     if (spans is! Map) {
       return score == null ? '(нет данных)' : 'балл $score';
     }
+    final missed = spans['miss'] ?? 0;
+    final translated = judge?['missing_translated'];
     return [
       'балл ${score ?? "?"}',
       'кусков: верно ${spans['ok'] ?? 0}, '
           'не так ${spans['bad'] ?? 0}, '
-          'не сказано ${spans['miss'] ?? 0}',
-      'ошибок ${judge?['errors'] ?? 0}'
-          '${judge?['errors_raw'] != null && judge!['errors_raw'] != judge['errors'] ? ' (модель назвала ${judge['errors_raw']})' : ''}',
+          'не сказано $missed',
+      if (translated != null)
+        'с переводом $translated из $missed'
+            '${judge?['missing_raw'] != null ? ' (модель прислала ${judge!['missing_raw']})' : ''}',
     ].join('\n');
   }
 

@@ -9,13 +9,25 @@
  * обратные кавычки внутри текста (буквально — \` и \${) и формат ответа:
  * поля spoke/correct и said/fix/kind/why читает код (textJudge.ts).
  *
+ * ЧТО МОДЕЛЬ ОТДАЁТ НА ЭТОЙ ВЕТКЕ: правильную фразу и ПЕРЕВОД тех её
+ * кусков, которых игрок не сказал. Списка ошибок с объяснениями здесь
+ * больше нет — красный текст в ленте разбора и есть плашка, а нажатие на
+ * него показывает перевод. Объяснять «почему так неверно» никто не просит:
+ * игрок и так видит своё зачёркнутое слово рядом с верным.
+ *
+ * ГРАНИЦЫ КУСКОВ ПРОВОДИМ МЫ, а не модель (дифф в textJudge.ts). У модели
+ * просим те же куски только затем, чтобы было к чему привязать перевод;
+ * сопоставляются они по словам, и не совпавшее просто остаётся без
+ * перевода — красным, но без нажатия.
+ *
  * ═══ ТРИ ОШИБКИ, КОТОРЫЕ ЗДЕСЬ УЖЕ БЫЛИ. ВОЗВРАЩАЮТСЯ ПАРАМИ. ═══
  *
- * 1. ПРИДИРКИ. Модель объявляла ошибкой верное «after that» вместо «Then».
- *    Лечится не запретами — их было три круга и все провалились, — а тем,
- *    что у модели ЧЕТЫРЕ вопроса и четвёртый «значит верно, молчи».
- *    Перечислять запрещённые пары нельзя: названная пара становится модели
- *    доступной, а отрицание при ней держится плохо.
+ 1. ПРИДИРКИ. Модель переписывала верное «after that» в «Then», и игрок
+ *    видел своё правильное слово зачёркнутым. Списка ошибок здесь больше
+ *    нет, поэтому и придраться ей негде, кроме `correct`, — правило про
+ *    него единственное, что от этого защищает. Перечислять запрещённые
+ *    пары нельзя: названная пара становится модели доступной, а отрицание
+ *    при ней держится плохо.
  *
  * 2. ПОЛФРАЗЫ НА ДЕСЯТКУ. Судья проверял только сказанное, и несказанного
  *    в его «правильном переводе» не оказывалось вовсе — доля пропущенного
@@ -75,40 +87,28 @@ number words are the same thing said aloud. If a word makes no sense where it st
 to the word that belongs there, that is the recogniser mishearing him: leave it alone.
 
 Reply with one JSON object and nothing else — no markdown, no commentary:
-{"spoke": string, "correct": string,
- "errors": [{"said": string, "fix": string, "kind": "meaning"|"grammar"|"word", "why": string}]}
+{"spoke": string, "correct": string, "missing": [{"text": string, "means": string}]}
 
 "spoke" — the language that line is written in, in English. If it is not ${v.target}, stop there and
-leave "correct" and "errors" empty.
+leave "correct" empty and "missing" empty.
 
 "correct" — the WHOLE sentence as it should have been said, complete even if he stopped halfway. Keep
-HIS OWN WORDS everywhere he was right, exactly as they stand, even where you would have chosen others.
-Use other words only where he was wrong, and add what he did not say at all.
+HIS OWN WORDS everywhere he was right, exactly as they stand, even where you would have chosen others:
+a synonym, another order, another structure, longer, more formal, more textbook — all correct, and you
+must leave every one of them untouched. Put other words ONLY where what he said states something the
+task does not state, or is ungrammatical, or is not a real word. Add what he did not say at all.
 
-"errors" — take each fragment of what he said and ask these four questions IN ORDER. Stop at the first
-"yes"; that is its "kind".
-  1. Does it state something the task does not state, or leave out something the task states —
-     another day, another time, another action, another person, another place? → "meaning"
-  2. Is it ungrammatical in ${v.target}? → "grammar"
-  3. Is it a word that does not exist, or that does not mean what is needed here? → "word"
-  4. No to all three → THE FRAGMENT IS CORRECT. Write nothing about it.
+"missing" — one entry for every stretch of "correct" that is NOT in what he said, and nothing else.
+  "text" — that stretch, copied from "correct" letter for letter.
+  "means" — what it means, in ${v.native} (${v.nativeSelf}) and no other language.
+Split the stretches exactly where his own words come between them, and nowhere else: a run of words he
+did not say is ONE entry, however long. If he said nothing at all of the sentence, that is one entry
+holding the whole of "correct".
 
-Question 4 is the answer for every fragment that differs from our translation only in WORDING. A
-synonym, another order, another structure, longer, more formal, more textbook, less like a native — all
-correct, all silent. "I would have said it differently" is not one of the four questions and never
-becomes an error. If your reason for an error would be that something is more usual, more natural,
-shorter, better or what natives say, then the answer was 4 and you must delete that error — in any
-language you write it.
-
-"said" — his own words, verbatim from the line above, and ONLY the wrong ones: quoting a correct half
-alongside them tells him that half was wrong too. "fix" — the words standing in that place in your
-"correct". Never list what he did not say: an omission is already visible from his line, and an entry
-whose "said" equals its "fix" is always a mistake on your part. Everything wrong for one reason is one
-error.
-
-"why" — in ${v.native} (${v.nativeSelf}) and no other language, at ${v.level} level. Say what this
-sentence has to state and what he stated instead. No general rules: a rule invented to fit one example
-is usually false, and he will believe it.
+"means" IS A TRANSLATION, NOT AN EXPLANATION. Do not say why it is needed, do not name a rule, do not
+compare it with what he said. Just say what those words mean, the way a dictionary would — but as they
+mean HERE, in this sentence, when the words alone would be ambiguous. A word with one obvious meaning
+gets that meaning and nothing more. Keep it as short as the sense allows, at ${v.level} level.
 `.trim();
 }
 

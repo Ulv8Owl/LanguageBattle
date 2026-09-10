@@ -20,6 +20,7 @@
  */
 
 import {
+  attachMeanings,
   correctText,
   type JudgeResult,
   judgeBaseUrl,
@@ -28,8 +29,6 @@ import {
   languageName,
   parseJson,
   requestQwen,
-  reviewErrors,
-  revertRejectedFixes,
   ribbon,
   sameLanguage,
 } from "./review.ts";
@@ -232,16 +231,19 @@ export async function textJudge(req: TextJudgeRequest): Promise<JudgeResult> {
   // ЛЕНТУ СЧИТАЕМ МЫ, а не модель, — ровно как на ветке Omni. Сравнить две
   // строки по словам это арифметика, и арифметику надо считать, а не
   // спрашивать. Здесь сравнивается расшифровка против перевода судьи.
-  // Сперва ошибки: часть правок отсеется, и их надо откатить в переводе ДО
-  // того, как по нему построится лента, — иначе отклонённая придирка всё
-  // равно зачеркнёт верное слово и снимет балл на «несказанном».
-  const { errors, rejected } = reviewErrors(parsed.errors, correct, asr.text);
-  const shown = revertRejectedFixes(correct, rejected);
-  const review = ribbon(diffWords(asr.text, shown));
+  // ЛЕНТУ СЧИТАЕМ МЫ, а не модель, — сравнить две строки по словам это
+  // арифметика, и её надо считать, а не спрашивать. Переводы, которые
+  // модель прислала списком, привязываются к готовым кускам по словам.
+  const review = attachMeanings(ribbon(diffWords(asr.text, correct)), parsed.missing);
 
+  const missed = review.filter((s) => s.kind === "miss");
   return {
     review,
-    errors,
+    // СПИСКА ОШИБОК НА ЭТОЙ ВЕТКЕ НЕТ. Плашка — это сам красный текст в
+    // ленте, а нажатие показывает перевод. Балл поэтому считается только по
+    // доле несказанного: неверное слово всё равно попадает в неё, потому
+    // что верное на его месте игрок не произнёс.
+    errors: [],
     audible: true,
     degraded: false,
     debug: {
@@ -250,20 +252,16 @@ export async function textJudge(req: TextJudgeRequest): Promise<JudgeResult> {
       ms: Date.now() - started,
       asr: asr.debug,
       heard: asr.text,
-      correct: shown,
-      // Что судья прислал до отката отклонённых правок — расхождение видно
-      // только здесь, и по нему понятно, придирался ли он.
-      correct_raw: shown !== correct ? correct : undefined,
-      rejected: rejected.length,
+      correct,
       spans: {
         ok: review.filter((s) => s.kind === "ok").length,
         bad: review.filter((s) => s.kind === "bad").length,
-        miss: review.filter((s) => s.kind === "miss").length,
+        miss: missed.length,
       },
-      errors: errors.length,
-      // Сколько ошибок судья назвал и сколько мы оставили — расхождение
-      // означает, что часть отсеяли проверки, и видно это только здесь.
-      errors_raw: Array.isArray(parsed.errors) ? parsed.errors.length : 0,
+      // Сколько несказанных кусков осталось без перевода: расхождение между
+      // нашими границами и перечислением модели видно только здесь.
+      missing_translated: missed.filter((s) => (s.means ?? "").length > 0).length,
+      missing_raw: Array.isArray(parsed.missing) ? parsed.missing.length : 0,
       raw: raw.slice(0, 2000),
     },
   };
