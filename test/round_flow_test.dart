@@ -91,20 +91,24 @@ void main() {
 
   group('промпт разбора', () {
     test('самоисправление не считается ошибкой', () {
-      expect(prompt(), contains('SELF-CORRECTION IS NOT AN ERROR'));
+      expect(prompt(), contains('said it again differently'));
+      expect(prompt(), contains('the version he settled on'));
     });
 
     test('запятые и заглавные буквы не ошибка', () {
       // Их в речи нет: их дописывает сама модель, когда пишет "heard".
-      expect(prompt(), contains('NEVER mark punctuation, capitalisation or sentence boundaries'));
+      expect(prompt(), contains('Never mark punctuation'));
     });
 
     test('смысл проверяется по частям, а не на слух «звучит складно»', () {
-      expect(prompt(), contains('CHECK THE MEANING PART BY PART'));
+      // Смысл — первый из трёх видов ошибки, и перечислено, по чему он
+      // расходится: действие, место, направление, время, лицо.
+      expect(prompt(), contains('"meaning"'));
+      expect(prompt(), contains('another action, place, direction, time, person'));
     });
 
     test('объяснение — про эту фразу, а не выдуманное правило', () {
-      expect(prompt(), contains('EXPLAIN THIS SENTENCE, NOT THE LANGUAGE'));
+      expect(prompt(), contains('Explain THIS sentence'));
       expect(prompt(), contains('Do not state a general rule'));
     });
   });
@@ -135,7 +139,7 @@ void main() {
       // and Thursday», а на плашке к той же ошибке написала «on Sunday and
       // Saturday» — предлог поправила, перепутанные дни оставила. Игрок
       // читает два разных правильных ответа подряд, и второй неверен.
-      expect(prompt(), contains('EVERY "fix" MUST BE COPIED OUT OF YOUR OWN "correct"'));
+      expect(prompt(), contains('that stand in that place in your "correct"'));
       // Промпта мало: расхождение отсеивается и кодом.
       final s = judge();
       expect(s, contains('export function groundedIn(fix: string, correct: string): boolean'));
@@ -148,14 +152,16 @@ void main() {
       // равно наказывает. Большинство игроков учились по учебникам и
       // грамматически правы.
       final s = prompt();
-      expect(s, contains('THE WORDS "MORE NATURAL" MUST NEVER APPEAR IN YOUR ANSWER'));
-      expect(s, contains('Textbook is not wrong'));
+      // Запрет на ДОВОД, а не на пару слов: перечислять запрещённые пары
+      // нельзя — названная пара становится модели доступной.
+      expect(s, contains('how usual a wording is'));
+      expect(s, contains('in any language'));
     });
 
     test('вид ошибки называется и проверяется кодом', () {
       // Стиля в списке видов нет намеренно: фрагмент, который не удаётся
       // отнести ни к смыслу, ни к грамматике, ни к слову, был в порядке.
-      expect(prompt(), contains('NAME THE KIND OF EVERY ERROR'));
+      expect(prompt(), contains('Three kinds exist and no others'));
       final s = judge();
       expect(s, contains('const ERROR_KINDS = new Set(["meaning", "grammar", "word"]);'));
       expect(s, contains('if (kind.length > 0 && !ERROR_KINDS.has(kind)) continue;'));
@@ -164,21 +170,21 @@ void main() {
     test('в ошибку попадают только неверные слова', () {
       // «after that I do coffee» — неверно только «do coffee», а игрок
       // читал плашку так, будто «after that» тоже ошибка.
-      expect(prompt(), contains('PUT ONLY THE WRONG WORDS IN "said"'));
-      // Второй пример показывает это на настоящем разборе.
-      expect(prompt(), contains('Second example, same task'));
+      expect(prompt(), contains('ONLY the wrong ones'));
     });
 
     test('разговорность не повод снимать балл', () {
       // «After that» вместо «Then» и «seven o'clock» вместо «seven» —
       // сказано верно, и отнимать за это балл нечестно.
       final s = prompt();
-      expect(s, contains('YOU ARE NOT HERE TO POLISH HIS ENGLISH'));
-      expect(s, contains('Longer is not wrong'));
+      expect(s, contains('whatever you would have said in his place'));
+      expect(s, contains('are not kinds of error'));
       // Прежний пример В САМОМ ПРОМПТЕ учил модели ровно этой придирке:
-      // показывал «After that» → «Then» как образцовую ошибку.
+      // показывал «After that» → «Then» как образцовую ошибку. Примеров в
+      // промпте больше нет вовсе — пример на фразе из банка модель читает
+      // как готовый ответ и переписывает его список ошибок в свой.
       expect(s.contains('"errors": [{"said": "After that", "fix": "Then"'), isFalse);
-      expect(s, contains('"errors" is EMPTY here, and that is the whole point of the example'));
+      expect(s.contains('Example. The learner was asked to say'), isFalse);
     });
   });
 
