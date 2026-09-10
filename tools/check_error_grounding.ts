@@ -6,7 +6,14 @@
 // неверна. Здесь проверяется отсев таких правок на настоящем случае из игры.
 //
 // Запуск: deno run --allow-env tools/check_error_grounding.ts
-import { asErrors, groundedIn, nitpickReason, saidIn } from "../supabase/functions/_shared/review.ts";
+import {
+  asErrors,
+  groundedIn,
+  nitpickReason,
+  reviewErrors,
+  revertRejectedFixes,
+  saidIn,
+} from "../supabase/functions/_shared/review.ts";
 
 let failed = 0;
 function check(name: string, actual: unknown, expected: unknown) {
@@ -138,6 +145,64 @@ check(
   ).length,
   0,
 );
+
+// ═══ ТРИ БАГА, КОТОРЫЕ ВОЗВРАЩАЛИСЬ ПАРАМИ ═══
+//
+// Придирки лечили правилом «correct собирается из сказанного игроком» — и
+// той же правкой ломали учёт несказанного и подмену дня недели. Здесь
+// проверяется, что теперь работают все три случая сразу.
+
+// 1. Придирка не проходит и НЕ ОТНИМАЕТ БАЛЛ ЧЕРЕЗ ЛЕНТУ.
+{
+  const heardOk = "I wake up at seven every morning. After that I make coffee and read the news.";
+  // Модель придралась: в её «правильном переводе» стоит get up вместо wake up.
+  const nitpicked = "I get up at seven every morning. After that I make coffee and read the news.";
+  const { errors, rejected } = reviewErrors(
+    [{ said: "wake up", fix: "get up", kind: "word", why: "так говорят чаще" }],
+    nitpicked,
+    heardOk,
+  );
+  check("придирка не показывается", errors.length, 0);
+  check("правка запомнена как отклонённая", rejected, [{ said: "wake up", fix: "get up" }]);
+  check(
+    "и откачена в переводе — лента не зачеркнёт верное слово",
+    revertRejectedFixes(nitpicked, rejected),
+    heardOk,
+  );
+}
+
+// 2. Полфразы: перевод остаётся ЦЕЛЫМ, значит несказанное видно.
+{
+  const half = "I get up at seven every morning.";
+  const whole = "I get up at seven every morning. Then I make coffee and read the news.";
+  const { errors, rejected } = reviewErrors([], whole, half);
+  check("ошибок нет — но и не должно быть", errors.length, 0);
+  check("откатывать нечего", rejected.length, 0);
+  check("несказанное осталось в переводе", revertRejectedFixes(whole, rejected), whole);
+}
+
+// 3. Sunday вместо Saturday: слово из образца обязано проходить как правка.
+{
+  const heardWrong = "My lessons are on Monday and Sunday.";
+  const wholeCorrect = "My lessons are on Monday and Saturday.";
+  const { errors } = reviewErrors(
+    [{
+      said: "Sunday",
+      fix: "Saturday",
+      kind: "meaning",
+      why: "в задании суббота, а не воскресенье",
+    }],
+    wholeCorrect,
+    heardWrong,
+  );
+  check("подмена дня остаётся ошибкой", errors.map((e) => e.text), ["Sunday"]);
+}
+
+// Пополнение списка доводов-придирок.
+check("довод «так говорят» — не довод", nitpickReason("так говорят носители языка"), true);
+check("довод «более употребительно» — не довод", nitpickReason("это более употребительно"), true);
+check("довод «предпочтительнее» — не довод", nitpickReason("этот вариант предпочтительнее"), true);
+check("довод про смысл остаётся доводом", nitpickReason("в задании суббота, а не воскресенье"), false);
 
 console.log(failed === 0 ? "\nвсё сходится" : `\nрасхождений: ${failed}`);
 if (failed > 0) Deno.exit(1);

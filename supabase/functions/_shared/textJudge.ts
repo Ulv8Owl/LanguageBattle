@@ -20,7 +20,6 @@
  */
 
 import {
-  asErrors,
   correctText,
   type JudgeResult,
   judgeBaseUrl,
@@ -29,6 +28,8 @@ import {
   languageName,
   parseJson,
   requestQwen,
+  reviewErrors,
+  revertRejectedFixes,
   ribbon,
   sameLanguage,
 } from "./review.ts";
@@ -39,16 +40,35 @@ import { asrModel, transcribe } from "./asr.ts";
 /**
  * Текстовые модели-судьи, между которыми можно переключаться из настроек.
  *
- * ПОРЯДОК — ТОТ, В КОТОРОМ ИХ НАЗВАЛ ВЛАДЕЛЕЦ ПРОЕКТА, первая по умолчанию.
+ * ПЕРВАЯ В СПИСКЕ РАБОТАЕТ ПО УМОЛЧАНИЮ, и порядок здесь не алфавитный.
+ * Обычные чат-модели идут первыми, `qwen-mt-*` — последними, и вот почему:
+ * `qwen-mt-*` это ПЕРЕВОДЧИКИ, а не собеседники. Они заточены выдавать
+ * перевод входного текста, и свободный ответ по инструкции — тем более
+ * JSON — им может быть не по профилю. Пока такая модель стояла первой,
+ * ветка из коробки выглядела сломанной, хотя дело было только в выборе по
+ * умолчанию.
  *
- * ОСОБОЕ ПРЕДУПРЕЖДЕНИЕ ПРО `qwen-mt-*`. Это переводчики, а не собеседники:
- * они заточены выдавать перевод входного текста и свободный ответ по
- * инструкции — тем более JSON — им может быть просто не по профилю. Список
- * оставлен таким, как заказан: смысл ветки в том и есть, чтобы померить это
- * на живых записях. Модель, которая не вернула JSON, честно превращается в
- * «модель не ответила» и не портит игроку балл (см. degraded ниже).
+ * Из списка они не убраны: смысл ветки в том и есть, чтобы померить их на
+ * живых записях. Модель, не вернувшая JSON, честно превращается в «модель
+ * не ответила» и балл игроку не портит (см. degraded ниже).
  */
 export const LLM_MODELS = [
+  // Обычные чат-модели — им и адресован промпт с ответом в JSON.
+  "qwen3.7-flash",
+  "qwen-flash",
+  "qwen3-vl-flash",
+  "qwen-turbo",
+  "qwen3.5-flash",
+  "qwen2.5-omni-7b",
+  "qwen3.8-flash",
+  "qwen3-vl-plus",
+  "qwen3.6-flash",
+  "qwen3.5-27b",
+  "qwen3.5-plus",
+  "qwen-plus",
+  "qwen3.6-plus",
+  "qwen3.6-27b",
+  // Переводчики. Стоят в конце намеренно — см. предупреждение выше.
   "qwen-mt-flash",
   "kimi-k3",
   "deepseek-v4-pro-0813",
@@ -202,8 +222,12 @@ export async function textJudge(req: TextJudgeRequest): Promise<JudgeResult> {
   // ЛЕНТУ СЧИТАЕМ МЫ, а не модель, — ровно как на ветке Omni. Сравнить две
   // строки по словам это арифметика, и арифметику надо считать, а не
   // спрашивать. Здесь сравнивается расшифровка против перевода судьи.
-  const review = ribbon(diffWords(asr.text, correct));
-  const errors = asErrors(parsed.errors, correct, asr.text);
+  // Сперва ошибки: часть правок отсеется, и их надо откатить в переводе ДО
+  // того, как по нему построится лента, — иначе отклонённая придирка всё
+  // равно зачеркнёт верное слово и снимет балл на «несказанном».
+  const { errors, rejected } = reviewErrors(parsed.errors, correct, asr.text);
+  const shown = revertRejectedFixes(correct, rejected);
+  const review = ribbon(diffWords(asr.text, shown));
 
   return {
     review,
@@ -216,7 +240,11 @@ export async function textJudge(req: TextJudgeRequest): Promise<JudgeResult> {
       ms: Date.now() - started,
       asr: asr.debug,
       heard: asr.text,
-      correct,
+      correct: shown,
+      // Что судья прислал до отката отклонённых правок — расхождение видно
+      // только здесь, и по нему понятно, придирался ли он.
+      correct_raw: shown !== correct ? correct : undefined,
+      rejected: rejected.length,
       spans: {
         ok: review.filter((s) => s.kind === "ok").length,
         bad: review.filter((s) => s.kind === "bad").length,

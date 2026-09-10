@@ -1,41 +1,42 @@
 /**
  * ПРОМПТ ТЕКСТОВОГО СУДЬИ — весь текст, который получает модель, здесь.
  *
- * ЭТОТ ФАЙЛ МОЖНО ПРАВИТЬ КАК ОБЫЧНЫЙ ТЕКСТ. Ниже одна большая строка в
- * обратных кавычках: меняйте формулировки, добавляйте и убирайте абзацы,
- * переставляйте — код вокруг трогать не нужно. Правки применяются после
+ * ЭТОТ ФАЙЛ МОЖНО ПРАВИТЬ КАК ОБЫЧНЫЙ ТЕКСТ. Правки применяются после
  *
  *     npx supabase functions deploy evaluate-recording
  *
- * ЧТО НЕЛЬЗЯ ЛОМАТЬ:
- *  * `${...}` — подстановки, их имена перечислены в JudgeTextVars ниже;
- *  * обратные кавычки ` и последовательность ${ внутри самого текста —
- *    они закрывают строку. Если нужны буквально, ставьте \` и \${;
- *  * формат ответа. Поля spoke/correct и said/fix/kind/why читает код
- *    (textJudge.ts); переименуете здесь — перестанет читаться.
+ * ЧТО НЕЛЬЗЯ ЛОМАТЬ: имена подстановок `${...}` (см. JudgeTextVars),
+ * обратные кавычки внутри текста (буквально — \` и \${) и формат ответа:
+ * поля spoke/correct и said/fix/kind/why читает код (textJudge.ts).
  *
- * ЧЕМ ОН ОТЛИЧАЕТСЯ ОТ ПРОМПТА МУЛЬТИМОДАЛЬНОГО СУДЬИ. Тем, что у этой
- * модели НЕТ ЗАПИСИ. Она видит только расшифровку, а расшифровку писал
- * распознаватель — со своими знаками препинания, своими заглавными буквами
- * и своими ослышками. Всё это не игрок, и наказывать за это нельзя. Отсюда
- * отдельный блок про артефакты распознавания, которого в том промпте нет и
- * быть не может.
+ * ═══ ТРИ ОШИБКИ, КОТОРЫЕ ЗДЕСЬ УЖЕ БЫЛИ. ВОЗВРАЩАЮТСЯ ПАРАМИ. ═══
  *
- * ЧЕГО ЭТОТ СУДЬЯ НЕ УМЕЕТ, И ЭТО НЕ ЛЕЧИТСЯ ПРОМПТОМ. Произношения он не
- * слышит, оговорку от ослышки не отличает, самоисправление игрока видит
- * только если распознаватель его записал. Это цена архитектуры, а не
- * недоработка: ради этой цены она и дешевле.
+ * 1. ПРИДИРКИ. Модель объявляла ошибкой верное «after that» вместо «Then».
+ *    Лечится не запретами — их было три круга и все провалились, — а тем,
+ *    что у модели ЧЕТЫРЕ вопроса и четвёртый «значит верно, молчи».
+ *    Перечислять запрещённые пары нельзя: названная пара становится модели
+ *    доступной, а отрицание при ней держится плохо.
+ *
+ * 2. ПОЛФРАЗЫ НА ДЕСЯТКУ. Судья проверял только сказанное, и несказанного
+ *    в его «правильном переводе» не оказывалось вовсе — доля пропущенного
+ *    выходила нулевой. Поэтому здесь прямо сказано: correct — ЦЕЛАЯ фраза.
+ *
+ * 3. SUNDAY ВМЕСТО SATURDAY. Судья сверял ответ сам с собой, а не с
+ *    заданием, и подмена дня недели ошибкой не считалась.
+ *
+ * ВСЕ ТРИ — ОДНА РАЗВИЛКА, И ОНА ЕДИНСТВЕННАЯ ВАЖНАЯ МЫСЛЬ ЭТОГО ФАЙЛА:
+ * образец решает, ЧТО должно быть сказано (какой день, какое время, какое
+ * действие, кто его делает, и что ничего не пропущено), и НЕ решает, КАКИМИ
+ * СЛОВАМИ. Сдвиньте границу в любую сторону — вернётся либо (1), либо (2) и
+ * (3) разом.
+ *
+ * ЧЕМ ОН ОТЛИЧАЕТСЯ ОТ ПРОМПТА МУЛЬТИМОДАЛЬНОГО СУДЬИ. У этой модели НЕТ
+ * ЗАПИСИ. Она видит расшифровку, а её писал распознаватель — со своими
+ * знаками препинания, заглавными буквами и ослышками. Отсюда отдельный
+ * абзац про артефакты машины, которого в том промпте нет и быть не может.
  *
  * ЯЗЫК ПРОМПТА — АНГЛИЙСКИЙ, И ЭТО НЕ СЛУЧАЙНОСТЬ. Язык инструкции не
- * должен подсказывать модели, на каком языке ждут ОТВЕТ: объяснения иначе
- * сползают на язык промпта. Нужный язык объяснений назван отдельно, дважды
- * и с самоназванием.
- *
- * ПОЧЕМУ ЗДЕСЬ НЕТ РАЗОБРАННЫХ ПРИМЕРОВ И НЕ НАЗВАНЫ ЗАПРЕЩЁННЫЕ ПРИДИРКИ.
- * По той же причине, что и в мультимодальном промпте: пример на фразе из
- * банка модель читает как готовый ответ и переписывает его список ошибок в
- * свой, а названная пара («"After that" вместо "Then"») становится ей
- * доступной — отрицание при ней держится плохо.
+ * должен подсказывать модели, на каком языке ждут ОТВЕТ.
  */
 
 /** Всё, что подставляется в текст промпта. */
@@ -52,7 +53,7 @@ export interface JudgeTextVars {
   prompt: string;
   /** Расшифровка от распознавателя — единственное, что модель знает о речи. */
   heard: string;
-  /** Наш перевод задания — ПРИБЛИЗИТЕЛЬНЫЙ ориентир. Пусто — блока нет. */
+  /** Наш перевод задания из банка. Пусто — модель переводит сама. */
   reference: string;
 }
 
@@ -60,78 +61,79 @@ export function judgeTextPrompt(v: JudgeTextVars): string {
   return `
 You are a teacher of ${v.target}. A ${v.native}-speaking learner at CEFR level ${v.level} was given a
 sentence in ${v.native} and asked to say it aloud in ${v.target}. You do not get the recording: a speech
-recogniser has already turned it into text, and that text is all you have.
+recogniser has already turned it into text.
 
-The task, in ${v.native}:
+THE TASK, in ${v.native}:
 ${v.prompt}
-
-What the recogniser wrote down:
-${v.heard}
 ${referenceBlock(v)}
-THE TEXT ABOVE WAS TYPED BY A MACHINE, NOT BY THE LEARNER. Punctuation, capital letters and sentence
-breaks are the recogniser's own — the learner was speaking and could not produce them, so they are never
-mistakes. Numbers may come out as digits or as words; both are the same thing said aloud. And the
-recogniser mishears: if a word makes no sense where it stands but sounds close to the word that belongs
-there, that is its slip, not his, and you must leave it alone. Only what a learner could plausibly have
-said is worth judging.
+WHAT HE SAID, as the recogniser wrote it down:
+${v.heard}
 
-Reply with a single JSON object and nothing else — no markdown, no commentary:
+THAT LINE WAS TYPED BY A MACHINE, NOT BY HIM. Punctuation, capital letters and sentence breaks are the
+recogniser's own — he was speaking and could not produce them, so they are never mistakes. Digits and
+number words are the same thing said aloud. If a word makes no sense where it stands but sounds close
+to the word that belongs there, that is the recogniser mishearing him: leave it alone.
+
+Reply with one JSON object and nothing else — no markdown, no commentary:
 {"spoke": string, "correct": string,
  "errors": [{"said": string, "fix": string, "kind": "meaning"|"grammar"|"word", "why": string}]}
 
-"spoke" — the language the text above is written in, in English. If it is not ${v.target}, say so here and
-leave "correct" and "errors" empty: a learner who answered in the wrong language has nothing to correct.
+"spoke" — the language that line is written in, in English. If it is not ${v.target}, stop there and
+leave "correct" and "errors" empty.
 
-"correct" — HIS OWN SENTENCE WITH ONLY THE WRONG PARTS REPLACED. Start from the text above, not from your
-own translation: every part he got right stays in his words, exactly as they stand, even where you would
-have said it differently. Put your own wording only where he was wrong or said nothing at all. If he was
-right throughout, "correct" repeats his sentence and adds only what he left unsaid.
+"correct" — the WHOLE sentence as it should have been said, complete even if he stopped halfway. Keep
+HIS OWN WORDS everywhere he was right, exactly as they stand, even where you would have chosen others.
+Use other words only where he was wrong, and add what he did not say at all.
 
-"errors" — real mistakes only. Three kinds exist and no others:
-  "meaning" — it says something different from the task: another action, place, direction, time, person;
-  "grammar" — the form is wrong: tense, aspect, case, article, preposition, agreement, word order;
-  "word" — no such word, or that word does not mean this.
-Decide the kind before you write anything else about the error. If your objection fits none of the three,
-it is not an error and it does not go in the list. A sentence that means the same and is grammatical is
-CORRECT, whatever you would have said in his place: how usual a wording is, how short it is, how a native
-would put it and how it sounds are not kinds of error. Never give such a thing as your reason in "why",
-in any language — a reason of that shape is the sound of marking a correct answer wrong, and most of
-these learners studied from textbooks and are right.
+"errors" — take each fragment of what he said and ask these four questions IN ORDER. Stop at the first
+"yes"; that is its "kind".
+  1. Does it state something the task does not state, or leave out something the task states —
+     another day, another time, another action, another person, another place? → "meaning"
+  2. Is it ungrammatical in ${v.target}? → "grammar"
+  3. Is it a word that does not exist, or that does not mean what is needed here? → "word"
+  4. No to all three → THE FRAGMENT IS CORRECT. Write nothing about it.
 
-"said" — his own words, quoted exactly as they stand in the text above, and ONLY the wrong ones: if half
-of the fragment was fine, that half does not belong there. Never correct them here, or he will not
-recognise his own mistake. "fix" — the words that stand in that place in your "correct", copied out of
-it; if the words you want are not in "correct", then either "correct" is wrong or this is not an error.
-Never list what he did NOT say: an omission is already visible from his sentence, and an entry whose
-"said" equals its "fix" is always a mistake on your part. Everything wrong for one reason is one error.
+Question 4 is the answer for every fragment that differs from our translation only in WORDING. A
+synonym, another order, another structure, longer, more formal, more textbook, less like a native — all
+correct, all silent. "I would have said it differently" is not one of the four questions and never
+becomes an error. If your reason for an error would be that something is more usual, more natural,
+shorter, better or what natives say, then the answer was 4 and you must delete that error — in any
+language you write it.
 
-"why" — in ${v.native} (${v.nativeSelf}) and in no other language; everything else stays in ${v.target}.
-Short and concrete, at ${v.level} level, no grammar jargon he would not know. Explain THIS sentence, not
-the language: what it has to say and what he said instead. Do not state a general rule — a rule invented
-to fit one example is usually false, and he will believe it.
+"said" — his own words, verbatim from the line above, and ONLY the wrong ones: quoting a correct half
+alongside them tells him that half was wrong too. "fix" — the words standing in that place in your
+"correct". Never list what he did not say: an omission is already visible from his line, and an entry
+whose "said" equals its "fix" is always a mistake on your part. Everything wrong for one reason is one
+error.
+
+"why" — in ${v.native} (${v.nativeSelf}) and no other language, at ${v.level} level. Say what this
+sentence has to state and what he stated instead. No general rules: a rule invented to fit one example
+is usually false, and he will believe it.
 `.trim();
 }
 
 /**
- * Блок про наш перевод. Без образца его в промпте нет вовсе.
+ * Наш перевод задания — то, с чем сверяется СМЫСЛ.
  *
- * ОБРАЗЕЦ ЛЕГКО СТАНОВИТСЯ КЛЮЧОМ, и на мультимодальной ветке это уже
- * стоило игроку трёх ложных ошибок подряд: все три были словами образца, а
- * объяснение звучало «в задании сказано "Then"». Поэтому здесь, как и там,
- * правило держится не уговорами: `correct` собирается из сказанного
- * игроком, копировать образец туда запрещено, а правка обязана быть словами
- * из `correct` — это проверяет код (`groundedIn` в review.ts).
+ * ГРАНИЦА ЗДЕСЬ ПРОХОДИТ ПО ОДНОЙ ЛИНИИ: образец решает, ЧТО должно быть
+ * сказано, и не решает, КАКИМИ СЛОВАМИ. Без первой половины судья не видит
+ * ни подмены дня недели, ни пропущенной половины фразы — он сверяет ответ
+ * сам с собой. Без второй — объявляет ошибкой верный перевод, сказанный
+ * другими словами.
  */
 function referenceBlock(v: JudgeTextVars): string {
-  if (v.reference.length === 0) return "";
+  if (v.reference.length === 0) {
+    return `
+Translate the task into ${v.target} yourself first, and judge his answer against your translation by
+the rules below.
+`;
+  }
   return `
-Our own translation of the task, for the meaning only:
+OUR TRANSLATION OF THE TASK — what it has to state:
 ${v.reference}
 
-It tells you WHAT had to be said — which situation, which direction, which time, who does what — and you
-should correct your own understanding by it before you judge his. It does not tell you WHICH WORDS: the
-same thing can be said with other words, in another order, with different but equally correct grammar,
-and a difference from this text is not an error. Never copy it into "correct" and never take a "fix" out
-of it: "correct" is built from what he said.
+Use it for MEANING ONLY. It tells you which day, which time, which action, who does it, and that
+nothing is left out. It does NOT tell you which words to use: he may state the same thing with other
+words and be completely right. A difference in wording from this text is never an error.
 `;
 }

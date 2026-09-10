@@ -417,6 +417,15 @@ const NITPICK_REASONS = [
   "лучше сказать",
   "лучше звучит",
   "короче",
+  "так говорят",
+  "так не говорят",
+  "распространён",
+  "употребительн",
+  "уместн",
+  "стилистич",
+  "разговорн",
+  "литературн",
+  "предпочтительн",
   // english
   "more natural",
   "sounds better",
@@ -427,6 +436,11 @@ const NITPICK_REASONS = [
   "commonly used",
   "more idiomatic",
   "is shorter",
+  "is preferred",
+  "preferable",
+  "more appropriate",
+  "stylistically",
+  "colloquial",
   // espanol
   "mas natural",
   "más natural",
@@ -445,9 +459,33 @@ export function nitpickReason(why: string): boolean {
   return NITPICK_REASONS.some((phrase) => text.includes(phrase));
 }
 
-export function asErrors(raw: unknown, correct: string, heard: string): JudgeError[] {
-  if (!Array.isArray(raw)) return [];
+/**
+ * Разбор списка ошибок с ОБЕИМИ половинами результата.
+ *
+ * ЗАЧЕМ ОТКЛОНЁННЫЕ ТОЖЕ НУЖНЫ. Отсеять придирку из списка плашек мало:
+ * модель, придравшись, УЖЕ переписала слово игрока в своём «правильном
+ * переводе», а лента разбора — это дифф услышанного против него. Верное
+ * «wake up» оставалось зачёркнутым, а «get up» считалось несказанным и
+ * снижало балл — то есть придирка стоила игроку балла даже тогда, когда
+ * плашку мы не показали. Отклонённые правки поэтому возвращаются наружу,
+ * чтобы их можно было откатить (revertRejectedFixes).
+ */
+export interface RejectedFix {
+  said: string;
+  fix: string;
+}
+
+export function reviewErrors(
+  raw: unknown,
+  correct: string,
+  heard: string,
+): { errors: JudgeError[]; rejected: RejectedFix[] } {
+  if (!Array.isArray(raw)) return { errors: [], rejected: [] };
   const out: JudgeError[] = [];
+  const rejected: RejectedFix[] = [];
+  const reject = (said: string, fix: string) => {
+    if (said.length > 0 && fix.length > 0) rejected.push({ said, fix });
+  };
   for (const item of raw) {
     if (!item || typeof item !== "object") continue;
     const row = item as Record<string, unknown>;
@@ -466,26 +504,62 @@ export function asErrors(raw: unknown, correct: string, heard: string): JudgeErr
     // балл второй раз: доля несказанного его уже учла.
     if (correction.length > 0 && correction === text) continue;
     // Правка расходится с переводом самой модели — см. groundedIn.
-    if (!groundedIn(correction, correct)) continue;
+    if (!groundedIn(correction, correct)) {
+      reject(text, correction);
+      continue;
+    }
     // Модель сама отнесла ошибку к стилю или к чему-то ещё вне списка —
     // значит по существу претензии нет. Отсутствующий вид пропускаем:
     // модель могла просто не заполнить поле, и терять из-за этого
     // настоящие ошибки хуже, чем пропустить одну придирку.
     const kind = typeof row.kind === "string" ? row.kind.trim().toLowerCase() : "";
-    if (kind.length > 0 && !ERROR_KINDS.has(kind)) continue;
+    if (kind.length > 0 && !ERROR_KINDS.has(kind)) {
+      reject(text, correction);
+      continue;
+    }
     // Вид назван верно, а доводом всё равно оказалась частотность —
     // см. NITPICK_REASONS. Ошибку модель придумала уже после того, как
     // выбрала ей вид.
-    if (nitpickReason(message)) continue;
+    if (nitpickReason(message)) {
+      reject(text, correction);
+      continue;
+    }
     // Плашка цитирует игрока — значит цитата должна быть из его речи.
-    if (!saidIn(text, heard)) continue;
+    if (!saidIn(text, heard)) {
+      reject(text, correction);
+      continue;
+    }
     out.push({
       text,
       message,
       correction,
     });
   }
-  return out;
+  return { errors: out, rejected };
+}
+
+/** Прежнее имя — только список плашек. Им пользуются инструменты проверки. */
+export function asErrors(raw: unknown, correct: string, heard: string): JudgeError[] {
+  return reviewErrors(raw, correct, heard).errors;
+}
+
+/**
+ * Возвращает в «правильный перевод» слова игрока там, где правку отклонили.
+ *
+ * Придирка, которую мы не показали, всё ещё сидит в «правильном переводе»
+ * модели: она заменила там верное слово на своё. Лента строится диффом
+ * против этого текста, и игрок видит своё верное слово зачёркнутым, а балл
+ * теряет на «несказанном». Здесь замена откатывается — по одному вхождению
+ * на правку, без регулярных выражений, чтобы ничего не задеть рядом.
+ */
+export function revertRejectedFixes(correct: string, rejected: RejectedFix[]): string {
+  let text = correct;
+  for (const { said, fix } of rejected) {
+    const at = text.toLowerCase().indexOf(fix.toLowerCase());
+    if (at < 0) continue;
+    text = text.slice(0, at) + said + text.slice(at + fix.length);
+  }
+  return text;
 }
 
 /**
