@@ -206,19 +206,26 @@ I get up| at seven| every morning|. Then I make| coffee| and read the news|.
 **Судья:** `qwen-mt-flash` (по умолчанию), `kimi-k3`, `deepseek-v4-pro-0813`,
 `glm-5.2`, `qwen-mt-lite`, `qwen-mt-turbo`, `qwen-mt-plus`.
 
-### Ключ один на всё
+### Ключ уже заведён — ставить ничего не нужно
+
+`OMNI_API_KEY` — это ключ ко всему сервису qwencloud, а не только к
+мультимодальной модели. Распознавание и текстовый судья ходят по тому же
+адресу с тем же ключом, так что **на этой ветке не нужно ни заводить новых
+секретов, ни менять существующие**. Всё, что уже стоит, работает как есть:
 
 ```
-npx supabase secrets set QWEN_ENABLED=1
-npx supabase secrets set QWEN_API_KEY=<ключ qwencloud>
+OMNI_ENABLED=1
+OMNI_API_KEY=<ключ qwencloud>
 ```
 
-Оба шага ходят по одному адресу с одним ключом. Прежние имена
-(`OMNI_ENABLED`, `OMNI_API_KEY`, `OMNI_BASE_URL`, `OMNI_TIMEOUT_MS`)
-принимаются вторыми: заставлять переставлять уже заведённый секрет ради
-переименования — работа без результата. Необязательные: `QWEN_BASE_URL`
+Имена `QWEN_ENABLED` / `QWEN_API_KEY` / `QWEN_BASE_URL` / `QWEN_TIMEOUT_MS`
+тоже принимаются — вторыми, на случай будущего переименования. Заводить их
+сейчас не надо: второй секрет с тем же значением — это гарантия того, что
+однажды обновят только один из двух.
+
+Необязательные: `OMNI_BASE_URL`
 (`https://dashscope-intl.aliyuncs.com/compatible-mode/v1`),
-`QWEN_TIMEOUT_MS`, `ASR_MODEL`, `LLM_MODEL`, `ENERGY_COST_JUDGE`.
+`OMNI_TIMEOUT_MS`, `ASR_MODEL`, `LLM_MODEL`, `ENERGY_COST_JUDGE`.
 
 Списание энергии по-прежнему одно на запись, хотя вызова теперь два: игрок
 платит за разбор, а не за наше устройство пайплайна.

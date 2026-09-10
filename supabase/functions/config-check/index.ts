@@ -82,7 +82,7 @@ async function checkOmni(): Promise<CheckResult> {
     return {
       configured: false,
       reachable: null,
-      detail: "разбор выключен (QWEN_ENABLED != 1)",
+      detail: "разбор выключен (OMNI_ENABLED != 1)",
     };
   }
 
@@ -99,7 +99,7 @@ async function checkOmni(): Promise<CheckResult> {
 
   const config = `asr=${asrModel(null)} llm=${llmModel(null)} at ${judgeBaseUrl()}`;
   if (!judgeKey()) {
-    return { configured: false, reachable: null, detail: "ключ не задан: QWEN_API_KEY" };
+    return { configured: false, reachable: null, detail: "ключ не задан: OMNI_API_KEY" };
   }
   return asr.error
     ? { configured: true, reachable: false, detail: `${config}: ${asr.error}` }

@@ -156,13 +156,15 @@ export function scoreFor(review: ReviewSpan[], errorCount: number): number {
 const DEFAULT_BASE = "https://dashscope-intl.aliyuncs.com/compatible-mode/v1";
 
 /**
- * КЛЮЧ ОДИН НА ВСЮ ВЕТКУ. Распознавание и текстовый судья — это разные
- * модели, но один провайдер (qwencloud/DashScope) и один счёт. Два секрета
- * для одного ключа означали бы, что однажды обновят только один.
+ * КЛЮЧ ОДИН НА ВЕСЬ QWEN, И ОН УЖЕ ЗАВЕДЁН. Распознавание и текстовый судья
+ * — разные модели, но один провайдер (qwencloud/DashScope), один счёт и один
+ * ключ; тот же, которым пользуется мультимодальная модель.
  *
- * Имя `OMNI_API_KEY` принимается вторым: ветка выросла из мультимодальной,
- * и заставлять переставлять уже заведённый секрет ради переименования —
- * это работа без результата.
+ * ОСНОВНОЕ ИМЯ — `OMNI_API_KEY`, потому что именно оно уже стоит в секретах
+ * проекта. Заводить второй секрет с тем же значением ради более точного
+ * названия — это гарантия того, что однажды обновят только один из двух.
+ * `QWEN_API_KEY` принимается тоже: если когда-нибудь переименуют, ничего не
+ * сломается.
  */
 function secret(...names: string[]): string | null {
   for (const name of names) {
@@ -173,18 +175,18 @@ function secret(...names: string[]): string | null {
 }
 
 export function judgeEnabled(): boolean {
-  return (secret("QWEN_ENABLED", "OMNI_ENABLED") ?? "0") === "1";
+  return (secret("OMNI_ENABLED", "QWEN_ENABLED") ?? "0") === "1";
 }
 
 export function judgeKey(): string | null {
-  return secret("QWEN_API_KEY", "OMNI_API_KEY");
+  return secret("OMNI_API_KEY", "QWEN_API_KEY");
 }
 
 export function judgeBaseUrl(): string {
-  return secret("QWEN_BASE_URL", "OMNI_BASE_URL") ?? DEFAULT_BASE;
+  return secret("OMNI_BASE_URL", "QWEN_BASE_URL") ?? DEFAULT_BASE;
 }
 
-const TIMEOUT_MS = Number(secret("QWEN_TIMEOUT_MS", "OMNI_TIMEOUT_MS") ?? "90000");
+const TIMEOUT_MS = Number(secret("OMNI_TIMEOUT_MS", "QWEN_TIMEOUT_MS") ?? "90000");
 
 /** Меньше этого запускать вызов бессмысленно — он не успеет вернуться. */
 const MIN_SLICE_MS = 8_000;
@@ -513,7 +515,7 @@ export async function requestQwen(
 ): Promise<{ raw: string } | { error: string }> {
   const key = judgeKey();
   if (!key) {
-    return { error: "нет ключа модели: npx supabase secrets set QWEN_API_KEY=<ключ>" };
+    return { error: "нет ключа модели: npx supabase secrets set OMNI_API_KEY=<ключ qwencloud>" };
   }
   const timeoutMs = Math.min(TIMEOUT_MS, budgetMs);
   if (timeoutMs < MIN_SLICE_MS) {
