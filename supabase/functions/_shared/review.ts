@@ -27,7 +27,7 @@ export interface JudgeError {
 }
 
 /** Вид куска в разборе. */
-import { type DiffKind, diffWords } from "./textDiff.ts";
+import { type DiffKind } from "./textDiff.ts";
 
 export type SpanKind =
   /** Сказано верно — обычный текст. */
@@ -608,7 +608,10 @@ export async function requestQwen(
       body: JSON.stringify({
         model,
         messages: [
-          { role: "system", content: system },
+          // Пустую системную часть НЕ ОТПРАВЛЯЕМ ВОВСЕ. Модели
+          // распознавания инструкций не выполняют, а сообщение с пустым
+          // содержимым часть провайдеров считает ошибкой запроса.
+          ...(system.length > 0 ? [{ role: "system", content: system }] : []),
           { role: "user", content: userParts },
         ],
         // Только текст: озвучка у нас своя, и просить у модели ещё и аудио

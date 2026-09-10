@@ -17,7 +17,8 @@
 import { bcp47For } from "../_shared/languages.ts";
 import { googleKey, googleKeySource, missingKeyMessage } from "../_shared/googleKey.ts";
 import { judgeBaseUrl, judgeEnabled, judgeKey } from "../_shared/review.ts";
-import { asrModel, transcribe } from "../_shared/asr.ts";
+import { requestQwen } from "../_shared/review.ts";
+import { asrModel } from "../_shared/asr.ts";
 import { llmModel } from "../_shared/textJudge.ts";
 import { synthesizeSpeech } from "../_shared/tts.ts";
 
@@ -85,49 +86,29 @@ async function checkOmni(): Promise<CheckResult> {
       detail: "разбор выключен (OMNI_ENABLED != 1)",
     };
   }
-
-  // ПРОВЕРЯЕТСЯ ПЕРВЫЙ ШАГ, А НЕ ОБА. Дошёл ли запрос, принят ли ключ и
-  // разобрался ли ответ — всё это видно уже по распознаванию, и оно
-  // дешевле. Второй шаг ходит по тому же адресу с тем же ключом: если
-  // сломан он один, это видно по отладке настоящей записи, а не по
-  // синтетической тишине, на которой судить всё равно нечего.
-  const asr = await transcribe({
-    audio: silentWav(),
-    audioFormat: "wav",
-    budgetMs: 60_000,
-  });
-
-  const config = `asr=${asrModel(null)} llm=${llmModel(null)} at ${judgeBaseUrl()}`;
   if (!judgeKey()) {
     return { configured: false, reachable: null, detail: "ключ не задан: OMNI_API_KEY" };
   }
-  return asr.error
-    ? { configured: true, reachable: false, detail: `${config}: ${asr.error}` }
+
+  // ПРОВЕРЯЕТСЯ ТЕКСТОВЫЙ ШАГ, А НЕ РАСПОЗНАВАНИЕ, И ЭТО НЕ ЛЕНЬ. Адрес и
+  // ключ у обоих шагов одни, так что дошёл ли запрос и принят ли ключ видно
+  // по любому из них. А распознавание берёт аудио ССЫЛКОЙ на файл в
+  // хранилище (см. asr.ts) — синтетической тишине такой ссылки взять
+  // неоткуда, и проверка ругалась бы на то, чего в бою не бывает.
+  const model = llmModel(null);
+  const answer = await requestQwen(
+    "Reply with the single word: ok",
+    [{ type: "text", text: "ping" }],
+    60_000,
+    model,
+  );
+
+  const config = `llm=${model}, asr=${asrModel(null)} at ${judgeBaseUrl()}`;
+  return "error" in answer
+    ? { configured: true, reachable: false, detail: `${config}: ${answer.error}` }
     : { configured: true, reachable: true, detail: `${config} отвечает, ключ принят` };
 }
 
-/** Секунда тишины в WAV 16 кГц моно — минимальный корректный контейнер. */
-function silentWav(): Uint8Array {
-  const samples = 16_000;
-  const bytes = new Uint8Array(44 + samples * 2);
-  const view = new DataView(bytes.buffer);
-  const ascii = (offset: number, text: string) => {
-    for (let i = 0; i < text.length; i++) view.setUint8(offset + i, text.charCodeAt(i));
-  };
-  ascii(0, "RIFF");
-  view.setUint32(4, 36 + samples * 2, true);
-  ascii(8, "WAVEfmt ");
-  view.setUint32(16, 16, true);
-  view.setUint16(20, 1, true);
-  view.setUint16(22, 1, true);
-  view.setUint32(24, 16_000, true);
-  view.setUint32(28, 32_000, true);
-  view.setUint16(32, 2, true);
-  view.setUint16(34, 16, true);
-  ascii(36, "data");
-  view.setUint32(40, samples * 2, true);
-  return bytes;
-}
 
 /**
  * Синтез речи. Проверяется тем же вызовом, что и в игре, но на одном

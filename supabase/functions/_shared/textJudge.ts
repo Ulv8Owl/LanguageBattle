@@ -90,6 +90,13 @@ export function llmModel(chosen?: string | null): string {
 }
 
 export interface TextJudgeRequest {
+  /**
+   * Подписанная ссылка на запись — основной путь распознавания.
+   *
+   * Вложенный в запрос файл провайдер у моделей распознавания разобрать не
+   * может и отвечает «format is empty» при непустом формате (см. asr.ts).
+   */
+  audioUrl?: string | null;
   audio: Uint8Array;
   /** Контейнер записи: wav, mp3, m4a — как есть у нас в хранилище. */
   audioFormat: string;
@@ -135,6 +142,7 @@ export async function textJudge(req: TextJudgeRequest): Promise<JudgeResult> {
 
   // --- Шаг первый: речь в текст --------------------------------------------
   const asr = await transcribe({
+    audioUrl: req.audioUrl,
     audio: req.audio,
     audioFormat: req.audioFormat,
     model: req.asrModelChoice,
@@ -181,7 +189,9 @@ export async function textJudge(req: TextJudgeRequest): Promise<JudgeResult> {
     Math.max(0, req.budgetMs - spent),
     llmModel(req.llmModelChoice),
   );
-  if ("error" in answer) return fail(`судья: ${answer.error}`, { asr: asr.debug });
+  if ("error" in answer) {
+    return fail(`судья ${llmModel(req.llmModelChoice)}: ${answer.error}`, { asr: asr.debug });
+  }
 
   const raw = answer.raw;
   if (raw.trim().length === 0) return fail("судья вернул пустой ответ", { asr: asr.debug });
