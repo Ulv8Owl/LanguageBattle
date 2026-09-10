@@ -72,17 +72,22 @@ export interface AsrResult {
  * закрыть задачу честным «модель не ответила», иначе она повиснет в
  * 'processing', а игрок будет ждать результат, которого не будет.
  *
- * АУДИО УХОДИТ ССЫЛКОЙ, А НЕ ВЛОЖЕНИЕМ, И ЭТО НЕ ОПТИМИЗАЦИЯ. Первая
- * версия клала файл прямо в запрос (`data:audio/wav;base64,…`) и получала
- * от провайдера HTTP 400 «format is empty», хотя формат мы передавали и он
- * точно был "wav". Модели распознавания у этого провайдера ждут в
- * `input_audio.data` ССЫЛКУ на файл и формат определяют сами; вложенный
- * data-URL они разобрать не могут, отсюда и «формат пустой» при непустом
- * формате.
+ * ═══ ФОРМА ВЫЗОВА ЗДЕСЬ НЕ ПРОИЗВОЛЬНАЯ. НЕ УПРОЩАТЬ. ═══
  *
- * Вложение осталось запасным путём — на случай, если ссылку не удалось
- * подписать. Оно заведомо работает с мультимодальными моделями (ветка
- * Omni живёт на нём), так что терять его незачем.
+ * Провайдер отвечает HTTP 400 «format is empty» на сообщение, в котором
+ * лежит ОДНО АУДИО и больше ничего, — даже когда формат передан и он
+ * заведомо непустой ("wav", других приложение не пишет). Это выяснилось
+ * трижды и с трёх сторон:
+ *
+ *   * распознавание слало одно аудио вложением — отказ;
+ *   * то же аудио ссылкой вместо вложения — тот же отказ слово в слово;
+ *   * мультимодальная модель на соседней ветке работала месяц, сломалась
+ *     ровно в тот день, когда из её сообщения убрали текстовую часть, и
+ *     починилась, когда её вернули.
+ *
+ * Поэтому здесь ровно то же, что у работающего вызова: непустая системная
+ * часть, звук вложением с явным форматом и короткая текстовая часть рядом.
+ * Смысла в этом тексте нет — есть форма, которую провайдер принимает.
  *
  * ЯЗЫК НЕ ПОДСКАЗЫВАЕМ НАМЕРЕННО. Распознаватель определяет его сам, и это
  * не лень, а механика проверки «не тот язык»: сказав по-русски, игрок
@@ -90,9 +95,6 @@ export interface AsrResult {
  * распознаватель услышал бы английский в чём угодно.
  */
 export async function transcribe(req: {
-  /** Подписанная ссылка на файл. Основной путь — см. выше. */
-  audioUrl?: string | null;
-  /** Сам файл. Запасной путь, если ссылки нет. */
   audio: Uint8Array;
   audioFormat: string;
   model?: string | null;
@@ -100,41 +102,36 @@ export async function transcribe(req: {
 }): Promise<AsrResult> {
   const started = Date.now();
   const model = asrModel(req.model);
-  const url = (req.audioUrl ?? "").trim();
-  const source = url.length > 0 ? "url" : "inline";
   const debug = (extra: Record<string, unknown> = {}) => ({
     provider: "asr",
     model,
     model_requested: (req.model ?? "").trim().length > 0 ? req.model : null,
     base_url: judgeBaseUrl(),
-    // Чем именно отправили аудио — первое, что нужно знать, когда провайдер
-    // ругается на формат.
-    audio_source: source,
     audio_bytes: req.audio.byteLength,
     audio_format: req.audioFormat,
     ms: Date.now() - started,
     ...extra,
   });
 
-  if (url.length === 0 && req.audio.byteLength === 0) {
+  if (req.audio.byteLength === 0) {
     return { text: "", error: "запись пуста", debug: debug({ status: "failed" }) };
   }
 
   const answer = await requestQwen(
-    // Системной части у распознавания НЕТ. Эти модели расшифровывают, а не
-    // выполняют инструкции, и лишний текст часть из них возвращает в ответе
-    // как часть расшифровки.
-    "",
-    [url.length > 0 ? audioUrlPart(url) : audioPart(req.audio, req.audioFormat)],
+    "You are a speech transcriber. Write down exactly what is said and nothing else.",
+    [
+      audioPart(req.audio, req.audioFormat),
+      { type: "text", text: "Transcribe this recording." },
+    ],
     req.budgetMs,
     model,
     { audio: true, temperature: 0 },
   );
 
   if ("error" in answer) {
-    // Модель и способ отправки — прямо в тексте ошибки: без них по
-    // скриншоту не понять, чей это отказ и что мы вообще послали.
-    const reason = `${model} (аудио ${source}, ${req.audioFormat}): ${answer.error}`;
+    // Модель, формат и размер — прямо в тексте ошибки: без них по скриншоту
+    // не понять, чей это отказ и что мы вообще послали.
+    const reason = `${model} (${req.audioFormat}, ${req.audio.byteLength} Б): ${answer.error}`;
     return { text: "", error: reason, debug: debug({ status: "failed", error: answer.error }) };
   }
 
@@ -148,11 +145,6 @@ export async function transcribe(req: {
       raw: answer.raw.slice(0, 600),
     }),
   };
-}
-
-/** Аудио ссылкой — основной путь для моделей распознавания. */
-function audioUrlPart(url: string): unknown {
-  return { type: "input_audio", input_audio: { data: url } };
 }
 
 /** Аудио раунда в том виде, в каком его принимает провайдер. */

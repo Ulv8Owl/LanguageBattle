@@ -735,38 +735,6 @@ async function loadAudio(
   return new Uint8Array(await file.arrayBuffer());
 }
 
-/**
- * Подписанная ссылка на запись — то, чем аудио уходит распознаванию.
- *
- * ЗАЧЕМ ССЫЛКА, КОГДА ФАЙЛ УЖЕ СКАЧАН. Модели распознавания у провайдера
- * ждут в `input_audio.data` ССЫЛКУ и формат определяют сами. Файл, вложенный
- * в запрос как data-URL, они разобрать не могут и отвечают HTTP 400
- * «format is empty» — при том, что формат мы передаём и он непустой.
- *
- * Бакет закрытый, поэтому ссылка подписанная и живёт пятнадцать минут:
- * дольше, чем любой разбор, и заметно меньше, чем срок жизни самой записи.
- * Не получилось подписать — не беда: распознавание умеет и вложением, это
- * просто дороже и работает не со всеми моделями.
- */
-async function audioLink(
-  supabase: SupabaseClient,
-  recording: VoiceRecordingRow,
-): Promise<string | null> {
-  try {
-    const { data, error } = await supabase.storage
-      .from("voice-recordings")
-      .createSignedUrl(recording.audio_storage_path, 900);
-    if (error || !data?.signedUrl) {
-      console.error("evaluate-recording: не подписалась ссылка на запись", error);
-      return null;
-    }
-    return data.signedUrl;
-  } catch (e) {
-    console.error("evaluate-recording: не подписалась ссылка на запись", e);
-    return null;
-  }
-}
-
 async function runJudge(
   supabase: SupabaseClient,
   recording: VoiceRecordingRow,
@@ -791,7 +759,6 @@ async function runJudge(
   }
 
   return await textJudge({
-    audioUrl: await audioLink(supabase, recording),
     audio,
     audioFormat: audioFormatOf(recording.audio_storage_path),
     nativeLanguage,
