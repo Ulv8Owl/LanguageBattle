@@ -777,14 +777,19 @@ export async function omniEvaluate(req: OmniRequest): Promise<OmniResult> {
   );
   const answer = await requestOmni(
     system,
-    // Задание и образец стоят в системной части — здесь только звук.
-    // Дублировать задание вторым сообщением значило бы дать модели два
-    // слегка разных описания одной задачи.
-    [audioPart(req.audio, req.audioFormat)],
+    // ЗВУК И КОРОТКАЯ ТЕКСТОВАЯ ЧАСТЬ. Текст здесь не ради содержания —
+    // задание и образец стоят в системной части и дублировать их незачем, —
+    // а потому, что именно в такой форме этот вызов работает. Сообщение из
+    // одного лишь аудио провайдер разбирал не всегда, и отказ приходил
+    // невнятный: HTTP 400 «format is empty» при заведомо непустом формате.
+    [
+      audioPart(req.audio, req.audioFormat),
+      { type: "text", text: "Judge this recording by the rules above." },
+    ],
     req.budgetMs,
     omniModel(req.model),
   );
-  if ("error" in answer) return fail(answer.error);
+  if ("error" in answer) return fail(`${omniModel(req.model)}: ${answer.error}`);
   const raw = answer.raw;
 
   if (raw.trim().length === 0) return fail("модель вернула пустой ответ");
