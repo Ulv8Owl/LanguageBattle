@@ -191,8 +191,31 @@ export function omniKey(): string | null {
   return key && key.length > 0 ? key : null;
 }
 
-export function omniModel(): string {
-  return Deno.env.get("OMNI_MODEL") ?? DEFAULT_MODEL;
+/**
+ * Модели, между которыми можно переключаться из настроек.
+ *
+ * СПИСОК ЗДЕСЬ, А НЕ В БАЗЕ, И ЭТО ОСОЗНАННО. Значение из профиля игрока —
+ * это ввод снаружи: строка, которую туда положил клиент. Проверять её надо
+ * там же, где ей пользуются, иначе опечатка в приложении уедет прямиком в
+ * тело запроса к провайдеру и вернётся невнятной ошибкой HTTP 400.
+ *
+ * Порядок значим: первая — модель по умолчанию.
+ */
+export const OMNI_MODELS = ["qwen3-omni-flash", "qwen3.5-omni-flash"] as const;
+
+/**
+ * Какая модель разбирает эту запись.
+ *
+ * Выбор игрока сильнее переменной окружения, а неизвестное значение молча
+ * заменяется моделью по умолчанию: сравнение цены и качества не повод
+ * оставить игрока без разбора из-за строки, которой провайдер не знает.
+ */
+export function omniModel(chosen?: string | null): string {
+  const wanted = (chosen ?? "").trim();
+  if ((OMNI_MODELS as readonly string[]).includes(wanted)) return wanted;
+  const fromEnv = Deno.env.get("OMNI_MODEL");
+  if (fromEnv && (OMNI_MODELS as readonly string[]).includes(fromEnv)) return fromEnv;
+  return DEFAULT_MODEL;
 }
 
 export function omniBaseUrl(): string {
@@ -200,10 +223,13 @@ export function omniBaseUrl(): string {
   return own && own.length > 0 ? own : DEFAULT_BASE;
 }
 
-export function omniConfigDebug(): Record<string, unknown> {
+export function omniConfigDebug(chosen?: string | null): Record<string, unknown> {
   return {
     provider: "omni",
-    model: omniModel(),
+    model: omniModel(chosen),
+    // Что игрок выбрал в настройках — отдельно от того, что ушло
+    // провайдеру: если выбор не доехал, видно это только так.
+    model_requested: (chosen ?? "").trim().length > 0 ? chosen : null,
     base_url: omniBaseUrl(),
     key_set: omniKey() !== null,
   };
@@ -553,6 +579,7 @@ async function requestOmni(
   system: string,
   userParts: unknown[],
   budgetMs: number,
+  model: string,
 ): Promise<{ raw: string } | { error: string }> {
   const key = omniKey();
   if (!key) {
@@ -573,7 +600,7 @@ async function requestOmni(
         Authorization: `Bearer ${key}`,
       },
       body: JSON.stringify({
-        model: omniModel(),
+        model,
         messages: [
           { role: "system", content: system },
           { role: "user", content: userParts },
@@ -635,6 +662,14 @@ export interface OmniRequest {
   level: string;
   /** Остаток бюджета задачи. Пережить его вызов не имеет права. */
   budgetMs: number;
+  /**
+   * Модель, выбранная игроком в настройках. Пусто — по умолчанию.
+   *
+   * Ветка Omni существует ради сравнения двух моделей на одних и тех же
+   * записях, поэтому выбор едет с каждым запросом, а не берётся из
+   * окружения: между двумя ответами подряд его можно поменять.
+   */
+  model?: string | null;
 }
 
 /**
@@ -652,7 +687,7 @@ export async function omniEvaluate(req: OmniRequest): Promise<OmniResult> {
     audible: false,
     degraded: true,
     failureReason: reason,
-    debug: { ...omniConfigDebug(), status: "failed", reason, ms: Date.now() - started, ...extra },
+    debug: { ...omniConfigDebug(req.model), status: "failed", reason, ms: Date.now() - started, ...extra },
   });
 
   if (req.audio.byteLength === 0) return fail("запись пуста");
@@ -668,6 +703,7 @@ export async function omniEvaluate(req: OmniRequest): Promise<OmniResult> {
       },
     ],
     req.budgetMs,
+    omniModel(req.model),
   );
   if ("error" in answer) return fail(answer.error);
   const raw = answer.raw;
@@ -678,7 +714,7 @@ export async function omniEvaluate(req: OmniRequest): Promise<OmniResult> {
   if (!parsed) return fail(`ответ не разобран как JSON: ${raw.slice(0, 300)}`);
 
   const debug: Record<string, unknown> = {
-    ...omniConfigDebug(),
+    ...omniConfigDebug(req.model),
     status: "ok",
     ms: Date.now() - started,
     audio_bytes: req.audio.byteLength,
@@ -698,7 +734,7 @@ export async function omniEvaluate(req: OmniRequest): Promise<OmniResult> {
       wrongLanguage: true,
       spokenLanguage: spoke,
       debug: {
-        ...omniConfigDebug(),
+        ...omniConfigDebug(req.model),
         status: "wrong_language",
         reason: `модель услышала ${spoke}, ожидался ${languageName(req.targetLanguage)}`,
         ms: Date.now() - started,
@@ -723,7 +759,7 @@ export async function omniEvaluate(req: OmniRequest): Promise<OmniResult> {
       degraded: false,
       silent: true,
       debug: {
-        ...omniConfigDebug(),
+        ...omniConfigDebug(req.model),
         status: "silent",
         reason: "модель не разобрала речи в записи (audible=false)",
         ms: Date.now() - started,

@@ -35,6 +35,13 @@
  * ответу. Здесь оставлено только то, что читает код, и по одному правилу
  * на каждую ошибку, которая реально приходила от модели.
  *
+ * СУДИТЬ НАДО ЗАПИСЬ, А НЕ РАСШИФРОВКУ, И ЭТО СМЫСЛ ВСЕЙ ВЕТКИ. Ради этого
+ * здесь и стоит мультимодальная модель: она слышит запись целиком, и ничто
+ * не нормализуется до того, как её оценят. Модель всё же пишет расшифровку
+ * (`heard`) — без неё не построить ленту разбора, — и поэтому в промпте
+ * прямо сказано, что расшифровка это заметка, а решает звук. Убрать это
+ * правило значит превратить omni в дорогое распознавание.
+ *
  * ЯЗЫК ПРОМПТА — АНГЛИЙСКИЙ, И ЭТО НЕ СЛУЧАЙНОСТЬ. Язык инструкции не
  * должен подсказывать модели, на каком языке ждут ОТВЕТ: объяснения иначе
  * сползают на язык промпта. Нужный язык объяснений назван отдельно, дважды
@@ -82,7 +89,12 @@ it is not ${v.target}, say so here and leave "heard", "correct" and "errors" emp
 actually said. Do not finish the sentence for him, do not repeat the task back, do not write your own
 translation here. If he said half the sentence and stopped, "heard" is that half and nothing more. If he
 said a word, stopped and said it again differently, keep the version he settled on and drop the abandoned
-one — correcting himself is the skill working, not failing. Everything else is decided from this field.
+one — correcting himself is the skill working, not failing.
+
+JUDGE THE RECORDING, NOT YOUR OWN TRANSCRIPTION. "heard" is a note you take for yourself, and writing
+things down tidies them: a swallowed ending comes out whole, a word that actually sounded like another
+word comes out as the one you expected. The mistakes live in the sounds. Listen again before you decide,
+and where your transcription and the recording disagree, the recording decides.
 
 "correct" — HIS OWN SENTENCE WITH ONLY THE WRONG PARTS REPLACED. Start from "heard", not from your own
 translation: every part he got right stays in his words, exactly as he said them, even where you would

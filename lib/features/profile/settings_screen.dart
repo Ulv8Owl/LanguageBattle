@@ -8,6 +8,7 @@ import '../../core/app_locale.dart';
 import '../../core/debug_flags.dart';
 import '../../core/leagues.dart';
 import '../../core/supabase_client.dart';
+import '../../data/judge_models.dart';
 import '../../data/player_rating.dart';
 import '../../data/training_session.dart';
 import '../../core/theme.dart';
@@ -47,6 +48,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
   PlayerRating? _rating;
   bool _savingRating = false;
 
+  /// Модель разбора. Ветка Omni существует ради сравнения двух моделей на
+  /// одних и тех же записях, и переключатель — единственный способ это
+  /// сравнение провести: сменить модель между двумя ответами подряд.
+  String _omniModel = defaultOmniModel;
+  bool _savingOmniModel = false;
+
   /// Пока идёт удаление, кнопку нельзя нажать второй раз: повторный вызов
   /// delete_account после успешного первого упрётся в «not authenticated».
   bool _deletingAccount = false;
@@ -55,6 +62,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   void initState() {
     super.initState();
     _loadNativeLanguage();
+    _loadOmniModel();
   }
 
   Future<void> _loadNativeLanguage() async {
@@ -181,6 +189,74 @@ class _SettingsScreenState extends State<SettingsScreen> {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(content: Text('$what появится в следующей итерации')),
     );
+  }
+
+  Future<void> _loadOmniModel() async {
+    try {
+      final model = await fetchOmniModel();
+      if (mounted) setState(() => _omniModel = model);
+    } catch (_) {
+      // Молча: не прочитался выбор — покажем модель по умолчанию, ту же,
+      // что подставит сервер. Ошибка здесь ничего не ломает.
+    }
+  }
+
+  /// Выбор модели разбора.
+  ///
+  /// Список моделей приходит из `judge_models.dart` — того же файла, что
+  /// знает, какие значения вообще допустимы. Второй список здесь означал бы
+  /// две правды об одном.
+  Future<void> _pickOmniModel() async {
+    final picked = await showModalBottomSheet<String>(
+      context: context,
+      backgroundColor: AppColors.navy2,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const SizedBox(height: 16),
+            Text('Модель разбора',
+                style: AppFonts.ui(fontSize: 15, weight: FontWeight.w800, color: AppColors.cream)),
+            const SizedBox(height: 4),
+            const Text(
+              'Обе слушают запись целиком. Меняется на следующей же записи —\n'
+              'можно сравнить их на одной и той же фразе.',
+              textAlign: TextAlign.center,
+              style: TextStyle(color: AppColors.muted, fontSize: 11, height: 1.4),
+            ),
+            const SizedBox(height: 8),
+            for (final model in omniModels)
+              ListTile(
+                title: Text(model, style: AppFonts.mono(fontSize: 12, color: AppColors.cream)),
+                trailing:
+                    model == _omniModel ? const Icon(Icons.check, color: AppColors.gold) : null,
+                onTap: () => Navigator.of(ctx).pop(model),
+              ),
+            const SizedBox(height: 12),
+          ],
+        ),
+      ),
+    );
+    if (picked == null || picked == _omniModel || !mounted) return;
+
+    setState(() => _savingOmniModel = true);
+    try {
+      await saveOmniModel(picked);
+      if (!mounted) return;
+      setState(() {
+        _omniModel = picked;
+        _savingOmniModel = false;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _savingOmniModel = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Не удалось сохранить: $e')),
+      );
+    }
   }
 
   Future<void> _pickDeckSize() async {
@@ -398,18 +474,34 @@ class _SettingsScreenState extends State<SettingsScreen> {
             const SizedBox(height: 8),
             ChPanel(
               padding: EdgeInsets.zero,
-              child: _Row(
-                icon: Icons.emoji_events_outlined,
-                title: t.ratingAndLeague,
-                trailing: _savingRating
-                    ? const SizedBox(height: 14, width: 14, child: CircularProgressIndicator(strokeWidth: 2))
-                    : Text(
-                        _rating == null
-                            ? '—'
-                            : '${_rating!.display} · ${_rating!.league.cefr}',
-                        style: AppFonts.mono(fontSize: 11, color: AppColors.muted),
-                      ),
-                onTap: _savingRating ? null : _editRating,
+              child: Column(
+                children: [
+                  _Row(
+                    icon: Icons.hearing,
+                    title: 'Модель разбора',
+                    trailing: _savingOmniModel
+                        ? const SizedBox(
+                            height: 14, width: 14, child: CircularProgressIndicator(strokeWidth: 2))
+                        : Text(_omniModel,
+                            style: AppFonts.mono(fontSize: 10, color: AppColors.muted)),
+                    onTap: _savingOmniModel ? null : _pickOmniModel,
+                  ),
+                  const Divider(height: 1, color: AppColors.line),
+                  _Row(
+                    icon: Icons.emoji_events_outlined,
+                    title: t.ratingAndLeague,
+                    trailing: _savingRating
+                        ? const SizedBox(
+                            height: 14, width: 14, child: CircularProgressIndicator(strokeWidth: 2))
+                        : Text(
+                            _rating == null
+                                ? '—'
+                                : '${_rating!.display} · ${_rating!.league.cefr}',
+                            style: AppFonts.mono(fontSize: 11, color: AppColors.muted),
+                          ),
+                    onTap: _savingRating ? null : _editRating,
+                  ),
+                ],
               ),
             ),
             const SizedBox(height: 18),

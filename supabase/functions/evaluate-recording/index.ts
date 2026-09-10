@@ -377,6 +377,15 @@ async function processJob(job_id: string): Promise<void> {
       (await speakerLeagueRating(supabase, recording.user_id, targetLanguage)) ?? 1000,
     );
 
+    // Какой моделью разбирать — выбор игрока из настроек.
+    //
+    // ЭТА ВЕТКА СУЩЕСТВУЕТ РАДИ СРАВНЕНИЯ ДВУХ МОДЕЛЕЙ на одних и тех же
+    // записях, поэтому выбор читается на каждой записи, а не берётся из
+    // окружения: между двумя ответами подряд его можно поменять, и разница
+    // будет видна на соседних раундах. Неизвестное значение сервер молча
+    // заменит моделью по умолчанию (omniModel в omniJudge.ts).
+    const judgeModel = await speakerOmniModel(supabase, recording.user_id);
+
     const omni = await runOmni(
       supabase,
       recording,
@@ -386,6 +395,7 @@ async function processJob(job_id: string): Promise<void> {
       reference,
       level,
       budgetLeft(),
+      judgeModel,
     );
     // Один вызов — одно списание, и только когда модель ответила. Отказ
     // провайдера бесплатен: энергия платит за ответ, а не за попытку.
@@ -721,6 +731,7 @@ async function runOmni(
   reference: string,
   level: CefrLevel,
   budgetMs: number,
+  model: string | null,
 ): Promise<OmniResult> {
   const audio = await loadAudio(supabase, recording);
   if (audio === null) {
@@ -743,7 +754,32 @@ async function runOmni(
     reference,
     level,
     budgetMs,
+    model,
   });
+}
+
+/**
+ * Модель разбора, выбранная игроком в настройках (миграция 0047).
+ *
+ * Ошибку чтения глотаем: выбор модели — это удобство сравнения, а не
+ * условие работы. Остаться без разбора из-за того, что не прочиталась одна
+ * колонка профиля, было бы обменом не в ту сторону.
+ */
+async function speakerOmniModel(
+  supabase: SupabaseClient,
+  userId: string,
+): Promise<string | null> {
+  try {
+    const { data } = await supabase
+      .from("users")
+      .select("omni_model")
+      .eq("id", userId)
+      .maybeSingle();
+    return (data?.omni_model as string | null) ?? null;
+  } catch (e) {
+    console.error("evaluate-recording: не удалось прочитать выбор модели", e);
+    return null;
+  }
 }
 
 /**
