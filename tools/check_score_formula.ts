@@ -8,7 +8,7 @@
 // ожидал, и выяснилось это числами, а не чтением кода.
 //
 // Запуск: deno run --allow-read --allow-env tools/check_score_formula.ts
-import { correctText, type ReviewSpan, scoreFor } from "../supabase/functions/_shared/omniJudge.ts";
+import { correctText, type ReviewSpan, scoreFor } from "../supabase/functions/_shared/review.ts";
 import { diffWords } from "../supabase/functions/_shared/textDiff.ts";
 
 const ok = (text: string): ReviewSpan => ({ kind: "ok", text });

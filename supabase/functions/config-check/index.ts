@@ -16,13 +16,10 @@
 
 import { bcp47For } from "../_shared/languages.ts";
 import { googleKey, googleKeySource, missingKeyMessage } from "../_shared/googleKey.ts";
-import { omniConfigDebug, omniEnabled, omniEvaluate } from "../_shared/omniJudge.ts";
+import { judgeBaseUrl, judgeEnabled, judgeKey } from "../_shared/review.ts";
+import { asrModel, transcribe } from "../_shared/asr.ts";
+import { llmModel } from "../_shared/textJudge.ts";
 import { synthesizeSpeech } from "../_shared/tts.ts";
-
-/// Заведомо ошибочная фраза: судья ОБЯЗАН найти здесь минимум одну ошибку
-/// (He go -> He went / He goes). Если он возвращает пустой список — дело не
-/// в связи с провайдером, а в том, что он не понимает задачу.
-const JUDGE_PROBE = "He go to school yesterday and dont finish he homework";
 
 interface CheckResult {
   configured: boolean;
@@ -81,39 +78,32 @@ async function withTimeout<T>(work: (signal: AbortSignal) => Promise<T>, ms = 15
  * «услышанное» — этого достаточно.
  */
 async function checkOmni(): Promise<CheckResult> {
-  if (!omniEnabled()) {
+  if (!judgeEnabled()) {
     return {
       configured: false,
       reachable: null,
-      detail: "мультимодальный путь выключен (OMNI_ENABLED != 1) — " +
-        "речь разбирают распознавание и судья по отдельности",
+      detail: "разбор выключен (QWEN_ENABLED != 1)",
     };
   }
 
-  const result = await omniEvaluate({
+  // ПРОВЕРЯЕТСЯ ПЕРВЫЙ ШАГ, А НЕ ОБА. Дошёл ли запрос, принят ли ключ и
+  // разобрался ли ответ — всё это видно уже по распознаванию, и оно
+  // дешевле. Второй шаг ходит по тому же адресу с тем же ключом: если
+  // сломан он один, это видно по отладке настоящей записи, а не по
+  // синтетической тишине, на которой судить всё равно нечего.
+  const asr = await transcribe({
     audio: silentWav(),
     audioFormat: "wav",
-    nativeLanguage: "ru",
-    targetLanguage: "en",
-    // Задание и образец пустые: содержимое неважно, важно, что запрос
-    // дошёл, ключ принят и ответ разобрался.
-    prompt: "",
-    reference: "",
-    level: "A1",
     budgetMs: 60_000,
   });
 
-  return result.degraded
-    ? {
-      configured: true,
-      reachable: false,
-      detail: `${JSON.stringify(omniConfigDebug())}: ${result.failureReason ?? "неизвестная причина"}`,
-    }
-    : {
-      configured: true,
-      reachable: true,
-      detail: `${omniConfigDebug().model} отвечает, ключ принят`,
-    };
+  const config = `asr=${asrModel(null)} llm=${llmModel(null)} at ${judgeBaseUrl()}`;
+  if (!judgeKey()) {
+    return { configured: false, reachable: null, detail: "ключ не задан: QWEN_API_KEY" };
+  }
+  return asr.error
+    ? { configured: true, reachable: false, detail: `${config}: ${asr.error}` }
+    : { configured: true, reachable: true, detail: `${config} отвечает, ключ принят` };
 }
 
 /** Секунда тишины в WAV 16 кГц моно — минимальный корректный контейнер. */

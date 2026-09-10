@@ -8,6 +8,7 @@ import '../../core/app_locale.dart';
 import '../../core/debug_flags.dart';
 import '../../core/leagues.dart';
 import '../../core/supabase_client.dart';
+import '../../data/judge_models.dart';
 import '../../data/player_rating.dart';
 import '../../data/training_session.dart';
 import '../../core/theme.dart';
@@ -47,6 +48,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
   PlayerRating? _rating;
   bool _savingRating = false;
 
+  /// Модели разбора. Ветка LLM существует ради сравнения цены и качества, и
+  /// переключатели — единственный способ это сравнение провести: сменить
+  /// модель между двумя ответами подряд на одной и той же фразе.
+  String _asrModel = defaultAsrModel;
+  String _llmModel = defaultLlmModel;
+  bool _savingModels = false;
+
   /// Пока идёт удаление, кнопку нельзя нажать второй раз: повторный вызов
   /// delete_account после успешного первого упрётся в «not authenticated».
   bool _deletingAccount = false;
@@ -55,6 +63,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   void initState() {
     super.initState();
     _loadNativeLanguage();
+    _loadJudgeModels();
   }
 
   Future<void> _loadNativeLanguage() async {
@@ -181,6 +190,91 @@ class _SettingsScreenState extends State<SettingsScreen> {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(content: Text('$what появится в следующей итерации')),
     );
+  }
+
+  Future<void> _loadJudgeModels() async {
+    try {
+      final models = await fetchJudgeModels();
+      if (!mounted) return;
+      setState(() {
+        _asrModel = models.asr;
+        _llmModel = models.llm;
+      });
+    } catch (_) {
+      // Молча: не прочитался выбор — покажем модели по умолчанию, те же,
+      // что подставит сервер. Ошибка здесь ничего не ломает.
+    }
+  }
+
+  /// Один список — один выбор. Оба переключателя устроены одинаково, потому
+  /// что это один и тот же выбор в двух местах: две копии этого кода
+  /// разъехались бы на первой же правке.
+  Future<void> _pickModel({
+    required String title,
+    required String note,
+    required List<String> options,
+    required String current,
+    required Future<void> Function(String) save,
+    required void Function(String) apply,
+  }) async {
+    final picked = await showModalBottomSheet<String>(
+      context: context,
+      backgroundColor: AppColors.navy2,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const SizedBox(height: 16),
+            Text(title,
+                style: AppFonts.ui(fontSize: 15, weight: FontWeight.w800, color: AppColors.cream)),
+            const SizedBox(height: 4),
+            Text(
+              note,
+              textAlign: TextAlign.center,
+              style: const TextStyle(color: AppColors.muted, fontSize: 11, height: 1.4),
+            ),
+            const SizedBox(height: 8),
+            Flexible(
+              child: ListView(
+                shrinkWrap: true,
+                children: [
+                  for (final model in options)
+                    ListTile(
+                      title:
+                          Text(model, style: AppFonts.mono(fontSize: 12, color: AppColors.cream)),
+                      trailing: model == current
+                          ? const Icon(Icons.check, color: AppColors.gold)
+                          : null,
+                      onTap: () => Navigator.of(ctx).pop(model),
+                    ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 12),
+          ],
+        ),
+      ),
+    );
+    if (picked == null || picked == current || !mounted) return;
+
+    setState(() => _savingModels = true);
+    try {
+      await save(picked);
+      if (!mounted) return;
+      setState(() {
+        apply(picked);
+        _savingModels = false;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _savingModels = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Не удалось сохранить: $e')),
+      );
+    }
   }
 
   Future<void> _pickDeckSize() async {
@@ -398,18 +492,65 @@ class _SettingsScreenState extends State<SettingsScreen> {
             const SizedBox(height: 8),
             ChPanel(
               padding: EdgeInsets.zero,
-              child: _Row(
-                icon: Icons.emoji_events_outlined,
-                title: t.ratingAndLeague,
-                trailing: _savingRating
-                    ? const SizedBox(height: 14, width: 14, child: CircularProgressIndicator(strokeWidth: 2))
-                    : Text(
-                        _rating == null
-                            ? '—'
-                            : '${_rating!.display} · ${_rating!.league.cefr}',
-                        style: AppFonts.mono(fontSize: 11, color: AppColors.muted),
-                      ),
-                onTap: _savingRating ? null : _editRating,
+              child: Column(
+                children: [
+                  _Row(
+                    icon: Icons.record_voice_over_outlined,
+                    title: 'Распознавание речи',
+                    trailing: _savingModels
+                        ? const SizedBox(
+                            height: 14, width: 14, child: CircularProgressIndicator(strokeWidth: 2))
+                        : Text(_asrModel,
+                            style: AppFonts.mono(fontSize: 9, color: AppColors.muted)),
+                    onTap: _savingModels
+                        ? null
+                        : () => _pickModel(
+                              title: 'Распознавание речи',
+                              note: 'Первый шаг: превращает запись в текст.\n'
+                                  'За аудио платит только он.',
+                              options: asrModels,
+                              current: _asrModel,
+                              save: saveAsrModel,
+                              apply: (m) => _asrModel = m,
+                            ),
+                  ),
+                  const Divider(height: 1, color: AppColors.line),
+                  _Row(
+                    icon: Icons.psychology_outlined,
+                    title: 'Судья по тексту',
+                    trailing: _savingModels
+                        ? const SizedBox(
+                            height: 14, width: 14, child: CircularProgressIndicator(strokeWidth: 2))
+                        : Text(_llmModel,
+                            style: AppFonts.mono(fontSize: 9, color: AppColors.muted)),
+                    onTap: _savingModels
+                        ? null
+                        : () => _pickModel(
+                              title: 'Судья по тексту',
+                              note: 'Второй шаг: ищет ошибки в расшифровке.\n'
+                                  'Записи не слышит — только текст.',
+                              options: llmModels,
+                              current: _llmModel,
+                              save: saveLlmModel,
+                              apply: (m) => _llmModel = m,
+                            ),
+                  ),
+                  const Divider(height: 1, color: AppColors.line),
+                  _Row(
+                    icon: Icons.emoji_events_outlined,
+                    title: t.ratingAndLeague,
+                    trailing: _savingRating
+                        ? const SizedBox(
+                            height: 14, width: 14, child: CircularProgressIndicator(strokeWidth: 2))
+                        : Text(
+                            _rating == null
+                                ? '—'
+                                : '${_rating!.display} · ${_rating!.league.cefr}',
+                            style: AppFonts.mono(fontSize: 11, color: AppColors.muted),
+                          ),
+                    onTap: _savingRating ? null : _editRating,
+                  ),
+                ],
               ),
             ),
             const SizedBox(height: 18),

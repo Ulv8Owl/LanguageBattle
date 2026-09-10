@@ -1,48 +1,23 @@
 /**
- * Одна мультимодальная модель вместо связки «распознавание + судья».
+ * Разбор ответа игрока: всё, что НЕ ЗАВИСИТ от того, кто его судил.
  *
- * ЗАЧЕМ. Прежний путь был из двух шагов, и каждый терял своё. Распознавание
- * превращало речь в текст — и вместе с ним терялось всё, что слышно только
- * в звуке: произношение, ударение, оборванное слово. Судья дальше работал
- * с текстом и сверял его с ЭТАЛОНОМ — единственным «правильным» переводом.
- * У фразы почти всегда несколько верных переводов, и сверка с одним из них
- * наказывала за правильный ответ, сказанный иначе.
+ * ЗАЧЕМ ЭТОТ ФАЙЛ ОТДЕЛЬНО. В ветке LLM судья другой — распознавание плюс
+ * текстовая модель вместо одной мультимодальной, — но лента разбора, балл,
+ * проверки правок и формат ответа для приложения обязаны остаться теми же.
+ * Иначе сравнивать две архитектуры будет не с чем: разница в цифрах пойдёт
+ * не от модели, а от того, что мы по-разному считаем.
  *
- * Модель здесь слушает запись напрямую и переводит задание сама. Наш
- * перевод она тоже получает, но ОРИЕНТИРОМ, А НЕ ЭТАЛОНОМ, и разница
- * между этими двумя словами — вся история этого файла. С эталоном модель
- * сверяет слово в слово и объявляет ошибкой верный перевод, сказанный
- * иначе. Без него ошибается сама: «вечером мы гуляем в парке» становилось
- * «in the evening we go to the park», и неверное направление уходило и в
- * ленту разбора, и в плашку ошибки.
+ * Здесь поэтому лежит ровно то, что общее: типы ответа, склейка ленты,
+ * формула балла, отсев придирок и транспорт до провайдера. Кто именно
+ * добывает расшифровку и разбор — дело textJudge.ts.
  *
- * ПРОСИТЬ СЧИТАТЬ ОБРАЗЕЦ ПРИБЛИЗИТЕЛЬНЫМ ОКАЗАЛОСЬ НЕДОСТАТОЧНО. Промпт
- * повторял это трижды, а модель всё равно выдавала ошибки словами образца:
- * игрок сказал верное "I wake up … After that I make coffee", образец
- * говорит "I get up … Then I make coffee" — и пришли три плашки подряд, с
- * объяснением «в задании сказано Then». Текст, который лежит рядом и
- * выглядит как ключ, перевешивает любые оговорки о нём.
- *
- * Поэтому правило перенесено с уговоров на механику. «Правильный перевод»
- * модель теперь собирает ИЗ СКАЗАННОГО ИГРОКОМ, меняя только неверное, а
- * правка на плашке обязана быть словами оттуда (groundedIn ниже). Слова
- * образца в правку так просто не попадают: их нет в «правильном». Что
- * промпт всё же не удержал, отсекается здесь же — nitpickReason и saidIn.
- *
- * ГРАНИЦЫ ОШИБОК модель проводит сама, по смыслу: «вот этот кусок сказан
- * не так». Не по элементам образца — про элементы она не знает и знать не
- * должна. Элементы остались только у подсказок, где перевод ручной.
- *
- * ПРОТОКОЛ. Сервис OpenAI-совместимый (DashScope), поэтому запрос
- * выглядит как /chat/completions с аудио в content. Две особенности,
- * которых нет у обычного чата:
- *   * stream обязателен — без него сервис отвечает ошибкой;
- *   * modalities говорит, что нам нужен только текст. Модель умеет и
- *     отвечать голосом, но озвучка у нас своя (Cloud TTS), и просить ещё и
- *     аудио значило бы платить за то, что тут же выбросим.
+ * ПРОТОКОЛ. Сервис OpenAI-совместимый (DashScope/qwencloud), поэтому запрос
+ * выглядит как /chat/completions. Ключ один на все модели ветки:
+ * распознавание и текстовый судья ходят по одному и тому же адресу с одним
+ * и тем же ключом.
  */
 
-export interface OmniError {
+export interface JudgeError {
   /** Фрагмент того, что игрок сказал, — к нему привязано объяснение. */
   text: string;
   /** Объяснение на родном языке игрока. */
@@ -53,7 +28,6 @@ export interface OmniError {
 
 /** Вид куска в разборе. */
 import { type DiffKind, diffWords } from "./textDiff.ts";
-import { judgePrompt } from "./prompts/judge.ts";
 
 export type SpanKind =
   /** Сказано верно — обычный текст. */
@@ -69,7 +43,7 @@ export interface ReviewSpan {
   kind: SpanKind;
 }
 
-export interface OmniResult {
+export interface JudgeResult {
   /**
    * Разбор одной лентой: правильный перевод, в который вплетено то, что
    * игрок сказал не так.
@@ -83,7 +57,7 @@ export interface OmniResult {
    */
   review: ReviewSpan[];
   /** Ошибки, найденные моделью. Пустой список — сказано верно. */
-  errors: OmniError[];
+  errors: JudgeError[];
   /**
    * Слышна ли в записи речь.
    *
@@ -132,7 +106,7 @@ export interface OmniResult {
  * одинаковых. Заодно здесь расставляются пробелы: слова приходят голыми,
  * и без этого фраза слиплась бы в одно длинное слово.
  */
-function ribbon(parts: { text: string; kind: DiffKind }[]): ReviewSpan[] {
+export function ribbon(parts: { text: string; kind: DiffKind }[]): ReviewSpan[] {
   const out: ReviewSpan[] = [];
   for (const part of parts) {
     const kind: SpanKind = part.kind === "same" ? "ok" : part.kind === "wrong" ? "bad" : "miss";
@@ -180,36 +154,37 @@ export function scoreFor(review: ReviewSpan[], errorCount: number): number {
 }
 
 const DEFAULT_BASE = "https://dashscope-intl.aliyuncs.com/compatible-mode/v1";
-const DEFAULT_MODEL = "qwen3-omni-flash";
 
-export function omniEnabled(): boolean {
-  return (Deno.env.get("OMNI_ENABLED") ?? "0") === "1";
+/**
+ * КЛЮЧ ОДИН НА ВСЮ ВЕТКУ. Распознавание и текстовый судья — это разные
+ * модели, но один провайдер (qwencloud/DashScope) и один счёт. Два секрета
+ * для одного ключа означали бы, что однажды обновят только один.
+ *
+ * Имя `OMNI_API_KEY` принимается вторым: ветка выросла из мультимодальной,
+ * и заставлять переставлять уже заведённый секрет ради переименования —
+ * это работа без результата.
+ */
+function secret(...names: string[]): string | null {
+  for (const name of names) {
+    const value = Deno.env.get(name);
+    if (value && value.length > 0) return value;
+  }
+  return null;
 }
 
-export function omniKey(): string | null {
-  const key = Deno.env.get("OMNI_API_KEY");
-  return key && key.length > 0 ? key : null;
+export function judgeEnabled(): boolean {
+  return (secret("QWEN_ENABLED", "OMNI_ENABLED") ?? "0") === "1";
 }
 
-export function omniModel(): string {
-  return Deno.env.get("OMNI_MODEL") ?? DEFAULT_MODEL;
+export function judgeKey(): string | null {
+  return secret("QWEN_API_KEY", "OMNI_API_KEY");
 }
 
-export function omniBaseUrl(): string {
-  const own = Deno.env.get("OMNI_BASE_URL");
-  return own && own.length > 0 ? own : DEFAULT_BASE;
+export function judgeBaseUrl(): string {
+  return secret("QWEN_BASE_URL", "OMNI_BASE_URL") ?? DEFAULT_BASE;
 }
 
-export function omniConfigDebug(): Record<string, unknown> {
-  return {
-    provider: "omni",
-    model: omniModel(),
-    base_url: omniBaseUrl(),
-    key_set: omniKey() !== null,
-  };
-}
-
-const TIMEOUT_MS = Number(Deno.env.get("OMNI_TIMEOUT_MS") ?? 90_000);
+const TIMEOUT_MS = Number(secret("QWEN_TIMEOUT_MS", "OMNI_TIMEOUT_MS") ?? "90000");
 
 /** Меньше этого запускать вызов бессмысленно — он не успеет вернуться. */
 const MIN_SLICE_MS = 8_000;
@@ -236,43 +211,12 @@ const LANGUAGE_ENDONYMS: Record<string, string> = {
   es: "español",
 };
 
-function languageName(code: string): string {
+export function languageName(code: string): string {
   return LANGUAGE_NAMES[code.toLowerCase()] ?? code;
 }
 
-function languageEndonym(code: string): string {
+export function languageEndonym(code: string): string {
   return LANGUAGE_ENDONYMS[code.toLowerCase()] ?? code;
-}
-
-/**
- * Инструкция модели живёт в отдельном файле — prompts/judge.ts.
- *
- * Она там одной большой строкой, которую можно править как обычный текст:
- * промпт меняют чаще любого кода вокруг, и держать его россыпью строк в
- * середине адаптера значило, что править его боязно.
- *
- * ЧТО МОДЕЛЬ ДЕЛАЕТ ПО ПОРЯДКУ. Переводит задание сама, слушает запись и
- * сравнивает со своим переводом. Наш перевод из датасета она получает
- * ориентиром по смыслу — приблизительным, не эталоном: с эталоном она
- * требует совпадения слово в слово, без него ошибается сама.
- *
- * БАЛЛ МОДЕЛЬ НЕ СТАВИТ. Его считает программа: доля несказанного плюс по
- * баллу за ошибку. Числовая оценка от модели была самой шаткой частью
- * ответа — на одной и той же записи она гуляла на два-три балла.
- */
-function systemPrompt(
-  nativeLanguage: string,
-  targetLanguage: string,
-  level: string,
-  reference: string,
-): string {
-  return judgePrompt({
-    native: languageName(nativeLanguage),
-    nativeSelf: languageEndonym(nativeLanguage),
-    target: languageName(targetLanguage),
-    level,
-    reference: reference.trim(),
-  });
 }
 
 /**
@@ -287,7 +231,7 @@ function systemPrompt(
  * шире, чем список названий), отказать игроку было бы хуже, чем пропустить
  * редкий случай: он получит разбор, а не отказ ни за что.
  */
-function sameLanguage(spoken: string, targetCode: string): boolean {
+export function sameLanguage(spoken: string, targetCode: string): boolean {
   const said = spoken.toLowerCase();
   const target = languageName(targetCode).toLowerCase();
   if (said.includes(target)) return true;
@@ -299,7 +243,7 @@ function sameLanguage(spoken: string, targetCode: string): boolean {
   return true;
 }
 
-function base64(bytes: Uint8Array): string {
+export function base64(bytes: Uint8Array): string {
   // По кускам: у аудио раунда десятки-сотни килобайт, и одним
   // String.fromCharCode(...bytes) на таком размере рвётся стек аргументов.
   let binary = "";
@@ -318,7 +262,7 @@ function base64(bytes: Uint8Array): string {
  */
 async function readStream(res: Response): Promise<string> {
   const reader = res.body?.getReader();
-  if (!reader) throw new Error("omni: пустой поток ответа");
+  if (!reader) throw new Error("пустой поток ответа");
   const decoder = new TextDecoder();
   let buffer = "";
   let text = "";
@@ -351,7 +295,7 @@ async function readStream(res: Response): Promise<string> {
 }
 
 /** Достаёт JSON-объект из ответа, даже если модель обернула его в текст. */
-function parseJson(raw: string): Record<string, unknown> | null {
+export function parseJson(raw: string): Record<string, unknown> | null {
   const trimmed = raw.trim();
   const candidates = [trimmed];
   // Модель может обернуть ответ в ```json ... ``` вопреки инструкции.
@@ -499,9 +443,9 @@ export function nitpickReason(why: string): boolean {
   return NITPICK_REASONS.some((phrase) => text.includes(phrase));
 }
 
-export function asErrors(raw: unknown, correct: string, heard: string): OmniError[] {
+export function asErrors(raw: unknown, correct: string, heard: string): JudgeError[] {
   if (!Array.isArray(raw)) return [];
-  const out: OmniError[] = [];
+  const out: JudgeError[] = [];
   for (const item of raw) {
     if (!item || typeof item !== "object") continue;
     const row = item as Record<string, unknown>;
@@ -549,14 +493,27 @@ export function asErrors(raw: unknown, correct: string, heard: string): OmniErro
  * modalities, разбор SSE) — жил в одном месте, а не расползался по вызовам
  * вместе с их особенностями.
  */
-async function requestOmni(
+/**
+ * Один HTTP-вызов провайдера: система + части пользовательского сообщения.
+ *
+ * ОБЩИЙ ДЛЯ ОБОИХ ШАГОВ ветки — и для распознавания, и для судьи. Протокол
+ * у них один: тот же адрес, тот же ключ, тот же разбор потока. Две копии
+ * этого кода разошлись бы на первой же особенности провайдера.
+ *
+ * `modalities` уходит только тогда, когда в запросе есть аудио: текстовые
+ * модели на незнакомое поле отвечают HTTP 400, и добавлять его «на всякий
+ * случай» значит ломать половину списка моделей.
+ */
+export async function requestQwen(
   system: string,
   userParts: unknown[],
   budgetMs: number,
+  model: string,
+  opts: { audio?: boolean; temperature?: number } = {},
 ): Promise<{ raw: string } | { error: string }> {
-  const key = omniKey();
+  const key = judgeKey();
   if (!key) {
-    return { error: "нет ключа модели: npx supabase secrets set OMNI_API_KEY=<ключ>" };
+    return { error: "нет ключа модели: npx supabase secrets set QWEN_API_KEY=<ключ>" };
   }
   const timeoutMs = Math.min(TIMEOUT_MS, budgetMs);
   if (timeoutMs < MIN_SLICE_MS) {
@@ -566,25 +523,27 @@ async function requestOmni(
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
-    const res = await fetch(`${omniBaseUrl()}/chat/completions`, {
+    const res = await fetch(`${judgeBaseUrl()}/chat/completions`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
         Authorization: `Bearer ${key}`,
       },
       body: JSON.stringify({
-        model: omniModel(),
+        model,
         messages: [
           { role: "system", content: system },
           { role: "user", content: userParts },
         ],
         // Только текст: озвучка у нас своя, и просить у модели ещё и аудио
-        // значило бы платить за то, что тут же выбросим.
-        modalities: ["text"],
-        // Обязателен для этой модели — без него сервис отвечает ошибкой.
+        // значило бы платить за то, что тут же выбросим. Текстовые модели
+        // этого поля не знают, поэтому оно едет лишь со звуком.
+        ...(opts.audio ? { modalities: ["text"] } : {}),
+        // Обязателен для аудио-моделей — без него сервис отвечает ошибкой.
+        // Текстовым он безразличен, а разбор потока у нас один на всех.
         stream: true,
         stream_options: { include_usage: true },
-        temperature: 0.2,
+        temperature: opts.temperature ?? 0.2,
       }),
       signal: controller.signal,
     });
@@ -603,173 +562,3 @@ async function requestOmni(
     clearTimeout(timer);
   }
 }
-
-/** Аудио раунда в том виде, в каком его принимает модель. */
-function audioPart(audio: Uint8Array, format: string): unknown {
-  return {
-    type: "input_audio",
-    input_audio: {
-      data: `data:audio/${format};base64,${base64(audio)}`,
-      format,
-    },
-  };
-}
-
-export interface OmniRequest {
-  audio: Uint8Array;
-  /** Контейнер записи: wav, mp3, m4a — как есть у нас в хранилище. */
-  audioFormat: string;
-  nativeLanguage: string;
-  targetLanguage: string;
-  /** Задание на РОДНОМ языке — то, что видел игрок. */
-  prompt: string;
-  /**
-   * Наш перевод задания на изучаемый язык — ПРИБЛИЗИТЕЛЬНЫЙ ориентир.
-   *
-   * Не эталон: игрок вправе сказать то же самое другими словами, и промпт
-   * говорит об этом трижды. Нужен, потому что без него модель переводила
-   * задание сама и, ошибаясь, уносила ошибку и в ленту разбора, и в плашку
-   * — сверять было не с чем. Пусто — блока с ним в промпте нет вовсе.
-   */
-  reference: string;
-  level: string;
-  /** Остаток бюджета задачи. Пережить его вызов не имеет права. */
-  budgetMs: number;
-}
-
-/**
- * Один вызов модели: звук на вход, разбор на выход.
- *
- * НИКОГДА НЕ БРОСАЕТ. Сбой провайдера — это degraded: true, а не падение
- * воркера. Иначе задача осталась бы висеть в 'processing', а игрок ждал бы
- * результат, которого не будет.
- */
-export async function omniEvaluate(req: OmniRequest): Promise<OmniResult> {
-  const started = Date.now();
-  const fail = (reason: string, extra: Record<string, unknown> = {}): OmniResult => ({
-    review: [],
-    errors: [],
-    audible: false,
-    degraded: true,
-    failureReason: reason,
-    debug: { ...omniConfigDebug(), status: "failed", reason, ms: Date.now() - started, ...extra },
-  });
-
-  if (req.audio.byteLength === 0) return fail("запись пуста");
-
-  const system = systemPrompt(req.nativeLanguage, req.targetLanguage, req.level, req.reference);
-  const answer = await requestOmni(
-    system,
-    [
-      audioPart(req.audio, req.audioFormat),
-      {
-        type: "text",
-        text: `The learner was asked to say this in ${languageName(req.targetLanguage)}:\n${req.prompt}`,
-      },
-    ],
-    req.budgetMs,
-  );
-  if ("error" in answer) return fail(answer.error);
-  const raw = answer.raw;
-
-  if (raw.trim().length === 0) return fail("модель вернула пустой ответ");
-
-  const parsed = parseJson(raw);
-  if (!parsed) return fail(`ответ не разобран как JSON: ${raw.slice(0, 300)}`);
-
-  const debug: Record<string, unknown> = {
-    ...omniConfigDebug(),
-    status: "ok",
-    ms: Date.now() - started,
-    audio_bytes: req.audio.byteLength,
-    audio_format: req.audioFormat,
-  };
-
-  // Модель услышала не тот язык. Это ответ, а не сбой: разбирать чужую
-  // речь как перевод нечем, и любая её часть, «совпавшая» с изучаемым
-  // языком, — плод ожидания, а не того, что игрок сказал.
-  const spoke = typeof parsed.spoke === "string" ? parsed.spoke.trim() : "";
-  if (spoke.length > 0 && !sameLanguage(spoke, req.targetLanguage)) {
-    return {
-      review: [],
-      errors: [],
-      audible: true,
-      degraded: false,
-      wrongLanguage: true,
-      spokenLanguage: spoke,
-      debug: {
-        ...omniConfigDebug(),
-        status: "wrong_language",
-        reason: `модель услышала ${spoke}, ожидался ${languageName(req.targetLanguage)}`,
-        ms: Date.now() - started,
-        audio_bytes: req.audio.byteLength,
-        raw: raw.slice(0, 400),
-      },
-    };
-  }
-
-  // Модель послушала запись и речи не разобрала.
-  //
-  // Аудио до неё ДОЕХАЛО — мы его сами скачали из хранилища и знаем его
-  // размер, он в отладке. Значит это не наш сбой, а ответ: разбирать было
-  // нечего. Балл за такую запись минимальный, а не нейтральный: раньше
-  // невнятное бормотание получало те же семь баллов, что и молчащий
-  // провайдер, и это выглядело как оценка за ответ.
-  if (parsed.audible === false) {
-    return {
-      review: [],
-      errors: [],
-      audible: false,
-      degraded: false,
-      silent: true,
-      debug: {
-        ...omniConfigDebug(),
-        status: "silent",
-        reason: "модель не разобрала речи в записи (audible=false)",
-        ms: Date.now() - started,
-        audio_bytes: req.audio.byteLength,
-        audio_format: req.audioFormat,
-        raw: raw.slice(0, 400),
-      },
-    };
-  }
-
-  const correct = typeof parsed.correct === "string" ? parsed.correct.trim() : "";
-  if (correct.length === 0) {
-    return fail(`в ответе нет перевода: ${raw.slice(0, 300)}`);
-  }
-
-  const heard = typeof parsed.heard === "string" ? parsed.heard.trim() : "";
-  if (heard.length === 0) {
-    // Без услышанного сравнивать нечего. Это не «игрок промолчал»:
-    // молчание модель сообщает через audible=false.
-    return fail(`в ответе нет расшифровки: ${raw.slice(0, 300)}`);
-  }
-
-  // ЛЕНТУ СЧИТАЕМ МЫ, а не модель. Дважды подряд она размечала её неверно:
-  // то помечала сказанное как пропущенное, то объявляла «ошибок нет» на
-  // половине фразы. Задача не для неё — сравнить две строки по словам это
-  // арифметика, и арифметику надо считать, а не спрашивать.
-  const review = ribbon(diffWords(heard, correct));
-
-  const errors = asErrors(parsed.errors, correct, heard);
-
-  debug.heard = heard;
-  debug.correct = correct;
-  debug.spans = {
-    ok: review.filter((s) => s.kind === "ok").length,
-    bad: review.filter((s) => s.kind === "bad").length,
-    miss: review.filter((s) => s.kind === "miss").length,
-  };
-  debug.errors = errors.length;
-  // Сколько ошибок модель назвала и сколько мы оставили — расхождение
-  // означает, что часть пришла без фрагмента или без объяснения, и это
-  // видно только здесь.
-  debug.errors_raw = Array.isArray(parsed.errors) ? parsed.errors.length : 0;
-  // Сырой ответ целиком: когда балл выглядит взятым с потолка, спорить
-  // можно только по нему. Обрезан, чтобы не раздувать строку в базе.
-  debug.raw = raw.slice(0, 2000);
-
-  return { review, errors, audible: true, degraded: false, debug };
-}
-

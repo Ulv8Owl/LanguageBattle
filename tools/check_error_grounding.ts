@@ -6,7 +6,7 @@
 // неверна. Здесь проверяется отсев таких правок на настоящем случае из игры.
 //
 // Запуск: deno run --allow-env tools/check_error_grounding.ts
-import { asErrors, groundedIn, nitpickReason, saidIn } from "../supabase/functions/_shared/omniJudge.ts";
+import { asErrors, groundedIn, nitpickReason, saidIn } from "../supabase/functions/_shared/review.ts";
 
 let failed = 0;
 function check(name: string, actual: unknown, expected: unknown) {

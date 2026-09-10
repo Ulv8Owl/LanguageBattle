@@ -9,7 +9,7 @@
 // на клиенте нельзя — раздел 2.2).
 //
 // ОДИН ШАГ. Мультимодальная модель слушает запись, сама переводит задание
-// и сравнивает услышанное со своим переводом (_shared/omniJudge.ts).
+// и сравнивает услышанное со своим переводом (_shared/textJudge.ts).
 // Раньше шагов было два: распознавание превращало речь в текст, а
 // текстовый судья сравнивал текст с эталоном. Оба удалены. Распознавание
 // теряло всё, что слышно только в звуке; судья наказывал за правильный
@@ -21,7 +21,8 @@
 
 import { createClient, type SupabaseClient } from "jsr:@supabase/supabase-js@2";
 import { type CefrLevel, NEUTRAL_SCORE, SILENT_SCORE } from "../_shared/cefr.ts";
-import { correctText, omniEvaluate, type OmniResult, scoreFor } from "../_shared/omniJudge.ts";
+import { correctText, type JudgeResult, scoreFor } from "../_shared/review.ts";
+import { textJudge } from "../_shared/textJudge.ts";
 
 /**
  * Лига говорящего приравнена к уровню CEFR (см. supabase/migrations/0023 —
@@ -106,7 +107,11 @@ const WRITE_RESERVE_MS = 15_000;
  * него меньше значило бы менять экономику игры заодно с пайплайном, а это
  * отдельное решение, которое никто не принимал.
  */
-const ENERGY_COST_OMNI = Number(Deno.env.get("ENERGY_COST_OMNI") ?? 3);
+// Два вызова вместо одного, но списание по-прежнему одно: игрок платит
+// за разбор, а не за наше устройство пайплайна.
+const ENERGY_COST_JUDGE = Number(
+  Deno.env.get("ENERGY_COST_JUDGE") ?? Deno.env.get("ENERGY_COST_OMNI") ?? 3,
+);
 
 /**
  * Счётчик энергии одной задачи.
@@ -347,19 +352,19 @@ async function processJob(job_id: string): Promise<void> {
     // них, но в базу не ходит, пока списывать нечего.
     const energy = createEnergyMeter(supabase, recording);
 
-    // Единственный шаг пайплайна: модель слушает запись, переводит задание
-    // сама и сравнивает.
+    // Два шага пайплайна: распознавание превращает речь в текст, текстовая
+    // модель этот текст судит (_shared/textJudge.ts).
     //
-    // РАСПОЗНАВАНИЯ ЗДЕСЬ БОЛЬШЕ НЕТ — и не «выключено», а удалено. Оно
-    // превращало речь в текст, теряя всё, что слышно только в звуке, и
-    // существовало ради текстового судьи, которого тоже больше нет. Модель
-    // слышит запись напрямую; просить у неё вдобавок расшифровку — платить
-    // за второй проход по тому же аудио ради текста, который нигде не
-    // показывается.
+    // ЭТО АРХИТЕКТУРА ДО OMNI, ВОССТАНОВЛЕННАЯ РАДИ СРАВНЕНИЯ ЦЕНЫ. За
+    // аудио платит только первый шаг — модель заточенная ровно под одно
+    // дело и заметно дешевле мультимодальной; судье достаётся текст.
+    // Платим за это тем, что судья не слышит записи: произношение,
+    // ударение, проглоченное окончание до него не доезжают, а распознаватель
+    // вдобавок приглаживает речь.
     // Задание на РОДНОМ языке — единственное, что модель получает кроме
     // звука. Эталон ей не показывают намеренно: увидев его, она начнёт
     // сверять с одним вариантом вместо того, чтобы оценивать перевод
-    // (см. omniJudge.ts).
+    // (см. textJudge.ts).
     const prompt = await roundPrompt(supabase, recording, nativeLanguage);
     // Наш перевод задания — ПРИБЛИЗИТЕЛЬНЫЙ ориентир для модели.
     //
@@ -377,7 +382,12 @@ async function processJob(job_id: string): Promise<void> {
       (await speakerLeagueRating(supabase, recording.user_id, targetLanguage)) ?? 1000,
     );
 
-    const omni = await runOmni(
+    // Какими моделями разбирать — выбор игрока из настроек, читается на
+    // КАЖДОЙ записи: ветка существует ради сравнения, и переключаться нужно
+    // уметь между двумя ответами подряд.
+    const models = await speakerJudgeModels(supabase, recording.user_id);
+
+    const verdict = await runJudge(
       supabase,
       recording,
       targetLanguage,
@@ -386,15 +396,16 @@ async function processJob(job_id: string): Promise<void> {
       reference,
       level,
       budgetLeft(),
+      models,
     );
     // Один вызов — одно списание, и только когда модель ответила. Отказ
     // провайдера бесплатен: энергия платит за ответ, а не за попытку.
-    if (!omni.degraded) {
-      await energy.charge(ENERGY_COST_OMNI, "разбор мультимодальной моделью");
+    if (!verdict.degraded) {
+      await energy.charge(ENERGY_COST_JUDGE, "распознавание и разбор");
     }
 
     // Диагностика пайплайна для отладочной панели в игре (миграция 0016).
-    const pipelineDebug: Record<string, unknown> = { omni: omni.debug };
+    const pipelineDebug: Record<string, unknown> = { judge: verdict.debug };
 
     // Номер попытки — только для отладочной панели: попытка в раунде одна,
     // и решений по этому числу больше не принимается.
@@ -431,20 +442,20 @@ async function processJob(job_id: string): Promise<void> {
     // нет (модель не ответила), и клиент честно показывает пустоту.
     let reviewSpans: { k: string; t: string }[] | null = null;
 
-    if (omni.wrongLanguage) {
+    if (verdict.wrongLanguage) {
       // Игрок говорил не на том языке. Разбирать нечего: всё, что «совпало»
       // с изучаемым языком, — плод ожидания модели, а не его слова.
       // В соло балла нет и раунд отвечается заново; в бою раунд обязан
       // сдвинуться, и там это ноль — сказанное не на том языке переводом
       // не является.
       score = SILENT_SCORE;
-      feedback = `Ответ прозвучал не на том языке (${omni.spokenLanguage ?? "?"}).`;
+      feedback = `Ответ прозвучал не на том языке (${verdict.spokenLanguage ?? "?"}).`;
       judgeStatus = "wrong_language";
       pipelineDebug.judge = {
         status: "wrong_language",
-        heard_language: omni.spokenLanguage,
+        heard_language: verdict.spokenLanguage,
       };
-    } else if (omni.silent) {
+    } else if (verdict.silent) {
       // Модель послушала запись и речи не разобрала. Это НЕ наш сбой:
       // аудио до неё доехало, мы сами его отправили и знаем его размер.
       //
@@ -459,7 +470,7 @@ async function processJob(job_id: string): Promise<void> {
       // Судью не звали по существу: разбирать было нечего.
       judgeStatus = "skipped";
       pipelineDebug.judge = { status: "silent", reason: "речи в записи не разобрать" };
-    } else if (omni.degraded) {
+    } else if (verdict.degraded) {
       // Модель не ответила. Балла за такую запись НЕТ ВОВСЕ — ни плохого,
       // ни нейтрального: мы не знаем, как игрок ответил, и любое число
       // здесь будет выдумкой, которую он примет за оценку. В соло раунд
@@ -474,11 +485,11 @@ async function processJob(job_id: string): Promise<void> {
       judgeStatus = "degraded";
       pipelineDebug.judge = {
         status: "degraded",
-        reason: omni.failureReason ?? "модель не ответила",
+        reason: verdict.failureReason ?? "модель не ответила",
       };
       console.error("evaluate-recording: модель деградировала", {
         recordingId: recording.id,
-        reason: omni.failureReason,
+        reason: verdict.failureReason,
       });
     } else {
       pipelineDebug.round = {
@@ -487,7 +498,7 @@ async function processJob(job_id: string): Promise<void> {
         budget_left_ms: budgetLeft(),
       };
       {
-        const judged = omni;
+        const judged = verdict;
         // БАЛЛ СЧИТАЕМ МЫ, а не модель. Числовая оценка от неё была самой
         // шаткой частью ответа — на одной записи гуляла на два-три балла и
         // объяснить её игроку было нечем. Здесь арифметика: доля
@@ -509,6 +520,11 @@ async function processJob(job_id: string): Promise<void> {
           length: 0,
           message: e.message,
           replacement: e.correction,
+          // «omni» здесь остаётся, хотя мультимодальной модели на этой ветке
+          // нет: это значение ограничено CHECK-ом в grammar_errors, а
+          // CHECK в Postgres умеет только расти. Заводить ради переименования
+          // новую категорию и мигрировать живые строки — цена выше пользы;
+          // чем разобрана запись, видно из pipeline_debug.judge.
           category: "omni",
           spanText: e.text,
         }));
@@ -567,7 +583,7 @@ async function processJob(job_id: string): Promise<void> {
         { onConflict: "round_id,user_id" },
       );
     } else if (
-      recording.training_round_id && !omni.degraded && !omni.silent && !omni.wrongLanguage
+      recording.training_round_id && !verdict.degraded && !verdict.silent && !verdict.wrongLanguage
     ) {
       // Одиночная Игра: в раунде одна запись, и балл за неё окончательный.
       // Раньше попыток было две, и балл ставился по второй — по той, где
@@ -712,7 +728,7 @@ async function loadAudio(
   return new Uint8Array(await file.arrayBuffer());
 }
 
-async function runOmni(
+async function runJudge(
   supabase: SupabaseClient,
   recording: VoiceRecordingRow,
   targetLanguage: string,
@@ -721,7 +737,8 @@ async function runOmni(
   reference: string,
   level: CefrLevel,
   budgetMs: number,
-): Promise<OmniResult> {
+  models: JudgeModels,
+): Promise<JudgeResult> {
   const audio = await loadAudio(supabase, recording);
   if (audio === null) {
     return {
@@ -730,11 +747,11 @@ async function runOmni(
       audible: false,
       degraded: true,
       failureReason: "не удалось скачать аудио",
-      debug: { provider: "omni", status: "failed", error: "аудио не скачалось" },
+      debug: { provider: "asr+llm", status: "failed", error: "аудио не скачалось" },
     };
   }
 
-  return await omniEvaluate({
+  return await textJudge({
     audio,
     audioFormat: audioFormatOf(recording.audio_storage_path),
     nativeLanguage,
@@ -743,7 +760,42 @@ async function runOmni(
     reference,
     level,
     budgetMs,
+    asrModelChoice: models.asr,
+    llmModelChoice: models.llm,
   });
+}
+
+/** Какими моделями разбирать эту запись — выбор игрока из настроек. */
+interface JudgeModels {
+  asr: string | null;
+  llm: string | null;
+}
+
+/**
+ * Модели, выбранные игроком в настройках (миграция 0048).
+ *
+ * Ошибку чтения глотаем: выбор модели — это удобство сравнения, а не
+ * условие работы. Остаться без разбора из-за того, что не прочиталась одна
+ * колонка профиля, было бы обменом не в ту сторону.
+ */
+async function speakerJudgeModels(
+  supabase: SupabaseClient,
+  userId: string,
+): Promise<JudgeModels> {
+  try {
+    const { data } = await supabase
+      .from("users")
+      .select("asr_model, llm_model")
+      .eq("id", userId)
+      .maybeSingle();
+    return {
+      asr: (data?.asr_model as string | null) ?? null,
+      llm: (data?.llm_model as string | null) ?? null,
+    };
+  } catch (e) {
+    console.error("evaluate-recording: не удалось прочитать выбор моделей", e);
+    return { asr: null, llm: null };
+  }
 }
 
 /**
