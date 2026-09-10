@@ -2,11 +2,14 @@ import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
 
-/// Мультимодальная модель слушает запись и судит перевод сама. Наш перевод
-/// она получает ОРИЕНТИРОМ, а не эталоном, и разница между этими двумя
-/// словами — вся история этого файла: с эталоном модель требовала
-/// совпадения слово в слово и наказывала за верный перевод, сказанный
-/// иначе; без него ошибалась сама и уносила свою ошибку в разбор.
+/// Судья на этой ветке ДВУХШАГОВЫЙ: распознавание превращает речь в текст,
+/// текстовая модель этот текст судит. Общее с веткой Omni — лента, балл и
+/// проверки — лежит в review.ts и обязано остаться тем же: иначе сравнение
+/// двух архитектур измеряло бы не модели, а разницу в нашей арифметике.
+///
+/// Наш перевод судья получает ОРИЕНТИРОМ по смыслу: он решает, ЧТО должно
+/// быть сказано, и не решает, КАКИМИ СЛОВАМИ. Сдвиньте эту границу — и
+/// вернётся либо придирка к верному переводу, либо полфразы на десятку.
 /// ПОЧЕМУ ЗДЕСЬ НЕТ ДОСЛОВНЫХ ЦИТАТ ИЗ ПРОМПТА. Были — и ломались на каждой
 /// правке формулировки, а промпт правят чаще любого кода вокруг: он для
 /// того и вынесен отдельным файлом, чтобы менять его свободно. Три раза
@@ -20,8 +23,12 @@ import 'package:flutter_test/flutter_test.dart';
 void main() {
   String read(String path) => File(path).readAsStringSync();
 
-  String omni() => read('supabase/functions/_shared/omniJudge.ts');
-  String prompt() => read('supabase/functions/_shared/prompts/judge.ts');
+  // На этой ветке судья двухшаговый: распознавание плюс текстовая
+  // модель. Общее ядро — лента, балл, проверки — лежит в review.ts.
+  String omni() => read('supabase/functions/_shared/review.ts');
+  String judge() => read('supabase/functions/_shared/textJudge.ts');
+  String asr() => read('supabase/functions/_shared/asr.ts');
+  String prompt() => read('supabase/functions/_shared/prompts/judgeText.ts');
   String worker() => read('supabase/functions/evaluate-recording/index.ts');
 
   test('наш перевод — ориентир, а не эталон', () {
@@ -30,11 +37,13 @@ void main() {
     // Образец решает СМЫСЛ и не решает СЛОВА — обе половины обязательны.
     // Без первой модель не видит подмены дня недели и пропущенной половины
     // фразы; без второй объявляет ошибкой верный перевод, сказанный иначе.
-    expect(s, contains('for the meaning only'));
-    expect(s, contains('It does not tell you WHICH WORDS'));
+    expect(s, contains('Use it for MEANING ONLY'));
+    expect(s, contains('It does NOT tell you which words to use'));
     // Без образца блока нет вовсе: пустая строка на его месте читалась бы
     // как «правильный перевод — пустота».
-    expect(s, contains('if (v.reference.length === 0) return "";'));
+    // Без образца судья переводит задание сам, и ему об этом говорят прямо.
+    expect(s, contains('if (v.reference.length === 0)'));
+    expect(s, contains('Translate the task into'));
     // Воркер читает образец из того же поля, куда его пишет клиент.
     expect(worker(), contains('await roundPrompt(supabase, recording, nativeLanguage)'));
     expect(worker(), contains('await roundReference(supabase, recording)'));
@@ -44,53 +53,60 @@ void main() {
   test('промпт лежит отдельным читаемым файлом', () {
     // Промпт меняют чаще любого кода вокруг, и россыпь строк в середине
     // адаптера означала, что править его боязно.
-    expect(omni(), contains('import { judgePrompt } from "./prompts/judge.ts";'));
-    expect(prompt(), contains('export function judgePrompt(v: JudgePromptVars): string {'));
+    expect(judge(), contains('import { judgeTextPrompt } from "./prompts/judgeText.ts";'));
+    expect(prompt(), contains('export function judgeTextPrompt(v: JudgeTextVars): string {'));
   });
 
-  test('второго вызова за расшифровкой нет', () {
-    // Она приходит тем же единственным вызовом, отдельного прохода по
-    // аудио не делаем.
-    final s = omni();
-    expect(s.contains('wantJudgement'), isFalse);
+  test('вызова ровно два, и за аудио платит только первый', () {
+    // В этом весь смысл ветки: аудио идёт в распознавание — модель
+    // заточенную под одно дело, — а судье достаётся текст, который стоит
+    // копейки. Третьего вызова нет: транспорт один на оба шага.
+    expect(asr(), contains('export async function transcribe'));
+    expect(judge(), contains('const asr = await transcribe('));
+    expect(judge(), contains('const answer = await requestQwen('));
+    expect(omni(), contains('export async function requestQwen'));
   });
 
   test('цитату сказанного модель не чинит', () {
     // В плашке ошибки и в зачёркнутом куске должны стоять слова игрока, а
     // не исправленный за него вариант: иначе он не узнает свою ошибку.
-    expect(prompt(), contains('quoted exactly as he said them'));
-    expect(prompt(), contains('Never correct them here'));
-    // И расшифровка — дословная, а не приглаженная.
-    expect(prompt(), contains('every mistake'));
+    // Слова игрока остаются в «правильном переводе» везде, где он был прав.
+    expect(prompt(), contains('HIS OWN WORDS everywhere he was right'));
+    expect(prompt(), contains('must leave every one of them untouched'));
   });
 
   test('ошибки группируются по смыслу, а не по словам', () {
     // Это и есть просьба игрока: не привязываться к структуре элементов, а
     // объединять в одну ошибку всё, что пошло не так по одной причине.
-    expect(prompt(), contains('Everything wrong for one reason is one error'));
+    // Подряд идущее несказанное — ОДИН кусок любой длины.
+    expect(prompt(), contains('did not say is ONE entry, however long'));
   });
 
   test('поток обязателен, аудио на выходе не просим', () {
     final s = omni();
     // Без stream сервис отвечает ошибкой.
     expect(s, contains('stream: true'));
-    // Озвучка у нас своя (Cloud TTS): просить у модели ещё и звук значило
-    // бы платить за то, что тут же выбросим.
-    expect(s, contains('modalities: ["text"]'));
+    // modalities едет ТОЛЬКО со звуком: текстовые модели на незнакомое поле
+    // отвечают HTTP 400, а их в списке судей два десятка.
+    expect(s, contains('...(opts.audio ? { modalities: ["text"] } : {})'));
   });
 
   test('сбой провайдера не роняет задачу', () {
     // Иначе задача осталась бы висеть в processing, а игрок ждал бы
     // результат, которого не будет.
-    expect(omni(), contains('НИКОГДА НЕ БРОСАЕТ'));
-    expect(omni(), contains('degraded: true'));
+    expect(judge(), contains('НИКОГДА НЕ БРОСАЕТ'));
+    expect(judge(), contains('degraded: true'));
+    // И распознавание тоже: сбой первого шага — это degraded, а не падение.
+    expect(asr(), contains('НИКОГДА НЕ БРОСАЕТ'));
   });
 
   test('ошибка без фрагмента или без объяснения не показывается', () {
     // Плашка — это и есть фрагмент; без объяснения за ней ничего нет.
-    expect(omni(), contains('if (text.length === 0 || message.length === 0) continue;'));
-    expect(read('lib/widgets/round_review.dart'),
-        contains('if (span.isEmpty || message.isEmpty) continue;'));
+    // Кусок без перевода остаётся красным, но нажимать на него не на что:
+    // показать перевод НЕ ОТ ТОГО куска хуже, чем не показать никакого.
+    expect(omni(), contains('if (key.length === 0 || means.length === 0) continue;'));
+    expect(read('lib/widgets/correction_text.dart'),
+        contains("bool get hasMeaning => kind == 'miss' && means.isNotEmpty;"));
   });
 
   test('язык объяснений называется дважды и самоназванием', () {
@@ -101,8 +117,7 @@ void main() {
     final s = omni();
     expect(s, contains('LANGUAGE_ENDONYMS'));
     expect(prompt(), contains(r'(${v.nativeSelf})'));
-    
-    expect(prompt(), contains('and in no other'));
+    expect(prompt(), contains('and no other language'));
   });
 
   test('родной язык берётся от активной пары, а не наугад', () {
@@ -120,7 +135,11 @@ void main() {
     final s = omni();
     expect(s, contains('export function scoreFor'));
     expect(s.contains('clampScore'), isFalse);
+    // Списка ошибок здесь нет вовсе, поэтому балл — это только доля
+    // несказанного. Двойного счёта не появляется, а исчезает: неверное
+    // слово и так попадает в эту долю.
     expect(worker(), contains('scoreFor(judged.review, judged.errors.length)'));
+    expect(judge(), contains('errors: [],'));
   });
 
   test('разбор доезжает до экрана лентой кусков', () {
@@ -129,14 +148,14 @@ void main() {
     expect(read('lib/widgets/correction_text.dart'), contains('List<TextSpan> reviewSpans('));
   });
 
-  test('модель обязана сказать, слышит ли она речь', () {
-    // Модель, до которой аудио не доехало, отвечает своим переводом без
-    // единой ошибки: игрок получает десятку за что угодно, и по ответу
-    // этого не видно. Явный вопрос превращает молчаливую ложь в отказ.
-    expect(prompt(), contains('"audible"'));
-    expect(prompt(), contains('any speech in the recording'));
-    expect(omni(), contains('if (parsed.audible === false)'));
-    expect(omni(), contains('audible=false'));
+  test('нашлась ли речь — решает пустая расшифровка, а не вопрос', () {
+    // На ветке Omni у модели об этом спрашивали прямо: она слышит запись и
+    // могла ответить своим переводом, не услышав ничего. Здесь спрашивать
+    // некого — судья записи не слышит вовсе, а распознавание либо принесло
+    // текст, либо нет. Это честнее вопроса.
+    expect(judge(), contains('if (asr.text.length === 0)'));
+    expect(judge(), contains('silent: true,'));
+    expect(judge(), contains('распознаватель не нашёл речи в записи'));
   });
 
   test('ленту строит код, а не модель', () {
@@ -144,8 +163,8 @@ void main() {
     // пропущенное, то объявляла «ошибок нет» на половине фразы. Сравнить
     // две строки по словам — арифметика, и её надо считать, а не
     // спрашивать.
-    final s = omni();
-    expect(s, contains('ribbon(diffWords(heard, correct))'));
+    final s = judge();
+    expect(s, contains('ribbon(diffWords(asr.text, correct))'));
     expect(s.contains('parsed.review'), isFalse);
     expect(read('supabase/functions/_shared/textDiff.ts'), contains('export function diffWords'));
   });
@@ -153,11 +172,11 @@ void main() {
   test('расшифровка обязательна и не показывается игроку', () {
     // Она нужна не экрану, а сравнению: без неё модель не представляет
     // сказанное явно и по умолчанию соглашается, что всё верно.
-    final s = omni();
-    expect(prompt(), contains('"heard"'));
-    // Только сказанное и ничего сверх: договаривать за игрока нельзя.
-    expect(prompt(), contains('only the part he'));
-    expect(s, contains('в ответе нет расшифровки'));
+    // Расшифровку даёт распознавание, а не судья: судье её ПОКАЗЫВАЮТ.
+    expect(prompt(), contains('WHAT HE SAID, as the recogniser wrote it down'));
+    // И предупреждают, что писала её машина: знаки препинания и заглавные
+    // буквы принадлежат ей, а не игроку.
+    expect(prompt(), contains('TYPED BY A MACHINE, NOT BY HIM'));
     // На экране её нет: блок «Голосовое:» убран и не возвращается.
     expect(read('lib/widgets/transcript_review.dart').contains('Голосовое'), isFalse);
   });
@@ -165,8 +184,10 @@ void main() {
   test('пропуск, выданный за ошибку, не снимает балл второй раз', () {
     // Модель регулярно присылает «сказал X, надо X» с объяснением «эту
     // часть не сказали». Долю несказанного мы уже посчитали по ленте.
-    expect(omni(), contains('if (correction.length > 0 && correction === text) continue;'));
-    expect(prompt(), contains('Never list what he did NOT say'));
+    // Пропуск и есть красный текст в ленте — отдельной записи о нём быть
+    // не может: списка ошибок на этой ветке нет вовсе.
+    expect(prompt(), contains('one entry for every stretch of "correct" that is NOT in what he said'));
+    expect(judge(), contains('errors: [],'));
   });
 
   test('пробел на стыке кусков восстанавливается', () {
@@ -188,28 +209,30 @@ void main() {
     // названная пара становится модели доступной.
     expect(prompt().contains('"After that" instead of "Then"'), isFalse);
     // Правило записано в шапке файла, чтобы его не вернули по недосмотру.
-    expect(prompt(), contains('ПОЧЕМУ ЗДЕСЬ НЕТ РАЗОБРАННЫХ ПРИМЕРОВ'));
+    expect(prompt(), contains('ВОЗВРАЩАЮТСЯ ПАРАМИ'));
   });
 
   test('сырой ответ модели сохраняется', () {
     // Когда балл выглядит взятым с потолка, спорить можно только по нему.
-    expect(omni(), contains('debug.raw = raw.slice'));
+    expect(judge(), contains('raw: raw.slice(0, 2000)'));
     expect(read('lib/features/training/training_screen.dart'), contains("judge?['raw']"));
   });
 
   test('один вызов — одно списание', () {
     final w = worker();
-    // Прежняя связка стоила 1 (распознавание) + 2 (разбор). Один вызов
-    // делает работу обоих, и цена та же.
-    expect(w, contains('ENERGY_COST_OMNI") ?? 3'));
-    expect(w, contains('energy.charge(ENERGY_COST_OMNI'));
+    // Вызова два, а списание одно: игрок платит за разбор, а не за наше
+    // устройство пайплайна.
+    expect(w, contains('ENERGY_COST_JUDGE'));
+    expect(w, contains('energy.charge(ENERGY_COST_JUDGE'));
     // Платим только за ответ: отказ провайдера бесплатен.
-    expect(w, contains('if (!omni.degraded) {'));
+    expect(w, contains('if (!verdict.degraded) {'));
   });
 
-  test('распознавания и текстового судьи в пайплайне нет', () {
+  test('прежних провайдеров в пайплайне нет', () {
+    // Распознавание вернулось, но своё и на том же ключе qwencloud, а не
+    // прежняя россыпь Google/Deepgram/OpenAI с отдельными адаптерами.
     final w = worker();
-    for (final gone in ['transcribeAudio', 'resolveTranscript', 'evaluateGrammar', 'ASR_']) {
+    for (final gone in ['transcribeAudio', 'resolveTranscript', 'evaluateGrammar']) {
       expect(w.contains(gone), isFalse, reason: gone);
     }
     // И самих файлов тоже: выключенный путь, который нельзя включить, —

@@ -11,8 +11,8 @@ import 'package:flutter_test/flutter_test.dart';
 void main() {
   String read(String path) => File(path).readAsStringSync();
 
-  String judge() => read('supabase/functions/_shared/omniJudge.ts');
-  String prompt() => read('supabase/functions/_shared/prompts/judge.ts');
+  String judge() => read('supabase/functions/_shared/review.ts');
+  String prompt() => read('supabase/functions/_shared/prompts/judgeText.ts');
   String worker() => read('supabase/functions/evaluate-recording/index.ts');
   String screen() => read('lib/features/training/training_screen.dart');
   String review() => read('lib/widgets/round_review.dart');
@@ -21,7 +21,7 @@ void main() {
   group('произношения в проекте не осталось', () {
     test('ни в промптах, ни в воркере, ни на экране', () {
       for (final source in {
-        'omniJudge.ts': judge(),
+        'review.ts': judge(),
         'evaluate-recording': worker(),
         'training_screen.dart': screen(),
         'voice_submission.dart': read('lib/data/voice_submission.dart'),
@@ -31,7 +31,9 @@ void main() {
         // Единственное уцелевшее упоминание — объяснение, ЗАЧЕМ модель
         // слушает звук вместо расшифровки. Это про разбор перевода.
         final mentions = 'произношени'.allMatches(source.value).length;
-        expect(mentions, lessThanOrEqualTo(source.key == 'omniJudge.ts' ? 1 : 0),
+        // Единственное уцелевшее упоминание — в воркере, где сказано, чем
+        // платим за дешевизну двух шагов: судья не слышит произношения.
+        expect(mentions, lessThanOrEqualTo(source.key == 'evaluate-recording' ? 1 : 0),
             reason: source.key);
       }
     });
@@ -78,38 +80,59 @@ void main() {
       // Игрок сказал одно предложение из двух без ошибок в сказанном и
       // видел «ОШИБОК НЕ НАЙДЕНО» над красным пропуском и баллом 5.
       final s = screen();
-      expect(s, contains('_mistakes.isEmpty && !_missedSomething'));
-      expect(s, contains("(attempt?.reviewSpans ?? const []).any((s) => s.kind == 'miss')"));
+      // Списка ошибок на этой ветке нет, поэтому заголовок решается по
+      // ленте — и проверять одно лишь несказанное мало в обе стороны:
+      // лишнее слово даёт зачёркнутый кусок без красного рядом.
+      expect(s, contains('_ when _flawless =>'));
+      expect(s, contains("(attempt?.reviewSpans ?? const []).every((s) => s.kind == 'ok')"));
     });
 
-    test('подпись под лентой тоже', () {
+    test('серых подписей под лентой не осталось вовсе', () {
+      // Плашка теперь — сам красный текст, а подписи говорили о ленте то,
+      // что лента и так показывает.
       final s = review();
-      expect(s, contains("bool get _missedSomething => spans.any((s) => s.kind == 'miss');"));
-      expect(s, contains('фраза сказана не целиком'));
+      // Проверяем СТРОКУ КОДА, а не упоминание: в комментарии рядом
+      // объяснено, почему подписи убраны, и это не то же самое.
+      expect(s.contains("'Ошибок не найдено"), isFalse);
+      expect(s.contains("'фраза сказана не целиком"), isFalse);
+      // Заголовок разбора решается по ленте: ни красного, ни зачёркнутого.
+      expect(read('lib/features/training/training_screen.dart'),
+          contains("bool get _flawless =>"));
     });
   });
 
   group('промпт разбора', () {
     test('самоисправление не считается ошибкой', () {
-      expect(prompt(), contains('said it again differently'));
-      expect(prompt(), contains('the version he settled on'));
+      // Самоисправления судья здесь не видит: запись до него не доезжает, а
+      // распознаватель пишет то, что записал. Зато он обязан не считать
+      // ошибкой промах самого распознавателя.
+      expect(prompt(), contains('TYPED BY A MACHINE, NOT BY HIM'));
+      expect(prompt(), contains('recogniser mishearing him'));
     });
 
     test('запятые и заглавные буквы не ошибка', () {
       // Их в речи нет: их дописывает сама модель, когда пишет "heard".
-      expect(prompt(), contains('Never mark punctuation'));
+      expect(prompt(), contains('so they are never'));
     });
 
     test('смысл проверяется по частям, а не на слух «звучит складно»', () {
       // Смысл — первый из трёх видов ошибки, и перечислено, по чему он
       // расходится: действие, место, направление, время, лицо.
-      expect(prompt(), contains('"meaning"'));
-      expect(prompt(), contains('another action, place, direction, time, person'));
+      // Смысл сверяется с ОБРАЗЦОМ, а не с ощущением «звучит складно»:
+      // образец решает, ЧТО должно быть сказано, и не решает, какими словами.
+      expect(prompt(), contains('Use it for MEANING ONLY'));
+      expect(prompt(), contains('which day, which time, which action, who does it'));
     });
 
-    test('объяснение — про эту фразу, а не выдуманное правило', () {
-      expect(prompt(), contains('Explain THIS sentence'));
-      expect(prompt(), contains('Do not state a general rule'));
+    test('вместо объяснения — перевод, и он про эту фразу', () {
+      // Объяснять «почему так неверно» здесь никто не просит: игрок видит
+      // своё зачёркнутое слово рядом с верным. Не знает он другого — что
+      // значат слова, которых он не сказал.
+      expect(prompt(), contains('IS A TRANSLATION, NOT AN EXPLANATION'));
+      expect(prompt(), contains('do not name a rule'));
+      // Перевод — про ЭТУ фразу: контекст там, где слово двусмысленно.
+      expect(prompt(), contains('but as they'));
+      expect(prompt(), contains('when the words alone would be ambiguous'));
     });
   });
 
@@ -133,67 +156,52 @@ void main() {
     }
   });
 
-  group('модель судит перевод, а не стиль', () {
-    test('правка на плашке берётся из перевода самой модели', () {
-      // Настоящий случай: в ленте модель показала «My lessons are on Monday
-      // and Thursday», а на плашке к той же ошибке написала «on Sunday and
-      // Saturday» — предлог поправила, перепутанные дни оставила. Игрок
-      // читает два разных правильных ответа подряд, и второй неверен.
-      expect(prompt(), contains('that stand in that place in your "correct"'));
-      // Промпта мало: расхождение отсеивается и кодом.
-      final s = judge();
-      expect(s, contains('export function groundedIn(fix: string, correct: string): boolean'));
-      expect(s, contains('if (!groundedIn(correction, correct)) continue;'));
-    });
-
-    test('«естественнее» — запрещённая причина', () {
-      // Модель писала «"After that" is okay, but "Then" is more natural
-      // here» и снимала за это балл. Она сама признаёт, что верно, — и всё
-      // равно наказывает. Большинство игроков учились по учебникам и
-      // грамматически правы.
+  group('судья правит перевод, а не стиль', () {
+    // СПИСКА ОШИБОК НА ЭТОЙ ВЕТКЕ НЕТ: плашка — это сам красный текст в
+    // ленте, а нажатие показывает перевод. Значит и придраться судье негде,
+    // кроме «правильного перевода», — правило про него единственное, что от
+    // этого защищает, и проверять надо именно его.
+    test('свои слова игрока остаются в переводе нетронутыми', () {
       final s = prompt();
-      // Запрет на ДОВОД, а не на пару слов: перечислять запрещённые пары
-      // нельзя — названная пара становится модели доступной.
-      expect(s, contains('how usual a wording is'));
-      expect(s, contains('in any language'));
+      expect(s, contains('HIS OWN WORDS everywhere he was right'));
+      // Перечислено, что именно верно, даже если сказано не так, как сказал
+      // бы судья. Перечислять запрещённые ПАРЫ нельзя: названная пара
+      // становится модели доступной.
+      expect(s, contains('a synonym, another order, another structure'));
+      expect(s, contains('must leave every one of them untouched'));
     });
 
-    test('вид ошибки называется и проверяется кодом', () {
-      // Стиля в списке видов нет намеренно: фрагмент, который не удаётся
-      // отнести ни к смыслу, ни к грамматике, ни к слову, был в порядке.
-      expect(prompt(), contains('Three kinds exist and no others'));
-      final s = judge();
-      expect(s, contains('const ERROR_KINDS = new Set(["meaning", "grammar", "word"]);'));
-      expect(s, contains('if (kind.length > 0 && !ERROR_KINDS.has(kind)) continue;'));
+    test('чужие слова ставятся только по трём причинам', () {
+      // Те же три вида ошибки, что были списком: смысл, грамматика, слово.
+      expect(prompt(), contains('Put other words ONLY where what he said states something the'));
+      expect(prompt(), contains('is ungrammatical, or is not a real word'));
     });
 
-    test('в ошибку попадают только неверные слова', () {
-      // «after that I do coffee» — неверно только «do coffee», а игрок
-      // читал плашку так, будто «after that» тоже ошибка.
-      expect(prompt(), contains('ONLY the wrong ones'));
-    });
-
-    test('разговорность не повод снимать балл', () {
-      // «After that» вместо «Then» и «seven o'clock» вместо «seven» —
-      // сказано верно, и отнимать за это балл нечестно.
+    test('перевод несказанного — перевод, а не объяснение', () {
       final s = prompt();
-      expect(s, contains('whatever you would have said in his place'));
-      expect(s, contains('are not kinds of error'));
-      // Прежний пример В САМОМ ПРОМПТЕ учил модели ровно этой придирке:
-      // показывал «After that» → «Then» как образцовую ошибку. Примеров в
-      // промпте больше нет вовсе — пример на фразе из банка модель читает
-      // как готовый ответ и переписывает его список ошибок в свой.
-      expect(s.contains('"errors": [{"said": "After that", "fix": "Then"'), isFalse);
-      expect(s.contains('Example. The learner was asked to say'), isFalse);
+      expect(s, contains('IS A TRANSLATION, NOT AN EXPLANATION'));
+      expect(s, contains('do not name a rule'));
+      // Контекст добавляется только там, где без него слово двусмысленно.
+      expect(s, contains('when the words alone would be ambiguous'));
+    });
+
+    test('несказанное режется лентой, а не моделью', () {
+      // Подряд идущее несказанное — ОДИН кусок любой длины: «so it is» это
+      // одна плашка, а не три.
+      expect(prompt(), contains('did not say is ONE entry, however long'));
+      // Границы всё равно проводит дифф, а перечисление модели только
+      // привязывает к ним переводы — не совпавшее остаётся без перевода.
+      final s = judge();
+      expect(s, contains('export function attachMeanings'));
+      expect(s, contains('Показать перевод НЕ ОТ ТОГО'));
     });
   });
-
   group('разбирать нечего — балла нет вовсе', () {
     test('соло не получает балл ни за молчание модели, ни за невнятную речь', () {
       // Раньше это были нейтральные семь и ноль. Оба числа закрывали
       // раунд оценкой за то, чего никто не слышал.
       expect(worker(),
-          contains('recording.training_round_id && !omni.degraded && !omni.silent'));
+          contains('recording.training_round_id && !verdict.degraded && !verdict.silent'));
     });
 
     test('экран просит ответить ещё раз и возвращает микрофон', () {
@@ -251,7 +259,7 @@ void main() {
       // Аудио до модели доехало: мы сами его отправили и знаем размер.
       // Значит это не наш сбой, а ответ — разбирать было нечего.
       expect(s, contains('silent?: boolean;'));
-      expect(s, contains('silent: true,'));
+      expect(read('supabase/functions/_shared/textJudge.ts'), contains('silent: true,'));
       expect(s.contains('return fail("модель не слышит речи'), isFalse);
     });
 
@@ -259,7 +267,7 @@ void main() {
       // В соло раунд не закрывается вовсе, но бой без оценки обоих не
       // сдвинется — там ноль и есть честный итог за нерасслышанное.
       final s = worker();
-      expect(s, contains('if (omni.silent) {'));
+      expect(s, contains('} else if (verdict.silent) {'));
       expect(s, contains('score = SILENT_SCORE;'));
       expect(s, contains('transcriptStatus = "empty";'));
       expect(s, contains('transcript_status: transcriptStatus,'));
