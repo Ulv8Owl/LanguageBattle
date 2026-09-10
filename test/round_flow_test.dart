@@ -92,7 +92,7 @@ void main() {
   group('промпт разбора', () {
     test('самоисправление не считается ошибкой', () {
       expect(prompt(), contains('said it again differently'));
-      expect(prompt(), contains('the version he settled on'));
+      expect(prompt(), contains('keep the version\nhe settled on'));
     });
 
     test('запятые и заглавные буквы не ошибка', () {
@@ -104,12 +104,12 @@ void main() {
       // Смысл — первый из трёх видов ошибки, и перечислено, по чему он
       // расходится: действие, место, направление, время, лицо.
       expect(prompt(), contains('"meaning"'));
-      expect(prompt(), contains('another action, place, direction, time, person'));
+      expect(prompt(), contains('another day, another time, another action, another person, another place'));
     });
 
     test('объяснение — про эту фразу, а не выдуманное правило', () {
-      expect(prompt(), contains('Explain THIS sentence'));
-      expect(prompt(), contains('Do not state a general rule'));
+      expect(prompt(), contains('Say what this'));
+      expect(prompt(), contains('No general rules'));
     });
   });
 
@@ -139,11 +139,11 @@ void main() {
       // and Thursday», а на плашке к той же ошибке написала «on Sunday and
       // Saturday» — предлог поправила, перепутанные дни оставила. Игрок
       // читает два разных правильных ответа подряд, и второй неверен.
-      expect(prompt(), contains('that stand in that place in your "correct"'));
+      expect(prompt(), contains('the words standing in that place in your "correct"'));
       // Промпта мало: расхождение отсеивается и кодом.
       final s = judge();
       expect(s, contains('export function groundedIn(fix: string, correct: string): boolean'));
-      expect(s, contains('if (!groundedIn(correction, correct)) continue;'));
+      expect(s, contains('if (!groundedIn(correction, correct)) {'));
     });
 
     test('«естественнее» — запрещённая причина', () {
@@ -154,17 +154,21 @@ void main() {
       final s = prompt();
       // Запрет на ДОВОД, а не на пару слов: перечислять запрещённые пары
       // нельзя — названная пара становится модели доступной.
-      expect(s, contains('how usual a wording is'));
-      expect(s, contains('in any language'));
+      expect(s, contains('more usual, more natural'));
+      expect(s, contains('in any\nlanguage you write it'));
     });
 
     test('вид ошибки называется и проверяется кодом', () {
       // Стиля в списке видов нет намеренно: фрагмент, который не удаётся
       // отнести ни к смыслу, ни к грамматике, ни к слову, был в порядке.
-      expect(prompt(), contains('Three kinds exist and no others'));
+      expect(prompt(), contains('ask these four questions IN ORDER'));
+      expect(prompt(), contains('THE FRAGMENT IS CORRECT'));
       final s = judge();
       expect(s, contains('const ERROR_KINDS = new Set(["meaning", "grammar", "word"]);'));
-      expect(s, contains('if (kind.length > 0 && !ERROR_KINDS.has(kind)) continue;'));
+      expect(s, contains('if (kind.length > 0 && !ERROR_KINDS.has(kind)) {'));
+      // Отклонённая правка ещё и откатывается в переводе: иначе придирка
+      // зачеркнёт верное слово и снимет балл, даже не показавшись плашкой.
+      expect(s, contains('export function revertRejectedFixes'));
     });
 
     test('в ошибку попадают только неверные слова', () {
@@ -177,8 +181,8 @@ void main() {
       // «After that» вместо «Then» и «seven o'clock» вместо «seven» —
       // сказано верно, и отнимать за это балл нечестно.
       final s = prompt();
-      expect(s, contains('whatever you would have said in his place'));
-      expect(s, contains('are not kinds of error'));
+      expect(s, contains('all\ncorrect, all silent'));
+      expect(s, contains('is not one of the four questions'));
       // Прежний пример В САМОМ ПРОМПТЕ учил модели ровно этой придирке:
       // показывал «After that» → «Then» как образцовую ошибку. Примеров в
       // промпте больше нет вовсе — пример на фразе из банка модель читает

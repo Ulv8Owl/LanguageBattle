@@ -30,11 +30,13 @@ void main() {
     // Образец решает СМЫСЛ и не решает СЛОВА — обе половины обязательны.
     // Без первой модель не видит подмены дня недели и пропущенной половины
     // фразы; без второй объявляет ошибкой верный перевод, сказанный иначе.
-    expect(s, contains('for the meaning only'));
-    expect(s, contains('It does not tell you WHICH WORDS'));
-    // Без образца блока нет вовсе: пустая строка на его месте читалась бы
-    // как «правильный перевод — пустота».
-    expect(s, contains('if (v.reference.length === 0) return "";'));
+    expect(s, contains('Use it for MEANING ONLY'));
+    expect(s, contains('It does NOT tell you which words to use'));
+    // Без образца модель переводит задание сама, и ей об этом говорят
+    // прямо. Пустая строка на месте образца читалась бы как «правильный
+    // перевод — пустота», а это хуже собственного перевода модели.
+    expect(s, contains('if (v.reference.length === 0)'));
+    expect(s, contains('Translate the task into'));
     // Воркер читает образец из того же поля, куда его пишет клиент.
     expect(worker(), contains('await roundPrompt(supabase, recording, nativeLanguage)'));
     expect(worker(), contains('await roundReference(supabase, recording)'));
@@ -58,8 +60,9 @@ void main() {
   test('цитату сказанного модель не чинит', () {
     // В плашке ошибки и в зачёркнутом куске должны стоять слова игрока, а
     // не исправленный за него вариант: иначе он не узнает свою ошибку.
-    expect(prompt(), contains('quoted exactly as he said them'));
-    expect(prompt(), contains('Never correct them here'));
+    expect(prompt(), contains('his own words, verbatim'));
+    // Вид ошибки решается ДО объяснения — иначе объяснение и рождает ошибку.
+    expect(prompt(), contains('Stop at the first'));
     // И расшифровка — дословная, а не приглаженная.
     expect(prompt(), contains('every mistake'));
   });
@@ -102,7 +105,7 @@ void main() {
     expect(s, contains('LANGUAGE_ENDONYMS'));
     expect(prompt(), contains(r'(${v.nativeSelf})'));
     
-    expect(prompt(), contains('and in no other'));
+    expect(prompt(), contains('and no other language'));
   });
 
   test('родной язык берётся от активной пары, а не наугад', () {
@@ -145,7 +148,7 @@ void main() {
     // две строки по словам — арифметика, и её надо считать, а не
     // спрашивать.
     final s = omni();
-    expect(s, contains('ribbon(diffWords(heard, correct))'));
+    expect(s, contains('ribbon(diffWords(heard, shown))'));
     expect(s.contains('parsed.review'), isFalse);
     expect(read('supabase/functions/_shared/textDiff.ts'), contains('export function diffWords'));
   });
@@ -156,7 +159,7 @@ void main() {
     final s = omni();
     expect(prompt(), contains('"heard"'));
     // Только сказанное и ничего сверх: договаривать за игрока нельзя.
-    expect(prompt(), contains('only the part he'));
+    expect(prompt(), contains('ONLY what he actually said'));
     expect(s, contains('в ответе нет расшифровки'));
     // На экране её нет: блок «Голосовое:» убран и не возвращается.
     expect(read('lib/widgets/transcript_review.dart').contains('Голосовое'), isFalse);
@@ -166,7 +169,7 @@ void main() {
     // Модель регулярно присылает «сказал X, надо X» с объяснением «эту
     // часть не сказали». Долю несказанного мы уже посчитали по ленте.
     expect(omni(), contains('if (correction.length > 0 && correction === text) continue;'));
-    expect(prompt(), contains('Never list what he did NOT say'));
+    expect(prompt(), contains('Never list what he did not say'));
   });
 
   test('пробел на стыке кусков восстанавливается', () {
@@ -188,7 +191,7 @@ void main() {
     // названная пара становится модели доступной.
     expect(prompt().contains('"After that" instead of "Then"'), isFalse);
     // Правило записано в шапке файла, чтобы его не вернули по недосмотру.
-    expect(prompt(), contains('ПОЧЕМУ ЗДЕСЬ НЕТ РАЗОБРАННЫХ ПРИМЕРОВ'));
+    expect(prompt(), contains('ВОЗВРАЩАЮТСЯ ПАРАМИ'));
   });
 
   test('сырой ответ модели сохраняется', () {
