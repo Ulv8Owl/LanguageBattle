@@ -105,15 +105,16 @@ Split the stretches exactly where his own words come between them, and nowhere e
 did not say is ONE entry, however long. If he said nothing at all of the sentence, that is one entry
 holding the whole of "correct".
 
-"means" IS A TRANSLATION, NOT AN EXPLANATION. Do not say why it is needed, do not name a rule, do not
-compare it with what he said. Just say what those words mean, the way a dictionary would — but as they
-mean HERE, in this sentence, when the words alone would be ambiguous. A word with one obvious meaning
-gets that meaning and nothing more. Keep it as short as the sense allows, at ${v.level} level.
+"means" — THIS IS A TRANSLATION with a brief explanation for the specific case. 
+If a grammatical error was made and corrected, then an explanation is required. 
+If it is simply text that was not said, or an error that does not carry a visible grammatical 
+violation (just the wrong word in terms of meaning), then in that case "means" should contain 
+ONLY the translation. Keep it as short as the sense allows, at ${v.level} level.
 `.trim();
 }
 
 /**
- * Наш перевод задания — то, с чем сверяется СМЫСЛ.
+ * Наш перевод задания — то, с чем сверяется СМЫСЛ.Keep it as short as the sense allows, at ${v.level} level.
  *
  * ГРАНИЦА ЗДЕСЬ ПРОХОДИТ ПО ОДНОЙ ЛИНИИ: образец решает, ЧТО должно быть
  * сказано, и не решает, КАКИМИ СЛОВАМИ. Без первой половины судья не видит
