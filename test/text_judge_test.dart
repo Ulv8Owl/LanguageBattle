@@ -84,6 +84,30 @@ void main() {
     expect(read('tools/deploy_server.sh'), contains('deploy asr-audio --no-verify-jwt'));
   });
 
+  test('первым шагом стоит модель, которая работает', () {
+    // Пять кругов проверок: тело запроса у нас побайтово такое же, как у
+    // вызова, который месяц работает с qwen3-omni-flash, — отличается ровно
+    // имя модели, и специальные модели распознавания всё равно отвечают
+    // отказом. Держать ветку сломанной ради экономии, которой пока нет,
+    // нельзя: она сначала должна работать.
+    final s = asr();
+    final list = s.substring(s.indexOf('export const ASR_MODELS'), s.indexOf('] as const;'));
+    expect(list.indexOf('"qwen3-omni-flash"'), lessThan(list.indexOf('"qwen-audio-3.0-asr-flash"')),
+        reason: 'рабочая модель должна стоять первой — она по умолчанию');
+    // Нерабочие из списка не убраны: вернуть экономию, когда станет
+    // известна форма вызова, должно быть делом одного переключателя.
+    expect(list, contains('"fun-asr-mtl"'));
+    // Мультимодальной лесенка не нужна — её форма известна и проверена.
+    expect(s, contains('const multimodal = model.includes("omni");'));
+    expect(s, contains('if (url.length > 0 && !multimodal) {'));
+    // Списки клиента и сервера обязаны совпадать: значение из профиля это
+    // ввод снаружи, и проверяется оно там, где им пользуются.
+    final dart = read('lib/data/judge_models.dart');
+    for (final m in ['qwen3-omni-flash', 'qwen3.5-omni-flash', 'fun-asr-mtl']) {
+      expect(dart, contains("'$m'"), reason: m);
+    }
+  });
+
   test('распознавание пробует три формы вызова, а не одну', () {
     // Провайдер обслуживает эти модели НЕ так, как мультимодальную, и как
     // именно — по документации было не угадать. Совместимый путь отвечал
@@ -92,7 +116,7 @@ void main() {
     // распознавания своя схема, и пробовать надо обе.
     final s = asr();
     // Форма, заведомо работающая с мультимодальной моделью: вложение плюс
-    // текстовая часть. С неё лесенка и начинается.
+    // текстовая часть. Для неё она единственная и нужная.
     expect(s, contains('name: "compat-inline"'));
     expect(s, contains('audioPart(req.audio, req.audioFormat)'));
     expect(s, contains('{ type: "text", text: "Transcribe this recording." }'));
