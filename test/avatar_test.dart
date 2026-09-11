@@ -1,6 +1,5 @@
 import 'dart:io';
 
-import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -122,46 +121,6 @@ void main() {
       ]);
       expect(out.map((s) => s.text).join(), 'I walk');
       expect(out.every((s) => s.style?.decoration != TextDecoration.lineThrough), isTrue);
-    });
-
-    test('красное не подчёркивается', () {
-      // Линия под красным делала из разбора ссылку и спорила с
-      // зачёркиванием соседнего слова: две разные линии в одном месте.
-      final out = reviewSpans([
-        ReviewSpan(kind: 'miss', text: 'walk in', means: 'гуляем'),
-      ]);
-      expect(out.single.style?.decoration, isNot(TextDecoration.underline));
-    });
-
-    test('зачёркнутое нажимается вместе со своим исправлением', () {
-      // Игрок видит ОДНО красное место — своё слово и верное рядом — и
-      // попадает пальцем в любую половину. Нажималась только вторая, и
-      // выглядело это как «иногда работает, иногда нет».
-      final fix = ReviewSpan(kind: 'miss', text: 'sleeps a lot', means: 'много спит');
-      final asked = <ReviewSpan>[];
-      final out = reviewSpans(
-        [ReviewSpan(kind: 'bad', text: 'many sleep '), fix],
-        recognizerFor: (span) {
-          asked.add(span);
-          return TapGestureRecognizer();
-        },
-      );
-      // Нажатий два — на зачёркнутом и на исправлении, — но перевод у них
-      // ОДИН И ТОТ ЖЕ: у слова игрока своего перевода нет и быть не может.
-      expect(asked.length, 2);
-      expect(asked.every((s) => identical(s, fix)), isTrue);
-      final struck = out.firstWhere((s) => s.style?.decoration == TextDecoration.lineThrough);
-      expect(struck.recognizer, isNotNull);
-    });
-
-    test('лишнее слово игрока нажимать не на что', () {
-      // Рядом нет исправления — значит он сказал лишнее, и переводить
-      // нечего. Пустая плашка хуже её отсутствия.
-      final out = reviewSpans(
-        [ReviewSpan(kind: 'ok', text: 'I '), ReviewSpan(kind: 'bad', text: 'really')],
-        recognizerFor: (span) => TapGestureRecognizer(),
-      );
-      expect(out.every((s) => s.recognizer == null), isTrue);
     });
   });
 

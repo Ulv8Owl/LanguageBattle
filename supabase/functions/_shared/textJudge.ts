@@ -7,9 +7,16 @@
  * заметно дешевле мультимодального разбора; второй получает символы.
  *
  * ЧТО ОСТАЛОСЬ ОБЩИМ С ВЕТКОЙ OMNI, И ЭТО ВАЖНЕЕ РАЗЛИЧИЙ. Лента разбора,
- * формула балла, отсев придирок, формат ответа для приложения — всё из
- * review.ts, слово в слово то же. Иначе сравнение двух архитектур измеряло
- * бы не модели, а разницу в нашей собственной арифметике.
+ * формула балла, отсев придирок, список ошибок с плашками, формат ответа
+ * для приложения — всё из review.ts и промпта judge.ts, слово в слово то
+ * же. Иначе сравнение двух архитектур измеряло бы не модели, а разницу в
+ * нашей собственной арифметике и в наших же формулировках.
+ *
+ * ПРОМПТ ЗДЕСЬ ТОТ ЖЕ, ЧТО НА OMNI (prompts/judge.ts), с тремя отличиями,
+ * и все три — от архитектуры, а не от вкуса: нет полей `audible` и `heard`
+ * (их знает распознаватель, а не судья), добавлен абзац про артефакты
+ * машины, и задание с расшифровкой приходят вторым сообщением — там же,
+ * где на Omni ехали задание и аудио.
  *
  * ЧЕМ ЗА ЭТО ПЛАТИМ. Судья не слышит записи. Произношение, ударение,
  * проглоченное окончание, оборванное слово — всё это до него не доезжает, а
@@ -20,7 +27,6 @@
  */
 
 import {
-  attachMeanings,
   correctText,
   type JudgeResult,
   judgeBaseUrl,
@@ -29,11 +35,13 @@ import {
   languageName,
   parseJson,
   requestQwen,
+  reviewErrors,
+  revertRejectedFixes,
   ribbon,
   sameLanguage,
 } from "./review.ts";
 import { diffWords } from "./textDiff.ts";
-import { judgeTextPrompt } from "./prompts/judgeText.ts";
+import { judgePrompt } from "./prompts/judge.ts";
 import { asrModel, transcribe } from "./asr.ts";
 
 /**
@@ -178,21 +186,23 @@ export async function textJudge(req: TextJudgeRequest): Promise<JudgeResult> {
 
   // --- Шаг второй: текст судье ---------------------------------------------
   const spent = Date.now() - started;
-  const system = judgeTextPrompt({
+  const system = judgePrompt({
     native: languageName(req.nativeLanguage),
     nativeSelf: languageEndonym(req.nativeLanguage),
     target: languageName(req.targetLanguage),
     level: req.level,
-    prompt: req.prompt,
-    heard: asr.text,
     reference: req.reference.trim(),
   });
-  // Задание и расшифровка уже стоят в системной части — тут остаётся только
-  // просьба ответить. Дублировать их вторым сообщением значило бы дать
-  // модели два слегка разных описания одной задачи.
+  // ЗАДАНИЕ И РАСШИФРОВКА ИДУТ ВТОРЫМ СООБЩЕНИЕМ, а не в системной части —
+  // ровно там же, где на ветке Omni ехали задание и аудио. Системная часть
+  // это правила, одинаковые для всех раундов; раунд — это то, что меняется.
   const answer = await requestQwen(
     system,
-    [{ type: "text", text: "Answer with the JSON object described above." }],
+    [{
+      type: "text",
+      text: `The learner was asked to say this in ${languageName(req.targetLanguage)}:\n${req.prompt}` +
+        `\n\nThis is what a speech recogniser wrote down from his recording:\n${asr.text}`,
+    }],
     Math.max(0, req.budgetMs - spent),
     llmModel(req.llmModelChoice),
   );
@@ -236,22 +246,23 @@ export async function textJudge(req: TextJudgeRequest): Promise<JudgeResult> {
     return fail(`в ответе судьи нет перевода: ${raw.slice(0, 300)}`, { asr: asr.debug });
   }
 
+  // ПЛАШКИ ОТСЕИВАЮТСЯ ТЕМ ЖЕ КОДОМ, ЧТО И НА ВЕТКЕ OMNI (review.ts).
+  // Правка обязана быть словами из перевода самой модели, довод «так
+  // говорят» доводом не считается, а цитата на плашке обязана найтись в
+  // речи игрока. Отклонённые правки возвращаются списком: модель, придравшись,
+  // уже переписала верное слово игрока в своём переводе, и без отката оно
+  // осталось бы зачёркнутым в ленте, а балл упал бы за «несказанное».
+  const { errors, rejected } = reviewErrors(parsed.errors, correct, asr.text);
+  const corrected = revertRejectedFixes(correct, rejected);
+
   // ЛЕНТУ СЧИТАЕМ МЫ, а не модель, — ровно как на ветке Omni. Сравнить две
   // строки по словам это арифметика, и арифметику надо считать, а не
   // спрашивать. Здесь сравнивается расшифровка против перевода судьи.
-  // ЛЕНТУ СЧИТАЕМ МЫ, а не модель, — сравнить две строки по словам это
-  // арифметика, и её надо считать, а не спрашивать. Переводы, которые
-  // модель прислала списком, привязываются к готовым кускам по словам.
-  const review = attachMeanings(ribbon(diffWords(asr.text, correct)), parsed.missing);
+  const review = ribbon(diffWords(asr.text, corrected));
 
-  const missed = review.filter((s) => s.kind === "miss");
   return {
     review,
-    // СПИСКА ОШИБОК НА ЭТОЙ ВЕТКЕ НЕТ. Плашка — это сам красный текст в
-    // ленте, а нажатие показывает перевод. Балл поэтому считается только по
-    // доле несказанного: неверное слово всё равно попадает в неё, потому
-    // что верное на его месте игрок не произнёс.
-    errors: [],
+    errors,
     audible: true,
     degraded: false,
     debug: {
@@ -260,16 +271,20 @@ export async function textJudge(req: TextJudgeRequest): Promise<JudgeResult> {
       ms: Date.now() - started,
       asr: asr.debug,
       heard: asr.text,
-      correct,
+      correct: corrected,
       spans: {
         ok: review.filter((s) => s.kind === "ok").length,
         bad: review.filter((s) => s.kind === "bad").length,
-        miss: missed.length,
+        miss: review.filter((s) => s.kind === "miss").length,
       },
-      // Сколько несказанных кусков осталось без перевода: расхождение между
-      // нашими границами и перечислением модели видно только здесь.
-      missing_translated: missed.filter((s) => (s.means ?? "").length > 0).length,
-      missing_raw: Array.isArray(parsed.missing) ? parsed.missing.length : 0,
+      errors: errors.length,
+      // Сколько ошибок судья назвал и сколько мы оставили — расхождение
+      // означает, что часть пришла без фрагмента, без объяснения или не
+      // прошла проверки выше, и видно это только здесь.
+      errors_raw: Array.isArray(parsed.errors) ? parsed.errors.length : 0,
+      // Правка, которую отклонили и откатили в переводе: без этой строки
+      // «судья назвал 3, осталось 0» не объяснить.
+      errors_rejected: rejected.length,
       raw: raw.slice(0, 2000),
     },
   };

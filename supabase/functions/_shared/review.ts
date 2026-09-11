@@ -41,20 +41,6 @@ export type SpanKind =
 export interface ReviewSpan {
   text: string;
   kind: SpanKind;
-  /**
-   * Перевод куска на родной язык игрока. Только у `miss`.
-   *
-   * КРАСНЫЙ ТЕКСТ И ЕСТЬ ПЛАШКА. Раньше под разбором стоял отдельный ряд
-   * плашек с объяснениями «почему так неверно», а игроку нужно было другое:
-   * что значат слова, которых он не сказал. Объяснение он и так видит —
-   * своё зачёркнутое слово стоит рядом с верным. Поэтому перевод едет
-   * ВМЕСТЕ С КУСКОМ, а не отдельным списком: список пришлось бы сводить с
-   * лентой по тексту, и на первой же неточности плашка потерялась бы.
-   *
-   * Пусто — перевода нет: кусок останется красным, но нажимать будет не на
-   * что. Это лучше, чем показать перевод не от того куска.
-   */
-  means?: string;
 }
 
 export interface JudgeResult {
@@ -132,46 +118,6 @@ export function ribbon(parts: { text: string; kind: DiffKind }[]): ReviewSpan[] 
   // «morningthen» — это игрок видел на экране.
   for (let i = 0; i < out.length - 1; i++) out[i].text += " ";
   return out;
-}
-
-/**
- * Привязывает переводы к несказанным кускам ленты.
- *
- * ГРАНИЦЫ КУСКОВ ПРОВОДИМ МЫ (дифф), а перечисляет их ещё раз модель — и
- * совпадают эти два перечисления не всегда. Сопоставляем по словам, без
- * регистра и пунктуации, тремя попытками от точной к грубой: точное
- * совпадение, кусок модели содержит наш, наш содержит кусок модели.
- *
- * Не нашлось — кусок остаётся без перевода. Показать перевод НЕ ОТ ТОГО
- * куска хуже, чем не показать никакого: игрок поверит.
- */
-export function attachMeanings(review: ReviewSpan[], raw: unknown): ReviewSpan[] {
-  const entries: { key: string; means: string }[] = [];
-  if (Array.isArray(raw)) {
-    for (const item of raw) {
-      if (!item || typeof item !== "object") continue;
-      const row = item as Record<string, unknown>;
-      const text = typeof row.text === "string" ? row.text : "";
-      const means = typeof row.means === "string" ? row.means.trim() : "";
-      const key = wordsOf(text).join(" ");
-      if (key.length === 0 || means.length === 0) continue;
-      entries.push({ key, means });
-    }
-  }
-  if (entries.length === 0) return review;
-
-  // Пробелы по краям — чтобы «is» не находилось внутри «this»: сравниваем
-  // последовательности слов, а не подстроки.
-  const pad = (k: string) => ` ${k} `;
-  return review.map((span) => {
-    if (span.kind !== "miss") return span;
-    const key = wordsOf(span.text).join(" ");
-    if (key.length === 0) return span;
-    const hit = entries.find((e) => e.key === key) ??
-      entries.find((e) => pad(e.key).includes(pad(key))) ??
-      entries.find((e) => pad(key).includes(pad(e.key)));
-    return hit ? { ...span, means: hit.means } : span;
-  });
 }
 
 /** Правильный перевод — всё, кроме сказанного игроком неверно. */

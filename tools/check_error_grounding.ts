@@ -9,7 +9,6 @@
 import { asrFamily, chatText, nativeText } from "../supabase/functions/_shared/asr.ts";
 import {
   asErrors,
-  attachMeanings,
   groundedIn,
   nitpickReason,
   reviewErrors,
@@ -206,60 +205,31 @@ check("довод «более употребительно» — не дово�
 check("довод «предпочтительнее» — не довод", nitpickReason("этот вариант предпочтительнее"), true);
 check("довод про смысл остаётся доводом", nitpickReason("в задании суббота, а не воскресенье"), false);
 
-// ═══ ПЛАШКА — ЭТО САМ КРАСНЫЙ ТЕКСТ, И К НЕМУ ПРИВЯЗАН ПЕРЕВОД ═══
+// ═══ ОТКЛОНЁННАЯ ПРАВКА ОТКАТЫВАЕТСЯ И В ПЕРЕВОДЕ ═══
 //
-// Настоящий раунд: «Мой телефон очень старый, поэтому он медленный. Я хочу
-// новый в следующем году.» Игрок сказал «My phone is old, because he slow.
-// I want new one in new year.» Границы кусков проводит дифф, переводы
-// перечисляет модель — и сходятся эти два перечисления не всегда.
+// Придирку мы на плашке не показали — но она всё ещё сидит в «правильном
+// переводе» модели: там она уже заменила верное слово игрока своим. Лента
+// строится диффом против этого текста, и без отката игрок увидел бы своё
+// верное слово зачёркнутым, а балл потерял бы на «несказанном».
 {
-  const ribbonSpans = [
-    { kind: "ok" as const, text: "My phone is " },
-    { kind: "miss" as const, text: "very " },
-    { kind: "bad" as const, text: "because he " },
-    { kind: "miss" as const, text: "so it is " },
-    { kind: "ok" as const, text: "slow. I want " },
-    { kind: "miss" as const, text: "a " },
-    { kind: "ok" as const, text: "new one " },
-    { kind: "bad" as const, text: "in new " },
-    { kind: "miss" as const, text: "next " },
-    { kind: "ok" as const, text: "year." },
-  ];
-  const withMeanings = attachMeanings(ribbonSpans, [
-    { text: "very", means: "очень" },
-    { text: "so it is", means: "поэтому он" },
-    { text: "a", means: "неопределённый артикль: один из многих" },
-    { text: "next", means: "следующий" },
-  ]);
-  check(
-    "перевод достался всем четырём несказанным кускам",
-    withMeanings.filter((s) => s.kind === "miss").map((s) => s.means),
-    ["очень", "поэтому он", "неопределённый артикль: один из многих", "следующий"],
+  const heard = "I wake up at seven every morning. After that I make coffee and read the news.";
+  const modelCorrect =
+    "I get up at seven every morning. Then I make coffee and read the news.";
+  const { errors, rejected } = reviewErrors(
+    [
+      { said: "wake up", fix: "get up", kind: "word", why: "так говорят носители языка" },
+      { said: "After that", fix: "Then", kind: "grammar", why: "этот вариант предпочтительнее" },
+    ],
+    modelCorrect,
+    heard,
   );
+  check("придирки до плашек не доходят", errors.length, 0);
+  check("но они запомнены для отката", rejected.length, 2);
   check(
-    "сказанному и зачёркнутому перевод не достаётся",
-    withMeanings.filter((s) => s.kind !== "miss").every((s) => s.means === undefined),
-    true,
+    "и слова игрока вернулись в перевод",
+    revertRejectedFixes(modelCorrect, rejected),
+    "I wake up at seven every morning. After that I make coffee and read the news.",
   );
-
-  // Модель перечислила куски иначе, чем провёл границы дифф.
-  const looser = attachMeanings(ribbonSpans, [
-    { text: "so it is slow", means: "поэтому он медленный" },
-  ]);
-  check(
-    "кусок модели шире нашего — перевод всё равно находится",
-    looser.find((s) => s.text.trim() === "so it is")?.means,
-    "поэтому он медленный",
-  );
-
-  // Ничего похожего не прислали — кусок остаётся красным, но без нажатия.
-  const none = attachMeanings(ribbonSpans, [{ text: "completely other", means: "другое" }]);
-  check(
-    "не нашлось — лучше без перевода, чем чужой",
-    none.filter((s) => s.kind === "miss").every((s) => s.means === undefined),
-    true,
-  );
-  check("пустой список ничего не ломает", attachMeanings(ribbonSpans, null).length, 10);
 }
 
 // ═══ РАЗБОР ОТВЕТА СВОЕЙ СХЕМЫ ПРОВАЙДЕРА ═══
