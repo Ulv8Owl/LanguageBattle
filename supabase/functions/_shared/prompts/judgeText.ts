@@ -10,10 +10,16 @@
  * поля spoke/correct и said/fix/kind/why читает код (textJudge.ts).
  *
  * ЧТО МОДЕЛЬ ОТДАЁТ НА ЭТОЙ ВЕТКЕ: правильную фразу и ПЕРЕВОД тех её
- * кусков, которых игрок не сказал. Списка ошибок с объяснениями здесь
- * больше нет — красный текст в ленте разбора и есть плашка, а нажатие на
- * него показывает перевод. Объяснять «почему так неверно» никто не просит:
- * игрок и так видит своё зачёркнутое слово рядом с верным.
+ * кусков, которых игрок не сказал. Отдельного списка ошибок с объяснениями
+ * здесь нет — красный текст в ленте разбора и есть плашка, а нажатие на
+ * него показывает перевод.
+ *
+ * ОБЪЯСНЕНИЕ ИДЁТ ТУДА ЖЕ, НО ТОЛЬКО ЗА ГРАММАТИКУ. Что значат слова —
+ * игрок не знает, и это перевод. Почему его «many sleep» стало «sleeps a
+ * lot» — он тоже не знает, и одной фразы про правило тут мало не бывает.
+ * А вот на «сказал другими словами» объяснять нечего: правки там нет.
+ * Отсюда и развилка в последнем правиле промпта — перевод всегда,
+ * объяснение только к грамматической правке.
  *
  * ГРАНИЦЫ КУСКОВ ПРОВОДИМ МЫ, а не модель (дифф в textJudge.ts). У модели
  * просим те же куски только затем, чтобы было к чему привязать перевод;
@@ -100,21 +106,25 @@ task does not state, or is ungrammatical, or is not a real word. Add what he did
 
 "missing" — one entry for every stretch of "correct" that is NOT in what he said, and nothing else.
   "text" — that stretch, copied from "correct" letter for letter.
-  "means" — what it means, in ${v.native} (${v.nativeSelf}) and no other language.
+  "means" — in ${v.native} (${v.nativeSelf}) and no other language. What goes in it: the last rule below.
 Split the stretches exactly where his own words come between them, and nowhere else: a run of words he
 did not say is ONE entry, however long. If he said nothing at all of the sentence, that is one entry
 holding the whole of "correct".
 
-"means" — THIS IS A TRANSLATION with a brief explanation for the specific case. 
-If a grammatical error was made and corrected, then an explanation is required. 
-If it is simply text that was not said, or an error that does not carry a visible grammatical 
-violation (just the wrong word in terms of meaning), then in that case "means" should contain 
-ONLY the translation. Keep it as short as the sense allows, at ${v.level} level.
+"means" — THIS IS A TRANSLATION with a brief explanation for the specific case.
+If a grammatical error was made and corrected, then an explanation is required: name in one short
+clause what the grammar demands here — the tense, the number, the article, the preposition, the order
+of the words. If it is simply text that was not said, or an error that does not carry a visible
+grammatical violation (just the wrong word in terms of meaning), then in that case "means" should
+contain ONLY the translation.
+The translation comes first, the explanation after it, separated by " — ", never the other way round.
+Wording you would have preferred is NOT a grammatical error and gets no explanation. Keep it as short
+as the sense allows, at ${v.level} level.
 `.trim();
 }
 
 /**
- * Наш перевод задания — то, с чем сверяется СМЫСЛ.Keep it as short as the sense allows, at ${v.level} level.
+ * Наш перевод задания — то, с чем сверяется СМЫСЛ.
  *
  * ГРАНИЦА ЗДЕСЬ ПРОХОДИТ ПО ОДНОЙ ЛИНИИ: образец решает, ЧТО должно быть
  * сказано, и не решает, КАКИМИ СЛОВАМИ. Без первой половины судья не видит

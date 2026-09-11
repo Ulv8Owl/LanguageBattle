@@ -124,15 +124,21 @@ void main() {
       expect(prompt(), contains('which day, which time, which action, who does it'));
     });
 
-    test('вместо объяснения — перевод, и он про эту фразу', () {
-      // Объяснять «почему так неверно» здесь никто не просит: игрок видит
-      // своё зачёркнутое слово рядом с верным. Не знает он другого — что
-      // значат слова, которых он не сказал.
-      expect(prompt(), contains('IS A TRANSLATION, NOT AN EXPLANATION'));
-      expect(prompt(), contains('do not name a rule'));
-      // Перевод — про ЭТУ фразу: контекст там, где слово двусмысленно.
-      expect(prompt(), contains('but as they'));
-      expect(prompt(), contains('when the words alone would be ambiguous'));
+    test('перевод всегда, объяснение — только за грамматику', () {
+      // Что значат слова — игрок не знает, и это перевод. Почему его
+      // «many sleep» стало «sleeps a lot» — он тоже не знает, и одной фразы
+      // про правило тут мало не бывает. А на «сказал другими словами»
+      // объяснять нечего: правки там нет.
+      final s = prompt();
+      expect(s, contains('THIS IS A TRANSLATION with a brief explanation'));
+      expect(s, contains('an explanation is required'));
+      expect(s, contains('ONLY the translation'));
+      // Порядок задан: сначала перевод, потом объяснение. Иначе плашка
+      // читается как урок грамматики, а перевода в ней будто и нет.
+      expect(s, contains('The translation comes first, the explanation after it'));
+      // И придирка объяснением не прикрывается: «я бы сказал иначе» — не
+      // грамматическая ошибка.
+      expect(s, contains('Wording you would have preferred is NOT a grammatical error'));
     });
   });
 
@@ -177,12 +183,17 @@ void main() {
       expect(prompt(), contains('is ungrammatical, or is not a real word'));
     });
 
-    test('перевод несказанного — перевод, а не объяснение', () {
+    test('объяснение не становится поводом придраться', () {
       final s = prompt();
-      expect(s, contains('IS A TRANSLATION, NOT AN EXPLANATION'));
-      expect(s, contains('do not name a rule'));
-      // Контекст добавляется только там, где без него слово двусмысленно.
-      expect(s, contains('when the words alone would be ambiguous'));
+      // Объяснение положено ровно там, где была грамматическая правка, —
+      // и ни строчкой шире. Иначе модель начнёт находить грамматику там,
+      // где у игрока просто другие слова: это ровно та придирка, из-за
+      // которой списка ошибок здесь больше нет.
+      expect(s, contains('Wording you would have preferred is NOT a grammatical error'));
+      expect(s, contains('does not carry a visible'));
+      // Язык плашки по-прежнему назван дважды — и требованием, и
+      // самоназванием: «explain in Russian» однажды прочли как пожелание.
+      expect(s, contains(r'in ${v.native} (${v.nativeSelf}) and no other language'));
     });
 
     test('несказанное режется лентой, а не моделью', () {
