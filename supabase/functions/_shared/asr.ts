@@ -151,6 +151,10 @@ export async function transcribe(req: {
     });
   }
   if (url.length > 0) {
+    // Своя схема провайдера идёт ПЕРВОЙ: именно про неё он говорит,
+    // отказывая моделям в совместимом режиме, и именно там fun-asr-mtl
+    // дошёл до проверки ссылки вместо отказа в модели.
+    shapes.unshift({ name: "native-url", run: () => nativeTranscribe(model, url, left()) });
     shapes.push({
       name: "compat-url",
       run: () =>
@@ -167,7 +171,6 @@ export async function transcribe(req: {
           { audio: true, temperature: 0 },
         ),
     });
-    shapes.push({ name: "native-url", run: () => nativeTranscribe(model, url, left()) });
   }
 
   for (const shape of shapes) {
@@ -226,7 +229,14 @@ async function nativeTranscribe(
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${key}` },
       body: JSON.stringify({
         model,
-        input: { messages: [{ role: "user", content: [{ audio: audioUrl }] }] },
+        input: {
+          messages: [
+            // Пустая системная часть стоит в документированной форме вызова
+            // этих моделей. Смысла в ней нет, но форму лучше повторить.
+            { role: "system", content: [{ text: "" }] },
+            { role: "user", content: [{ audio: audioUrl }] },
+          ],
+        },
       }),
       signal: controller.signal,
     });

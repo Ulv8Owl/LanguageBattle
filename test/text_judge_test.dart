@@ -57,6 +57,33 @@ void main() {
     expect(prompt(), contains('export function judgeTextPrompt(v: JudgeTextVars): string {'));
   });
 
+  test('ссылка для распознавания кончается на .wav и не открывает лишнего', () {
+    // Провайдер определяет формат ПО РАСШИРЕНИЮ В ССЫЛКЕ: подписанная
+    // ссылка Supabase кончается на `.wav?token=…`, и одна модель отвечает
+    // «format is empty», другая — «url error, please check url!».
+    final link = read('supabase/functions/_shared/audioLink.ts');
+    expect(link, contains('/functions/v1/asr-audio/'));
+    expect(link, contains(r'${token}.${ext}'));
+    // Подписываем путь И СРОК вместе: подпись только пути дала бы вечную
+    // ссылку, подпись только срока — подстановку чужого файла.
+    expect(link, contains(r'const payload = `${storagePath}|${exp}`;'));
+
+    // ПУБЛИЧНЫМ БАКЕТ НЕ СТАНОВИТСЯ. Он решал бы ту же задачу одной
+    // строкой, но ценой того, что голос игрока читает кто угодно.
+    for (final f in Directory('supabase/migrations').listSync().whereType<File>()) {
+      final sql = f.readAsStringSync();
+      expect(sql.contains("'voice-recordings', true"), isFalse, reason: f.path);
+    }
+
+    // Функция отдаёт файл только по действующей подписи — и одинаково
+    // молчит на истёкший, подделанный и испорченный токен.
+    final fn = read('supabase/functions/asr-audio/index.ts');
+    expect(fn, contains('if (path === null) return new Response("not found", { status: 404 });'));
+    expect(fn.contains('list('), isFalse, reason: 'бакет не листается');
+    // Деплой без проверки JWT — обязателен: провайдеру взять токен неоткуда.
+    expect(read('tools/deploy_server.sh'), contains('deploy asr-audio --no-verify-jwt'));
+  });
+
   test('распознавание пробует три формы вызова, а не одну', () {
     // Провайдер обслуживает эти модели НЕ так, как мультимодальную, и как
     // именно — по документации было не угадать. Совместимый путь отвечал
@@ -73,8 +100,10 @@ void main() {
     // и расширение из неё вычитывается неверно.
     expect(s, contains('name: "compat-url"'));
     expect(s, contains('input_audio: { data: url, format: req.audioFormat }'));
-    // И своя схема провайдера — другой путь и другое тело.
-    expect(s, contains('name: "native-url"'));
+    // И своя схема провайдера — другой путь и другое тело. Она идёт ПЕРВОЙ:
+    // именно там fun-asr-mtl дошёл до проверки ссылки, а не до отказа в
+    // модели, — значит эти модели провайдер держит там.
+    expect(s, contains('shapes.unshift({ name: "native-url"'));
     expect(s, contains('/api/v1/services/aigc/multimodal-generation/generation'));
     // Какая форма прошла и что ответили остальные — в отладке записи.
     expect(s, contains('shape: shape.name'));

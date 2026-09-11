@@ -36,5 +36,10 @@ step "2/2 Деплою Edge Functions"
 npx supabase functions deploy evaluate-recording
 npx supabase functions deploy config-check
 npx supabase functions deploy synthesize-speech
+# asr-audio отдаёт запись провайдеру распознавания по ссылке, кончающейся на
+# .wav. --no-verify-jwt здесь ОБЯЗАТЕЛЕН: запрос приходит от провайдера, у
+# которого токена Supabase нет и быть не может. Без проверки JWT — не значит
+# без проверки: функция требует своей подписи на конкретный файл и срок.
+npx supabase functions deploy asr-audio --no-verify-jwt
 
 note "Сервер обновлён до $(git rev-parse --short HEAD)."

@@ -21,6 +21,7 @@
 
 import { createClient, type SupabaseClient } from "jsr:@supabase/supabase-js@2";
 import { type CefrLevel, NEUTRAL_SCORE, SILENT_SCORE } from "../_shared/cefr.ts";
+import { audioUrlFor } from "../_shared/audioLink.ts";
 import { correctText, type JudgeResult, scoreFor } from "../_shared/review.ts";
 import { textJudge } from "../_shared/textJudge.ts";
 
@@ -736,30 +737,23 @@ async function loadAudio(
 }
 
 /**
- * Подписанная ссылка на запись — её просит распознавание.
+ * Ссылка на запись для распознавания — кончается на .wav и без хвоста.
  *
- * Две формы вызова из трёх передают аудио ссылкой, а не вложением: свою
- * схему провайдера иначе не позвать вовсе (см. asr.ts). Бакет закрытый,
- * поэтому ссылка подписанная и живёт пятнадцать минут — дольше любого
- * разбора и много меньше срока жизни самой записи.
+ * Провайдер определяет формат по расширению в ссылке и больше ниоткуда, а
+ * подписанная ссылка Supabase кончается на `.wav?token=…` — её он не
+ * разбирает (см. _shared/audioLink.ts). Поэтому ссылка ведёт на функцию
+ * `asr-audio`, а токен лежит в пути.
  *
- * Не подписалась — не беда: остаётся вложение, с него лесенка и начинается.
+ * Не собралась — не беда: у лесенки остаётся форма с вложенным аудио.
  */
-async function audioLink(
-  supabase: SupabaseClient,
-  recording: VoiceRecordingRow,
-): Promise<string | null> {
+async function audioLink(recording: VoiceRecordingRow): Promise<string | null> {
   try {
-    const { data, error } = await supabase.storage
-      .from("voice-recordings")
-      .createSignedUrl(recording.audio_storage_path, 900);
-    if (error || !data?.signedUrl) {
-      console.error("evaluate-recording: не подписалась ссылка на запись", error);
-      return null;
-    }
-    return data.signedUrl;
+    const base = Deno.env.get("SUPABASE_URL");
+    const secret = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
+    if (!base || !secret) return null;
+    return await audioUrlFor(recording.audio_storage_path, base, secret);
   } catch (e) {
-    console.error("evaluate-recording: не подписалась ссылка на запись", e);
+    console.error("evaluate-recording: не собралась ссылка на запись", e);
     return null;
   }
 }
@@ -788,7 +782,7 @@ async function runJudge(
   }
 
   return await textJudge({
-    audioUrl: await audioLink(supabase, recording),
+    audioUrl: await audioLink(recording),
     audio,
     audioFormat: audioFormatOf(recording.audio_storage_path),
     nativeLanguage,
