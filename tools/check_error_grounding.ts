@@ -6,7 +6,7 @@
 // неверна. Здесь проверяется отсев таких правок на настоящем случае из игры.
 //
 // Запуск: deno run --allow-env tools/check_error_grounding.ts
-import { nativeText } from "../supabase/functions/_shared/asr.ts";
+import { asrFamily, chatText, nativeText } from "../supabase/functions/_shared/asr.ts";
 import {
   asErrors,
   attachMeanings,
@@ -267,6 +267,18 @@ check("довод про смысл остаётся доводом", nitpickRea
 // Форма ответа там вложенная и не одна: часть моделей кладёт текст списком
 // частей, часть — строкой, часть — прямо в output.text. Разборщик, молча
 // возвращающий null, неотличим от «модель ничего не сказала».
+// ВОТ ГДЕ ЛЕЖИТ РАСШИФРОВКА У СВОЕЙ СХЕМЫ ПРОВАЙДЕРА. Документация особо
+// оговаривает, что это НЕ output.choices — а смотрели мы именно туда.
+check(
+  "текст из output.output.sentence",
+  nativeText('{"output":{"output":{"sentence":{"text":"I get up at seven."}}}}'),
+  "I get up at seven.",
+);
+check(
+  "несколько фраз склеиваются",
+  nativeText('{"output":{"output":{"sentence":[{"text":"a"},{"text":"b"}]}}}'),
+  "a b",
+);
 check(
   "текст списком частей",
   nativeText('{"output":{"choices":[{"message":{"content":[{"text":"I get up at seven."}]}}]}}'),
@@ -281,6 +293,19 @@ check("текст прямо в output", nativeText('{"output":{"text":"прив
 check("две части склеиваются", nativeText('{"output":{"choices":[{"message":{"content":[{"text":"a"},{"text":"b"}]}}]}}'), "a b");
 check("не JSON — честный null", nativeText("<html>502</html>"), null);
 check("JSON без текста — честный null", nativeText('{"output":{"choices":[]}}'), null);
+check(
+  "совместимый ответ распознавателя",
+  chatText('{"choices":[{"message":{"content":"I get up at seven."}}]}'),
+  "I get up at seven.",
+);
+check("совместимый ответ без текста — честный null", chatText('{"choices":[]}'), null);
+
+// Семейство решает ВСЮ форму вызова: перепутанное семейство это не падение,
+// а отказ провайдера на живой записи — баг, который видит только игрок.
+check("омни зовётся как чат", asrFamily("qwen3-omni-flash"), "omni");
+check("qwen3-asr — совместимый режим", asrFamily("qwen3-asr-flash"), "compat-asr");
+check("qwen-audio-3.0 — своя схема", asrFamily("qwen-audio-3.0-asr-flash"), "native-asr");
+check("fun-asr-flash — своя схема", asrFamily("fun-asr-flash-2026-06-15"), "native-asr");
 
 console.log(failed === 0 ? "\nвсё сходится" : `\nрасхождений: ${failed}`);
 if (failed > 0) Deno.exit(1);

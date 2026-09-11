@@ -85,64 +85,104 @@ void main() {
   });
 
   test('первым шагом стоит модель, которая работает', () {
-    // Пять кругов проверок: тело запроса у нас побайтово такое же, как у
-    // вызова, который месяц работает с qwen3-omni-flash, — отличается ровно
-    // имя модели, и специальные модели распознавания всё равно отвечают
-    // отказом. Держать ветку сломанной ради экономии, которой пока нет,
-    // нельзя: она сначала должна работать.
+    // Специальные распознаватели теперь зовутся по документации, но
+    // проверены только на форме запроса. По умолчанию должна стоять та, что
+    // месяц работает на живых записях: ветка сначала работает, потом
+    // сравнивается.
     final s = asr();
     final list = s.substring(s.indexOf('export const ASR_MODELS'), s.indexOf('] as const;'));
     expect(list.indexOf('"qwen3-omni-flash"'), lessThan(list.indexOf('"qwen-audio-3.0-asr-flash"')),
         reason: 'рабочая модель должна стоять первой — она по умолчанию');
-    // Нерабочие из списка не убраны: вернуть экономию, когда станет
-    // известна форма вызова, должно быть делом одного переключателя.
-    expect(list, contains('"fun-asr-mtl"'));
-    // Мультимодальной лесенка не нужна — её форма известна и проверена.
-    expect(s, contains('const multimodal = model.includes("omni");'));
-    expect(s, contains('if (url.length > 0 && !multimodal) {'));
+    // Моделей, которым нужен отдельный асинхронный путь распознавания
+    // файлов, в списке быть не должно: звать их тем путём, которого у них
+    // нет, значит показывать игроку заведомо мёртвую кнопку.
+    for (final m in ['fun-asr-mtl', 'filetrans']) {
+      expect(list, isNot(contains(m)), reason: m);
+    }
     // Списки клиента и сервера обязаны совпадать: значение из профиля это
     // ввод снаружи, и проверяется оно там, где им пользуются.
     final dart = read('lib/data/judge_models.dart');
-    for (final m in ['qwen3-omni-flash', 'qwen3.5-omni-flash', 'fun-asr-mtl']) {
-      expect(dart, contains("'$m'"), reason: m);
+    final dartList = dart.substring(
+        dart.indexOf('const List<String> asrModels'), dart.indexOf('/// Текстовые модели-судьи'));
+    for (final m in ['qwen3-omni-flash', 'qwen3.5-omni-flash', 'qwen-audio-3.0-asr-flash',
+        'fun-asr-flash-2026-06-15', 'qwen3-asr-flash']) {
+      expect(dartList, contains("'$m'"), reason: m);
+    }
+    for (final m in ['fun-asr-mtl', 'filetrans']) {
+      expect(dartList, isNot(contains(m)), reason: m);
     }
   });
 
-  test('распознавание пробует три формы вызова, а не одну', () {
-    // Провайдер обслуживает эти модели НЕ так, как мультимодальную, и как
-    // именно — по документации было не угадать. Совместимый путь отвечал
-    // «format is empty» на всё подряд, а на fun-asr-mtl честно сказал:
-    // «Unsupported model for OpenAI compatibility mode». Значит у моделей
-    // распознавания своя схема, и пробовать надо обе.
+  test('у каждого семейства моделей своя документированная форма вызова', () {
+    // Раньше здесь была лесенка из трёх попыток подряд — чистое угадывание,
+    // провалившее пять кругов проверок. Документация провайдера отвечает
+    // прямо: форма зависит от семейства модели, и путать их нельзя.
     final s = asr();
-    // Форма, заведомо работающая с мультимодальной моделью: вложение плюс
-    // текстовая часть. Для неё она единственная и нужная.
+    expect(s, contains('export function asrFamily(model: string): AsrFamily'));
+    expect(s, contains('if (model.includes("omni")) return "omni";'));
+    expect(s, contains('if (model.startsWith("qwen3-asr")) return "compat-asr";'));
+
+    // Мультимодальная: вложение плюс текстовая часть, обычный чат. Форма
+    // известна и проверена месяцем игры.
     expect(s, contains('name: "compat-inline"'));
     expect(s, contains('audioPart(req.audio, req.audioFormat)'));
     expect(s, contains('{ type: "text", text: "Transcribe this recording." }'));
-    // Ссылкой — и обязательно с форматом: в подписанной ссылке есть токен,
-    // и расширение из неё вычитывается неверно.
-    expect(s, contains('name: "compat-url"'));
-    expect(s, contains('input_audio: { data: url, format: req.audioFormat }'));
-    // И своя схема провайдера — другой путь и другое тело. Она идёт ПЕРВОЙ:
-    // именно там fun-asr-mtl дошёл до проверки ссылки, а не до отказа в
-    // модели, — значит эти модели провайдер держит там.
-    expect(s, contains('shapes.unshift({ name: "native-url"'));
+
+    // Своя схема провайдера. ВОТ ЗДЕСЬ И ЖИЛ БАГ «format is empty»: формат и
+    // частоту читают из parameters — РЯДОМ с input, а не внутри input_audio,
+    // куда мы их клали пять кругов подряд.
     expect(s, contains('/api/v1/services/aigc/multimodal-generation/generation'));
+    expect(s, contains('parameters: { format, sample_rate: SAMPLE_RATE }'));
+    expect(s, contains('content: [{ type: "input_audio", input_audio: { data: audio } }]'));
+    expect(s, contains('"X-DashScope-SSE": "disable"'));
+    // Короткой формы {audio: …} здесь быть не должно: это схема другого
+    // семейства, и слали мы её не той модели.
+    expect(s, isNot(contains('{ audio: audioUrl }')));
+
+    // Совместимый режим распознавателя: ни format, ни текстовой части —
+    // вместо них asr_options. Определение языка включено: на нём держится
+    // проверка «сказал не на том языке».
+    expect(s, contains('asr_options: { enable_lid: true, enable_itn: false }'));
+
     // Какая форма прошла и что ответили остальные — в отладке записи.
     expect(s, contains('shape: shape.name'));
     expect(s, contains('attempts,'));
   });
 
-  test('лесенка останавливается на первой ответившей', () {
+  test('расшифровка читается оттуда, где её кладёт провайдер', () {
+    // Своя схема кладёт текст в output.output.sentence.text, и документация
+    // особо оговаривает, что это НЕ output.choices. Мы смотрели в choices.
     final s = asr();
-    // Неудача — не повод бросать: пробуем следующую форму.
+    final at = s.indexOf('export function nativeText');
+    expect(at, greaterThan(0));
+    final body = s.substring(at);
+    expect(body.indexOf('parsed?.output?.output?.sentence'),
+        lessThan(body.indexOf('parsed?.output?.choices')),
+        reason: 'сначала документированное место, потом запасные');
+  });
+
+  test('попытки не проедают бюджет раунда', () {
+    final s = asr();
+    // Неудача — не повод бросать: пробуем вторую документированную форму
+    // (ссылка и вложение — это одно и то же поле data).
     expect(s, contains('attempts.push({ shape: shape.name, ok: false'));
     expect(s, contains('continue;'));
     // Успех — возврат сразу, лишних вызовов не делаем.
     expect(s, contains('attempts.push({ shape: shape.name, ok: true'));
-    // И бюджет раунда лесенка не проедает: без запаса времени не начинаем.
+    // Без запаса времени не начинаем.
     expect(s, contains('if (left() < 5_000)'));
+  });
+
+  test('размышлять перед ответом судью не просим', () {
+    // Судье нужен короткий JSON, а не рассуждение: у части моделей Qwen3
+    // режим размышления включён по умолчанию и проедает бюджет раунда.
+    final s = omni();
+    expect(s, contains('export function supportsThinking'));
+    expect(s, contains('enable_thinking: false'));
+    // Но только тем, кто это поле знает: остальные отвечают на него
+    // отказом, и «на всякий случай» здесь ломает полсписка моделей.
+    expect(s, contains('!opts.audio && supportsThinking(model)'));
+    expect(s, contains('if (model.startsWith("qwen-mt")) return false;'));
   });
 
   test('вызова ровно два, и за аудио платит только первый', () {

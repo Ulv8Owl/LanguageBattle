@@ -13,33 +13,39 @@
  * на этом пути значит «ошибок не осталось в тексте», а не «игрок сказал
  * верно».
  *
- * ═══ ПОЧЕМУ ЗДЕСЬ ЛЕСЕНКА ИЗ ТРЁХ ПОПЫТОК ═══
+ * ═══ ПОЧЕМУ ЗДЕСЬ ТРИ СХЕМЫ ВЫЗОВА, А НЕ ОДНА ═══
  *
- * Потому что провайдер обслуживает эти модели НЕ ТАК, как мультимодальную, и
- * как именно — по документации было не угадать. Три круга проверок на живых
- * записях дали вот что:
+ * Потому что у провайдера их и правда три, и модели распознавания разложены
+ * по ним не по нашему вкусу. Раньше на этом месте стояла лесенка из трёх
+ * попыток подряд — она была ЧИСТЫМ УГАДЫВАНИЕМ и все пять кругов проверок
+ * провалила. Документация провайдера отвечает на это прямо, и вот ответ:
  *
- *   * `qwen-audio-3.0-asr-flash` через OpenAI-совместимый путь отвечает
- *     HTTP 400 «format is empty» — и вложенным аудио, и ссылкой, и с
- *     текстовой частью рядом, и без неё. Формат при этом передаётся и он
- *     заведомо непустой: приложение пишет только WAV;
- *   * `fun-asr-mtl` отвечает честнее: HTTP 404 «Unsupported model for
- *     OpenAI compatibility mode» — то есть через этот путь его нет вовсе.
+ *   * `format` и `sample_rate` у своей схемы провайдера лежат в
+ *     `parameters` — РЯДОМ с `input`, а не внутри `input_audio`. Мы клали
+ *     их внутрь, поэтому в ответ и приходило «format is empty»: поле
+ *     отправлялось, но не туда, где его читают. Это и есть причина бага,
+ *     одна на все пять кругов;
+ *   * содержимое сообщения у `qwen-audio-3.0-*` — `{"type":"input_audio",
+ *     "input_audio":{"data": …}}`, а короткая форма `{"audio": …}` это
+ *     схема другого семейства (`qwen3-asr-flash`). Мы слали короткую не той
+ *     модели;
+ *   * текст ответа своей схемы лежит в `output.output.sentence.text`, а НЕ
+ *     в `output.choices[].message.content`, куда мы смотрели;
+ *   * `fun-asr-mtl`, `fun-asr` и все `*-filetrans` в оба этих пути не
+ *     ходят вовсе: им нужен ОТДЕЛЬНЫЙ асинхронный путь распознавания файлов
+ *     (`/api/v1/services/audio/asr/transcription` с заголовком
+ *     `X-DashScope-Async: enable` и опросом задачи). Отсюда и честный
+ *     ответ «Unsupported model for OpenAI compatibility mode». Из списка
+ *     моделей они убраны: звать их тем путём, которого у них нет, значит
+ *     держать игроку сломанную кнопку.
  *
- * Второй ответ и объясняет первый: у DashScope есть СВОЙ, не
- * OpenAI-совместимый endpoint для мультимодальных генераций, и модели
- * распознавания живут там. Совместимый путь либо не знает их, либо знает
- * наполовину.
+ * Поэтому вместо лесенки — одна документированная схема на семейство. Две
+ * попытки внутри семейства остаются, но это не угадывание: `data` по
+ * документации принимает И ссылку, И вложенное base64, а ссылка дешевле —
+ * её и пробуем первой.
  *
- * Поэтому вместо четвёртого круга угадываний — три формы вызова подряд, до
- * первой, которая ответит текстом. Отказ приходит мгновенно и не стоит
- * ничего: за неудавшийся запрос провайдер денег не берёт, а получасовой
- * круг «собери — поставь — попробуй» стоит дорого.
- *
- * КАКАЯ ФОРМА СРАБОТАЛА, ВИДНО В ОТЛАДКЕ ЗАПИСИ (`asr.shape`), и все
- * неудавшиеся попытки лежат там же со своими ответами. Как только станет
- * известно, какая именно нужна, лесенку надо свернуть до неё одной —
- * лишние попытки это лишняя задержка на каждом раунде.
+ * КАКАЯ СХЕМА СРАБОТАЛА, ВИДНО В ОТЛАДКЕ ЗАПИСИ (`asr.shape`), и неудачные
+ * попытки лежат там же со своими ответами.
  */
 
 import { base64, judgeBaseUrl, judgeKey, requestQwen } from "./review.ts";
@@ -47,41 +53,27 @@ import { base64, judgeBaseUrl, judgeKey, requestQwen } from "./review.ts";
 /**
  * Модели для первого шага — превратить речь в текст.
  *
- * ПЕРВЫМИ СТОЯТ МУЛЬТИМОДАЛЬНЫЕ, И ЭТО НЕ ОПЕЧАТКА. Они не заточены под
- * распознавание и стоят дороже — зато они РАБОТАЮТ. Пять кругов проверок
- * на живых записях показали, что специальные модели распознавания у этого
- * провайдера через доступные нам схемы вызова не зовутся вовсе:
+ * ПЕРВОЙ СТОИТ МУЛЬТИМОДАЛЬНАЯ, И ЭТО НЕ ОПЕЧАТКА. Она не заточена под
+ * распознавание и стоит дороже — зато она РАБОТАЕТ на живых записях уже
+ * месяц. Специальные распознаватели ниже теперь зовутся по документации, а
+ * не по догадке, но проверены они пока только на форме запроса; по
+ * умолчанию ветка должна работать, а не проверяться.
  *
- *   * тело запроса у нас побайтово такое же, как у вызова, который месяц
- *     работает с `qwen3-omni-flash`, — отличается ровно поле `model`;
- *   * `qwen-audio-3.0-asr-flash` отвечает «format is empty» на все три
- *     формы: вложением, ссылкой и по своей схеме провайдера;
- *   * `fun-asr-mtl` в совместимом режиме отвечает «Unsupported model», а
- *     по своей схеме — «url error», то есть до аудио дело не доходит.
- *
- * Значит им нужно что-то, чего по ответам провайдера не восстановить, и
- * сидеть на этом дальше — это держать всю ветку сломанной ради экономии,
- * которой пока нет. Ветка сначала должна работать.
- *
- * ЧТО ЭТО МЕНЯЕТ В СРАВНЕНИИ ЦЕН, сказано честно: аудио-шаг теперь стоит
- * как у мультимодальной модели, и дешевизна двух шагов на этих моделях
- * пропадает. Остаётся сравнение КАЧЕСТВА: одна модель судит всё против
- * «мультимодальная расшифровывает, дешёвая текстовая судит». Как только
- * станет известна форма вызова специальных моделей — они уже в списке, и
- * вернуть экономию будет делом одного переключателя.
+ * ЧЕГО В СПИСКЕ НЕТ И ПОЧЕМУ. `fun-asr-mtl`, `fun-asr` и `*-filetrans`
+ * живут на отдельном асинхронном пути распознавания файлов — там задача
+ * ставится в очередь и опрашивается, это другой endpoint и другой сценарий.
+ * Пока мы туда не ходим, держать их в списке значит предлагать игроку
+ * кнопку, которая гарантированно ответит отказом.
  */
 export const ASR_MODELS = [
-  // Работают: та же форма вызова, что и на ветке Omni.
+  // Проверено на живых записях — та же форма вызова, что и на ветке Omni.
   "qwen3-omni-flash",
   "qwen3.5-omni-flash",
-  // Не отвечают ни на одну из трёх известных нам форм — оставлены, чтобы
-  // проверить их снова, когда станет известна нужная.
+  // Своя схема провайдера: параметры звука в `parameters`.
   "qwen-audio-3.0-asr-flash",
-  "qwen-audio-3.0-asr-flash-filetrans",
-  "fun-asr-mtl",
-  "qwen3-asr-flash",
-  "qwen3-asr-flash-filetrans",
   "fun-asr-flash-2026-06-15",
+  // OpenAI-совместимый режим, но со своими `asr_options` и БЕЗ `format`.
+  "qwen3-asr-flash",
 ] as const;
 
 export const DEFAULT_ASR_MODEL = ASR_MODELS[0];
@@ -93,6 +85,32 @@ export function asrModel(chosen?: string | null): string {
   const fromEnv = Deno.env.get("ASR_MODEL");
   if (fromEnv && (ASR_MODELS as readonly string[]).includes(fromEnv)) return fromEnv;
   return DEFAULT_ASR_MODEL;
+}
+
+/**
+ * Частота записи, которую провайдер ждёт числом рядом с форматом.
+ *
+ * Здесь она константой, а не вычисляется из файла, потому что приложение
+ * пишет ровно один формат: WAV PCM 16 бит, 16 кГц, моно
+ * (`lib/core/audio_format.dart`). Начнём писать иначе — чинить придётся оба
+ * места сразу, и пусть это будет заметно.
+ */
+const SAMPLE_RATE = "16000";
+
+/** К какому семейству относится модель — от этого зависит вся форма вызова. */
+export type AsrFamily = "omni" | "compat-asr" | "native-asr";
+
+/**
+ * Семейство модели по её имени.
+ *
+ * Открыто наружу ради проверки: перепутанное семейство это не падение, а
+ * отказ провайдера на живой записи — то есть баг, который виден только
+ * игроку.
+ */
+export function asrFamily(model: string): AsrFamily {
+  if (model.includes("omni")) return "omni";
+  if (model.startsWith("qwen3-asr")) return "compat-asr";
+  return "native-asr";
 }
 
 export interface AsrResult {
@@ -123,7 +141,7 @@ interface Attempt {
  * распознаватель услышал бы английский в чём угодно.
  */
 export async function transcribe(req: {
-  /** Подписанная ссылка на запись. Нужна двум формам вызова из трёх. */
+  /** Подписанная ссылка на запись. Ею зовём первой — она дешевле вложения. */
   audioUrl?: string | null;
   audio: Uint8Array;
   audioFormat: string;
@@ -132,6 +150,7 @@ export async function transcribe(req: {
 }): Promise<AsrResult> {
   const started = Date.now();
   const model = asrModel(req.model);
+  const family = asrFamily(model);
   const url = (req.audioUrl ?? "").trim();
   const attempts: Attempt[] = [];
   const left = () => req.budgetMs - (Date.now() - started);
@@ -139,6 +158,7 @@ export async function transcribe(req: {
   const debug = (extra: Record<string, unknown> = {}) => ({
     provider: "asr",
     model,
+    family,
     model_requested: (req.model ?? "").trim().length > 0 ? req.model : null,
     base_url: judgeBaseUrl(),
     audio_bytes: req.audio.byteLength,
@@ -157,50 +177,54 @@ export async function transcribe(req: {
     return { text: "", error: "запись пуста", debug: debug({ status: "failed" }) };
   }
 
-  // МУЛЬТИМОДАЛЬНОЙ МОДЕЛИ ЛЕСЕНКА НЕ НУЖНА: её форма вызова известна и
-  // проверена. Гонять на ней три попытки значило бы тратить время раунда на
-  // заведомо лишние отказы.
-  const multimodal = model.includes("omni");
+  // Вложение — это то же аудио, только внутри запроса. Считаем его один раз:
+  // base64 от полумегабайта не бесплатен, а нужен он в двух семействах.
+  const inline = () => `data:audio/${req.audioFormat};base64,${base64(req.audio)}`;
 
   const shapes: { name: string; run: () => Promise<{ raw: string } | { error: string }> }[] = [];
 
-  if (req.audio.byteLength > 0) {
-    shapes.push({
-      name: "compat-inline",
-      run: () =>
-        requestQwen(
-          "You are a speech transcriber. Write down exactly what is said and nothing else.",
-          [
-            audioPart(req.audio, req.audioFormat),
-            { type: "text", text: "Transcribe this recording." },
-          ],
-          left(),
-          model,
-          { audio: true, temperature: 0 },
-        ),
-    });
-  }
-  if (url.length > 0 && !multimodal) {
-    // Своя схема провайдера идёт ПЕРВОЙ: именно про неё он говорит,
-    // отказывая моделям в совместимом режиме, и именно там fun-asr-mtl
-    // дошёл до проверки ссылки вместо отказа в модели.
-    shapes.unshift({ name: "native-url", run: () => nativeTranscribe(model, url, left()) });
-    shapes.push({
-      name: "compat-url",
-      run: () =>
-        requestQwen(
-          "You are a speech transcriber. Write down exactly what is said and nothing else.",
-          [
-            // Формат передаём и здесь: ссылка на файл в хранилище несёт
-            // токен в запросе, и расширение из неё вычитывается неверно.
-            { type: "input_audio", input_audio: { data: url, format: req.audioFormat } },
-            { type: "text", text: "Transcribe this recording." },
-          ],
-          left(),
-          model,
-          { audio: true, temperature: 0 },
-        ),
-    });
+  if (family === "omni") {
+    // Форма известна и проверена месяцем игры: вложение плюс текстовая
+    // часть, обычный чат. Пробовать что-то ещё тут незачем.
+    if (req.audio.byteLength > 0) {
+      shapes.push({
+        name: "compat-inline",
+        run: () =>
+          requestQwen(
+            "You are a speech transcriber. Write down exactly what is said and nothing else.",
+            [
+              audioPart(req.audio, req.audioFormat),
+              { type: "text", text: "Transcribe this recording." },
+            ],
+            left(),
+            model,
+            { audio: true, temperature: 0 },
+          ),
+      });
+    }
+  } else if (family === "compat-asr") {
+    // Совместимый режим, но тело своё: ни `format`, ни системной части —
+    // вместо них `asr_options`. Лишние поля этот путь отвергает.
+    if (url.length > 0) {
+      shapes.push({ name: "compat-asr-url", run: () => compatAsr(model, url, left()) });
+    }
+    if (req.audio.byteLength > 0) {
+      shapes.push({ name: "compat-asr-inline", run: () => compatAsr(model, inline(), left()) });
+    }
+  } else {
+    // Своя схема провайдера: параметры звука — рядом с `input`.
+    if (url.length > 0) {
+      shapes.push({
+        name: "native-url",
+        run: () => nativeTranscribe(model, url, req.audioFormat, left()),
+      });
+    }
+    if (req.audio.byteLength > 0) {
+      shapes.push({
+        name: "native-inline",
+        run: () => nativeTranscribe(model, inline(), req.audioFormat, left()),
+      });
+    }
   }
 
   for (const shape of shapes) {
@@ -237,13 +261,18 @@ export async function transcribe(req: {
 /**
  * Своя схема DashScope, не OpenAI-совместимая.
  *
- * Живёт на том же хосте, но по другому пути, и тело у неё другое: аудио
- * ссылкой внутри `input.messages`, ответ — в `output.choices`. Именно про
- * этот путь провайдер и говорит, отказывая моделям в совместимом режиме.
+ * ЗДЕСЬ И ЖИЛ БАГ «format is empty». Формат и частоту провайдер читает из
+ * `parameters` — рядом с `input`, а не внутри `input_audio`, куда мы их
+ * клали пять кругов подряд. Поле отправлялось, ответ был честным: там, где
+ * его читают, оно действительно пустое.
+ *
+ * `data` принимает И ссылку, И вложение `data:audio/wav;base64,…` —
+ * поэтому параметр здесь называется `audio`, а не `audioUrl`.
  */
 async function nativeTranscribe(
   model: string,
-  audioUrl: string,
+  audio: string,
+  format: string,
   budgetMs: number,
 ): Promise<{ raw: string } | { error: string }> {
   const key = judgeKey();
@@ -256,17 +285,22 @@ async function nativeTranscribe(
   try {
     const res = await fetch(`${host}/api/v1/services/aigc/multimodal-generation/generation`, {
       method: "POST",
-      headers: { "Content-Type": "application/json", Authorization: `Bearer ${key}` },
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${key}`,
+        // Ответ целиком, а не потоком: разбирать поток тут нечего, а без
+        // заголовка часть моделей отвечает событиями.
+        "X-DashScope-SSE": "disable",
+      },
       body: JSON.stringify({
         model,
         input: {
           messages: [
-            // Пустая системная часть стоит в документированной форме вызова
-            // этих моделей. Смысла в ней нет, но форму лучше повторить.
-            { role: "system", content: [{ text: "" }] },
-            { role: "user", content: [{ audio: audioUrl }] },
+            { role: "user", content: [{ type: "input_audio", input_audio: { data: audio } }] },
           ],
         },
+        // Вот ровно то место, которого не хватало.
+        parameters: { format, sample_rate: SAMPLE_RATE },
       }),
       signal: controller.signal,
     });
@@ -284,7 +318,76 @@ async function nativeTranscribe(
 }
 
 /**
+ * Совместимый режим для `qwen3-asr-flash` — похож на чат, но не чат.
+ *
+ * Отличий от обычного вызова три, и каждое из них обязательное: в
+ * `input_audio` едет ТОЛЬКО `data` (поле `format` этот путь не знает),
+ * текстовой части рядом нет вовсе, а вместо системного сообщения —
+ * `asr_options`. Поэтому вызов свой, а не через requestQwen.
+ *
+ * `enable_lid` — определение языка самим распознавателем: на этом и держится
+ * проверка «сказал не на том языке». `enable_itn` выключен намеренно: он
+ * превращает числа в цифры («two» → «2»), а нам нужно то, что произнесено,
+ * иначе сравнение с нашим переводом развалится на ровном месте.
+ */
+async function compatAsr(
+  model: string,
+  audio: string,
+  budgetMs: number,
+): Promise<{ raw: string } | { error: string }> {
+  const key = judgeKey();
+  if (!key) return { error: "нет ключа модели" };
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), Math.max(5_000, budgetMs));
+  try {
+    const res = await fetch(`${judgeBaseUrl()}/chat/completions`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${key}` },
+      body: JSON.stringify({
+        model,
+        messages: [
+          { role: "user", content: [{ type: "input_audio", input_audio: { data: audio } }] },
+        ],
+        asr_options: { enable_lid: true, enable_itn: false },
+      }),
+      signal: controller.signal,
+    });
+    const body = await res.text();
+    if (!res.ok) return { error: `HTTP ${res.status}: ${body.slice(0, 400)}` };
+    const text = chatText(body);
+    if (text === null) return { error: `ответ без текста: ${body.slice(0, 300)}` };
+    return { raw: text };
+  } catch (e) {
+    if (e instanceof Error && e.name === "AbortError") return { error: "вызов не уложился в срок" };
+    return { error: `сбой вызова: ${e}` };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/** Текст из частей ответа: они бывают строкой, бывают списком кусков. */
+function partsText(content: unknown): string | null {
+  if (typeof content === "string") return content;
+  if (Array.isArray(content)) {
+    const parts = content
+      .map((item: unknown) =>
+        item && typeof item === "object" && typeof (item as { text?: unknown }).text === "string"
+          ? (item as { text: string }).text
+          : ""
+      )
+      .filter((t: string) => t.length > 0);
+    if (parts.length > 0) return parts.join(" ");
+  }
+  return null;
+}
+
+/**
  * Достаёт расшифровку из ответа своей схемы. Форма ответа там вложенная.
+ *
+ * ПОРЯДОК ПОИСКА НЕ СЛУЧАЕН. Первым идёт `output.output.sentence.text` —
+ * именно туда `qwen-audio-3.0-*` кладёт расшифровку, и документация особо
+ * оговаривает, что это НЕ `output.choices`. Остальные ветки оставлены для
+ * соседних моделей семейства: у них ответ приходит обычной чат-формой.
  *
  * Открыт наружу ради проверки: разборщик, который молча возвращает null,
  * выглядит точно так же, как «модель ничего не сказала», и отличить одно
@@ -293,18 +396,21 @@ async function nativeTranscribe(
 export function nativeText(body: string): string | null {
   try {
     const parsed = JSON.parse(body);
-    const content = parsed?.output?.choices?.[0]?.message?.content;
-    if (typeof content === "string") return content;
-    if (Array.isArray(content)) {
-      const parts = content
-        .map((item: unknown) =>
-          item && typeof item === "object" && typeof (item as { text?: unknown }).text === "string"
-            ? (item as { text: string }).text
+    const sentence = parsed?.output?.output?.sentence;
+    if (typeof sentence?.text === "string") return sentence.text;
+    // Несколько фраз подряд — склеиваем, порядок провайдер держит сам.
+    if (Array.isArray(sentence)) {
+      const said = sentence
+        .map((s: unknown) =>
+          s && typeof s === "object" && typeof (s as { text?: unknown }).text === "string"
+            ? (s as { text: string }).text
             : ""
         )
         .filter((t: string) => t.length > 0);
-      if (parts.length > 0) return parts.join(" ");
+      if (said.length > 0) return said.join(" ");
     }
+    const choice = partsText(parsed?.output?.choices?.[0]?.message?.content);
+    if (choice !== null) return choice;
     // Некоторые ответы кладут текст прямо в output.text.
     if (typeof parsed?.output?.text === "string") return parsed.output.text;
     return null;
@@ -313,7 +419,22 @@ export function nativeText(body: string): string | null {
   }
 }
 
-/** Аудио раунда в том виде, в каком его принимает провайдер. */
+/**
+ * Достаёт текст из обычного (не потокового) ответа совместимого режима.
+ *
+ * Открыт наружу по той же причине, что и nativeText: пустой разбор и
+ * молчание модели снаружи неотличимы.
+ */
+export function chatText(body: string): string | null {
+  try {
+    const parsed = JSON.parse(body);
+    return partsText(parsed?.choices?.[0]?.message?.content);
+  } catch {
+    return null;
+  }
+}
+
+/** Аудио раунда в том виде, в каком его принимает мультимодальная модель. */
 function audioPart(audio: Uint8Array, format: string): unknown {
   return {
     type: "input_audio",
