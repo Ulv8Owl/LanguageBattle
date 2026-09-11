@@ -6,6 +6,7 @@
 // неверна. Здесь проверяется отсев таких правок на настоящем случае из игры.
 //
 // Запуск: deno run --allow-env tools/check_error_grounding.ts
+import { nativeText } from "../supabase/functions/_shared/asr.ts";
 import {
   asErrors,
   attachMeanings,
@@ -260,6 +261,26 @@ check("довод про смысл остаётся доводом", nitpickRea
   );
   check("пустой список ничего не ломает", attachMeanings(ribbonSpans, null).length, 10);
 }
+
+// ═══ РАЗБОР ОТВЕТА СВОЕЙ СХЕМЫ ПРОВАЙДЕРА ═══
+//
+// Форма ответа там вложенная и не одна: часть моделей кладёт текст списком
+// частей, часть — строкой, часть — прямо в output.text. Разборщик, молча
+// возвращающий null, неотличим от «модель ничего не сказала».
+check(
+  "текст списком частей",
+  nativeText('{"output":{"choices":[{"message":{"content":[{"text":"I get up at seven."}]}}]}}'),
+  "I get up at seven.",
+);
+check(
+  "текст строкой",
+  nativeText('{"output":{"choices":[{"message":{"content":"I get up at seven."}}]}}'),
+  "I get up at seven.",
+);
+check("текст прямо в output", nativeText('{"output":{"text":"привет"}}'), "привет");
+check("две части склеиваются", nativeText('{"output":{"choices":[{"message":{"content":[{"text":"a"},{"text":"b"}]}}]}}'), "a b");
+check("не JSON — честный null", nativeText("<html>502</html>"), null);
+check("JSON без текста — честный null", nativeText('{"output":{"choices":[]}}'), null);
 
 console.log(failed === 0 ? "\nвсё сходится" : `\nрасхождений: ${failed}`);
 if (failed > 0) Deno.exit(1);

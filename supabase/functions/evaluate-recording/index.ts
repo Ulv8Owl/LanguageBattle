@@ -735,6 +735,35 @@ async function loadAudio(
   return new Uint8Array(await file.arrayBuffer());
 }
 
+/**
+ * Подписанная ссылка на запись — её просит распознавание.
+ *
+ * Две формы вызова из трёх передают аудио ссылкой, а не вложением: свою
+ * схему провайдера иначе не позвать вовсе (см. asr.ts). Бакет закрытый,
+ * поэтому ссылка подписанная и живёт пятнадцать минут — дольше любого
+ * разбора и много меньше срока жизни самой записи.
+ *
+ * Не подписалась — не беда: остаётся вложение, с него лесенка и начинается.
+ */
+async function audioLink(
+  supabase: SupabaseClient,
+  recording: VoiceRecordingRow,
+): Promise<string | null> {
+  try {
+    const { data, error } = await supabase.storage
+      .from("voice-recordings")
+      .createSignedUrl(recording.audio_storage_path, 900);
+    if (error || !data?.signedUrl) {
+      console.error("evaluate-recording: не подписалась ссылка на запись", error);
+      return null;
+    }
+    return data.signedUrl;
+  } catch (e) {
+    console.error("evaluate-recording: не подписалась ссылка на запись", e);
+    return null;
+  }
+}
+
 async function runJudge(
   supabase: SupabaseClient,
   recording: VoiceRecordingRow,
@@ -759,6 +788,7 @@ async function runJudge(
   }
 
   return await textJudge({
+    audioUrl: await audioLink(supabase, recording),
     audio,
     audioFormat: audioFormatOf(recording.audio_storage_path),
     nativeLanguage,

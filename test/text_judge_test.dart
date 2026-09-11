@@ -57,20 +57,39 @@ void main() {
     expect(prompt(), contains('export function judgeTextPrompt(v: JudgeTextVars): string {'));
   });
 
-  test('к аудио всегда едет текстовая часть — иначе провайдер отказывает', () {
-    // HTTP 400 «format is empty» приходит на сообщение, где лежит ОДНО
-    // аудио и больше ничего, — при заведомо непустом формате. Проверено
-    // трижды: вложением, ссылкой, и на соседней ветке, где рабочий вызов
-    // сломался ровно в день, когда из него убрали текст.
+  test('распознавание пробует три формы вызова, а не одну', () {
+    // Провайдер обслуживает эти модели НЕ так, как мультимодальную, и как
+    // именно — по документации было не угадать. Совместимый путь отвечал
+    // «format is empty» на всё подряд, а на fun-asr-mtl честно сказал:
+    // «Unsupported model for OpenAI compatibility mode». Значит у моделей
+    // распознавания своя схема, и пробовать надо обе.
     final s = asr();
+    // Форма, заведомо работающая с мультимодальной моделью: вложение плюс
+    // текстовая часть. С неё лесенка и начинается.
+    expect(s, contains('name: "compat-inline"'));
     expect(s, contains('audioPart(req.audio, req.audioFormat)'));
-    expect(s, contains("{ type: \"text\", text: \"Transcribe this recording.\" }"));
-    // И системная часть непустая: у работающего вызова она есть.
-    expect(s, contains('You are a speech transcriber'));
-    // Формат передаётся явно — на него провайдер и ссылается в отказе.
-    expect(s, contains('format,'));
-    // Правило записано рядом с кодом, чтобы его не «упростили» обратно.
-    expect(s, contains('НЕ УПРОЩАТЬ'));
+    expect(s, contains('{ type: "text", text: "Transcribe this recording." }'));
+    // Ссылкой — и обязательно с форматом: в подписанной ссылке есть токен,
+    // и расширение из неё вычитывается неверно.
+    expect(s, contains('name: "compat-url"'));
+    expect(s, contains('input_audio: { data: url, format: req.audioFormat }'));
+    // И своя схема провайдера — другой путь и другое тело.
+    expect(s, contains('name: "native-url"'));
+    expect(s, contains('/api/v1/services/aigc/multimodal-generation/generation'));
+    // Какая форма прошла и что ответили остальные — в отладке записи.
+    expect(s, contains('shape: shape.name'));
+    expect(s, contains('attempts,'));
+  });
+
+  test('лесенка останавливается на первой ответившей', () {
+    final s = asr();
+    // Неудача — не повод бросать: пробуем следующую форму.
+    expect(s, contains('attempts.push({ shape: shape.name, ok: false'));
+    expect(s, contains('continue;'));
+    // Успех — возврат сразу, лишних вызовов не делаем.
+    expect(s, contains('attempts.push({ shape: shape.name, ok: true'));
+    // И бюджет раунда лесенка не проедает: без запаса времени не начинаем.
+    expect(s, contains('if (left() < 5_000)'));
   });
 
   test('вызова ровно два, и за аудио платит только первый', () {

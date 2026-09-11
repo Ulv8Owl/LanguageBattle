@@ -89,6 +89,11 @@ export function llmModel(chosen?: string | null): string {
 }
 
 export interface TextJudgeRequest {
+  /**
+   * Подписанная ссылка на запись — нужна двум формам вызова распознавания
+   * из трёх (см. лесенку в asr.ts). Пусто — остаётся только вложение.
+   */
+  audioUrl?: string | null;
   audio: Uint8Array;
   /** Контейнер записи: wav, mp3, m4a — как есть у нас в хранилище. */
   audioFormat: string;
@@ -134,6 +139,7 @@ export async function textJudge(req: TextJudgeRequest): Promise<JudgeResult> {
 
   // --- Шаг первый: речь в текст --------------------------------------------
   const asr = await transcribe({
+    audioUrl: req.audioUrl,
     audio: req.audio,
     audioFormat: req.audioFormat,
     model: req.asrModelChoice,
