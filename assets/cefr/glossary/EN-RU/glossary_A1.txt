@@ -1,0 +1,60 @@
+1.1 «I get up» — I=я; get=встаю; up=встаю
+1.2 «at seven» — at=в; seven=семь
+1.3 «every morning» — every=каждое; morning=утро
+1.4 «Then I make» — Then=потом; I=я; make=делаю
+1.5 «coffee» — coffee=кофе
+1.6 «and read the news» — and=и; read=читаю; the=нет артикля; news=новости
+2.1 «My office» — My=мой; office=офис
+2.2 «is near» — is=находится; near=рядом с
+2.3 «the train station» — the=нет артикля; train=вокзал; station=вокзал
+2.4 «I walk» — I=я; walk=иду пешком
+2.5 «there» — there=туда
+2.6 «in ten minutes» — in=за; ten=десять; minutes=минут
+3.1 «I don't like» — I=я; don't=не; like=люблю
+3.2 «cold weather» — cold=холодную; weather=погоду
+3.3 «so I stay at home» — so=поэтому; I=я; stay=сижу; at=дома; home=дома
+3.4 «Today» — Today=сегодня
+3.5 «it is» — it=на улице; is=на улице
+3.6 «very windy» — very=сильный; windy=ветер
+4.1 «My brother» — My=мой; brother=брат
+4.2 «works» — works=работает
+4.3 «in a big hotel» — in=в; a=нет артикля; big=большом; hotel=отеле
+4.4 «He starts» — He=он; starts=начинает
+4.5 «work» — work=работу
+4.6 «at six» — at=в; six=шесть
+5.1 «We have» — We=у нас; have=есть
+5.2 «a small dog» — a=нет артикля; small=маленькая; dog=собака
+5.3 «and he sleeps a lot» — and=и; he=она; sleeps=спит; a=много; lot=много
+5.4 «In the evening» — In=вечером; the=нет артикля; evening=вечером
+5.5 «we walk» — we=мы; walk=гуляем
+5.6 «in the park» — in=в; the=нет артикля; park=парке
+6.1 «I am» — I=я; am=нет связки
+6.2 «a student» — a=нет артикля; student=студент
+6.3 «and I study Spanish» — and=и; I=я; study=учу; Spanish=испанский
+6.4 «My class» — My=мои; class=занятия
+6.5 «is» — is=проходят
+6.6 «on Monday and Thursday» — on=в; Monday=понедельник; and=и; Thursday=четверг
+7.1 «This shop» — This=этот; shop=магазин
+7.2 «is open» — is=нет связки; open=открыт
+7.3 «every day» — every=каждый; day=день
+7.4 «I buy» — I=я; buy=покупаю
+7.5 «bread and milk» — bread=хлеб; and=и; milk=молоко
+7.6 «here» — here=здесь
+8.1 «My phone» — My=мой; phone=телефон
+8.2 «is very old» — is=нет связки; very=очень; old=старый
+8.3 «so it is slow» — so=поэтому; it=он; is=нет связки; slow=медленный
+8.4 «I want» — I=я; want=хочу
+8.5 «a new one» — a=нет артикля; new=новый; one=заменяет уже названное слово
+8.6 «next year» — next=следующем; year=году
+9.1 «On Saturday» — On=в; Saturday=субботу
+9.2 «I clean» — I=я; clean=убираю
+9.3 «my room» — my=свою; room=комнату
+9.4 «After that» — After=после; that=этого
+9.5 «I cook» — I=я; cook=готовлю
+9.6 «lunch for my family» — lunch=обед; for=для; my=моей; family=семьи
+10.1 «I don't drink» — I=я; don't=не; drink=пью
+10.2 «coffee» — coffee=кофе
+10.3 «in the evening» — in=вечером; the=нет артикля; evening=вечером
+10.4 «It is bad» — It=это; is=нет связки; bad=вредно
+10.5 «for my sleep» — for=для; my=моего; sleep=сна
+10.6 «so I drink tea» — so=поэтому; I=я; drink=пью; tea=чай

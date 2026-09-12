@@ -47,6 +47,43 @@ python3 tools/cefr_explanations.py skeleton A1 en          # blank template
 python3 tools/cefr_explanations.py fill A1 ru en < bodies  # "1.1 <text>" lines
 ```
 
+## Word-level glossary (Тренировка)
+
+```
+glossary/<NATIVE>-<TARGET>/glossary_<LEVEL>.txt
+```
+
+Same line shape as the explanations, so there is only one format to learn:
+
+```
+<phrase>.<element> «<element text in the NATIVE language>» — слово=перевод; слово=перевод
+```
+
+The guillemets hold the same kind of anchor, checked character by
+character; the words left of `=` are checked too — their sequence has to
+match the element's words exactly, or a translation would silently land on
+the neighbouring word. Build and check with:
+
+```
+python3 tools/build_glossary.py --check
+python3 tools/build_glossary.py
+```
+
+**Why a word needs its own translation when elements already align.** An
+element is a piece of meaning; in Тренировка the learner marks the words he
+does NOT know, and «семь» can be unknown while «в» is not.
+
+**Words that have no separate counterpart** (articles, a preposition the
+other language does not use, a copula) still get a translation: the
+smallest phrase that carries them, or a short note in the target language
+(`the=нет артикля`, `las=no article`). A word whose card is empty is worse
+than a word whose card explains why it is empty.
+
+**A missing level is not a bug.** Without a glossary file each word of an
+element gets the translation of the WHOLE element — coarser, but Тренировка
+works on all six levels from day one (see `PhraseGlossary` in
+lib/data/phrase_glossary.dart).
+
 ## Structure
 
 | Level | Sentences per phrase | Elements per phrase |

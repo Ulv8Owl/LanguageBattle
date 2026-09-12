@@ -1,0 +1,60 @@
+1.1 «Me levanto» — Me=I; levanto=get up
+1.2 «a las siete» — a=at; las=no article; siete=seven
+1.3 «todas las mañanas» — todas=every; las=no article; mañanas=morning
+1.4 «Luego preparo» — Luego=then; preparo=make
+1.5 «café» — café=coffee
+1.6 «y leo las noticias» — y=and; leo=read; las=the; noticias=news
+2.1 «Mi oficina» — Mi=my; oficina=office
+2.2 «está cerca» — está=is; cerca=near
+2.3 «de la estación de tren» — de=near; la=the; estación=station; de=of; tren=train
+2.4 «Voy» — Voy=I walk
+2.5 «allí» — allí=there
+2.6 «a pie en diez minutos» — a=on; pie=foot; en=in; diez=ten; minutos=minutes
+3.1 «No me gusta» — No=don't; me=I; gusta=like
+3.2 «el frío» — el=no article; frío=cold weather
+3.3 «así que me quedo en casa» — así=so; que=so; me=I; quedo=stay; en=at; casa=home
+3.4 «Hoy» — Hoy=today
+3.5 «hace» — hace=it is
+3.6 «mucho viento» — mucho=very; viento=windy
+4.1 «Mi hermano» — Mi=my; hermano=brother
+4.2 «trabaja» — trabaja=works
+4.3 «en un hotel grande» — en=in; un=a; hotel=hotel; grande=big
+4.4 «Empieza» — Empieza=starts
+4.5 «a trabajar» — a=no preposition; trabajar=work
+4.6 «a las seis» — a=at; las=no article; seis=six
+5.1 «Tenemos» — Tenemos=we have
+5.2 «un perro pequeño» — un=a; perro=dog; pequeño=small
+5.3 «y duerme mucho» — y=and; duerme=sleeps; mucho=a lot
+5.4 «Por la tarde» — Por=in; la=the; tarde=evening
+5.5 «paseamos» — paseamos=we walk
+5.6 «por el parque» — por=in; el=the; parque=park
+6.1 «Soy» — Soy=I am
+6.2 «estudiante» — estudiante=a student
+6.3 «y estudio español» — y=and; estudio=I study; español=Spanish
+6.4 «Mi clase» — Mi=my; clase=class
+6.5 «es» — es=is
+6.6 «los lunes y los jueves» — los=on; lunes=Monday; y=and; los=on; jueves=Thursday
+7.1 «Esta tienda» — Esta=this; tienda=shop
+7.2 «está abierta» — está=is; abierta=open
+7.3 «todos los días» — todos=every; los=no article; días=day
+7.4 «Compro» — Compro=I buy
+7.5 «pan y leche» — pan=bread; y=and; leche=milk
+7.6 «aquí» — aquí=here
+8.1 «Mi teléfono» — Mi=my; teléfono=phone
+8.2 «es muy viejo» — es=is; muy=very; viejo=old
+8.3 «así que va lento» — así=so; que=so; va=is; lento=slow
+8.4 «Quiero» — Quiero=I want
+8.5 «uno nuevo» — uno=one; nuevo=new
+8.6 «el año que viene» — el=no article; año=year; que=next; viene=next
+9.1 «Los sábados» — Los=on; sábados=Saturday
+9.2 «limpio» — limpio=I clean
+9.3 «mi habitación» — mi=my; habitación=room
+9.4 «Después» — Después=after that
+9.5 «cocino» — cocino=I cook
+9.6 «la comida para mi familia» — la=no article; comida=lunch; para=for; mi=my; familia=family
+10.1 «No bebo» — No=don't; bebo=I drink
+10.2 «café» — café=coffee
+10.3 «por la noche» — por=in; la=the; noche=evening
+10.4 «Es malo» — Es=it is; malo=bad
+10.5 «para mi sueño» — para=for; mi=my; sueño=sleep
+10.6 «así que bebo té» — así=so; que=so; bebo=I drink; té=tea

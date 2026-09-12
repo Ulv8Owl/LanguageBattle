@@ -13,6 +13,7 @@ import '../../core/theme.dart';
 import '../../data/avatar_parts.dart';
 import '../../data/phrase_bank.dart';
 import '../../widgets/interactive_phrase.dart';
+import '../../data/achievements.dart';
 import '../../data/player_rating.dart';
 import '../../data/voice_submission.dart';
 import '../../widgets/chrolingo_widgets.dart';
@@ -22,10 +23,14 @@ import '../../widgets/voice_message_bubble.dart';
 import '../../widgets/voice_recorder_dock.dart';
 import '../subscription/paywall_screen.dart';
 
-/// Сколько раундов в одной сессии Одиночной Игры. Спека не фиксирует это
-/// число (раздел 2.2 описывает только механику раунда) — берём 5 раундов
-/// на одну единицу энергии.
-const _roundsPerSession = 5;
+/// РАУНДОВ В ОДИНОЧНОЙ ИГРЕ БОЛЬШЕ НЕ СЧИТАННОЕ ЧИСЛО. Их было пять, и
+/// пятый обрывал игру ровно тогда, когда она начинала получаться: сессия
+/// заканчивалась не потому, что игрок наигрался, а потому, что счётчик
+/// дошёл до конца. Теперь раунды идут, пока игрок сам не остановится, —
+/// ограничивает их только энергия, которая тратится на разбор ответа.
+///
+/// null здесь и значит «без предела»; у проверки уровня предел свой.
+const int? _roundsPerSession = null;
 
 /// Сколько раундов в проверке уровня при регистрации. Один: проверка стоит
 /// на пути в игру, и пять раундов до первого самостоятельного шага — это
@@ -103,9 +108,31 @@ class TrainingScreen extends StatefulWidget {
   /// null — обычная Одиночная Игра.
   final String? placementLevel;
 
-  const TrainingScreen({super.key, this.placementLevel});
+  /// Сквозной индекс фразы, если экран открыт ПОСЛЕДНИМ ШАГОМ ТРЕНИРОВКИ.
+  ///
+  /// Тренировка заканчивается тем, что игрок произносит ту самую фразу,
+  /// слова которой только что учил. Раунд при этом ничем не отличается от
+  /// раунда Одиночной Игры — значит и экран должен быть тот же: вторая
+  /// копия записи, отправки и ожидания разбора разошлась бы с этой на
+  /// первой же правке. Отличий ровно два: фраза задана снаружи и раунд
+  /// один.
+  final int? fixedPhraseIndex;
+
+  /// Заголовок экрана. Нужен той же Тренировке: раунд тот же, но игрок
+  /// пришёл в него не из Одиночной Игры и должен видеть, где он.
+  final String? title;
+
+  const TrainingScreen({
+    super.key,
+    this.placementLevel,
+    this.fixedPhraseIndex,
+    this.title,
+  });
 
   bool get isPlacement => placementLevel != null;
+
+  /// Раунд один: и на проверке уровня, и на последнем шаге Тренировки.
+  bool get isSingleRound => placementLevel != null || fixedPhraseIndex != null;
 
   @override
   State<TrainingScreen> createState() => _TrainingScreenState();
@@ -182,10 +209,16 @@ class _TrainingScreenState extends State<TrainingScreen> {
   /// История пройденных раундов сессии — рисуется той же лентой.
   final List<_CompletedRound> _history = [];
 
-  /// Сколько раундов в этой конкретной сессии: проверка уровня короче
-  /// обычной Одиночной Игры.
-  int get _totalRounds =>
-      widget.isPlacement ? _roundsPerPlacement : _roundsPerSession;
+  /// Сколько раундов в этой конкретной сессии. null — сколько угодно:
+  /// предел есть только там, где раунд ровно один.
+  int? get _totalRounds =>
+      widget.isSingleRound ? _roundsPerPlacement : _roundsPerSession;
+
+  /// Дошли ли до последнего раунда сессии. Без предела — никогда.
+  bool get _atLastRound {
+    final total = _totalRounds;
+    return total != null && _roundNumber >= total;
+  }
 
   /// Сдан ли экзамен по уже выставленному баллу.
   ///
@@ -277,9 +310,13 @@ class _TrainingScreenState extends State<TrainingScreen> {
         });
         return;
       }
-      _phraseOrder = [
-        for (var i = 0; i < PhraseBank.perLevel; i++) level * PhraseBank.perLevel + i,
-      ]..shuffle();
+      // Фраза задана снаружи (последний шаг Тренировки) — берём ровно её:
+      // игрок только что выучил её слова, и говорить он должен именно её.
+      _phraseOrder = widget.fixedPhraseIndex != null
+          ? [widget.fixedPhraseIndex!]
+          : ([
+              for (var i = 0; i < PhraseBank.perLevel; i++) level * PhraseBank.perLevel + i,
+            ]..shuffle());
 
       // start_training_session проверяет подписку и списывает энергию на
       // сервере — клиент не решает ни то, ни другое. На проверке уровня
@@ -720,6 +757,22 @@ class _TrainingScreenState extends State<TrainingScreen> {
   /// Доля считается по среднему баллу судьи (1..10 за раунд): 6 из 10 —
   /// это и есть 60% правильного, и отдельной метрики «правильно/неправильно»
   /// в пайплайне нет.
+  /// Сообщает серверу серию и показывает новые ступени.
+  ///
+  /// Не ждём ответа: достижение — украшение поверх игры, и задерживать
+  /// из-за него переход к следующему раунду нечем оправдать.
+  void _awardStreak(int rounds) {
+    awardUnstoppable(rounds).then((tiers) {
+      if (!mounted || tiers.isEmpty) return;
+      final kind = AchievementKind.unstoppable;
+      for (final tier in tiers) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text('Новое достижение: ${kind.title} — ${kind.describe(tier).toLowerCase()}'),
+        ));
+      }
+    });
+  }
+
   void _finishSession() {
     if (widget.isPlacement) {
       final ratio = _history.isEmpty
@@ -737,6 +790,12 @@ class _TrainingScreenState extends State<TrainingScreen> {
   }
 
   Future<void> _next() async {
+    // ДОСТИЖЕНИЕ ЗА СЕРИЮ — здесь, а не в конце сессии: игрок должен
+    // узнать о нём в тот момент, когда его заработал, а не когда решил
+    // выйти. Раунды одной сессии идут подряд по определению, поэтому
+    // серия — это и есть номер раунда.
+    if (!widget.isSingleRound) _awardStreak(_roundNumber);
+
     _history.add(_CompletedRound(
       roundNumber: _roundNumber,
       phrase: _phrase,
@@ -746,7 +805,7 @@ class _TrainingScreenState extends State<TrainingScreen> {
       attempt: _attempt,
       audio: _attemptAudio,
     ));
-    if (_roundNumber >= _totalRounds) {
+    if (_atLastRound) {
       setState(() => _stage = _Stage.sessionDone);
       return;
     }
@@ -769,16 +828,17 @@ class _TrainingScreenState extends State<TrainingScreen> {
       appBar: AppBar(
         // Версия сборки живёт в Настройках, а не в шапке игрового экрана:
         // во время раунда она только мешает.
-        title: Text(widget.isPlacement
-            ? AppLocale.strings.levelCheckTitle
-            : 'Одиночная Игра'),
+        title: Text(widget.title ??
+            (widget.isPlacement ? AppLocale.strings.levelCheckTitle : 'Одиночная Игра')),
         actions: [
           if (_stage != _Stage.starting && _stage != _Stage.failed)
             Padding(
               padding: const EdgeInsets.only(right: 14),
               child: Center(
                 child: Text(
-                  '$_roundNumber / $_totalRounds',
+                  // Без предела показываем НОМЕР раунда, а не «N из M»:
+                  // знаменателя нет, и «5 / ∞» читалось бы как поломка.
+                  _totalRounds == null ? 'Раунд $_roundNumber' : '$_roundNumber / $_totalRounds',
                   style: AppFonts.mono(fontSize: 11, weight: FontWeight.w700, color: AppColors.gold),
                 ),
               ),
@@ -883,12 +943,28 @@ class _TrainingScreenState extends State<TrainingScreen> {
           else if (_stage == _Stage.roundDone)
             Padding(
               padding: const EdgeInsets.all(16),
-              child: SizedBox(
-                width: double.infinity,
-                child: ElevatedButton(
-                  onPressed: _next,
-                  child: Text(_roundNumber >= _totalRounds ? 'Итоги' : 'Следующий раунд'),
-                ),
+              child: Row(
+                children: [
+                  // ВЫЙТИ НАДО ЧЕМ-ТО. Раньше сессия кончалась сама на
+                  // пятом раунде; теперь предела нет, и «Завершить» —
+                  // единственный способ дойти до итогов по своей воле.
+                  if (!widget.isSingleRound && !_atLastRound) ...[
+                    Expanded(
+                      child: OutlinedButton(
+                        onPressed: () => setState(() => _stage = _Stage.sessionDone),
+                        child: const Text('Завершить'),
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                  ],
+                  Expanded(
+                    flex: 2,
+                    child: ElevatedButton(
+                      onPressed: _next,
+                      child: Text(_atLastRound ? 'Итоги' : 'Следующий раунд'),
+                    ),
+                  ),
+                ],
               ),
             ),
         ],
@@ -1108,7 +1184,9 @@ class _CompletedRound {
 
 class _AiSay extends StatelessWidget {
   final int roundNumber;
-  final int total;
+
+  /// Сколько раундов всего. null — предела нет, и знаменатель не пишем.
+  final int? total;
 
   /// Задание целиком — запасной вариант, когда элементов нет (фраза
   /// старого формата или уже сыгранный раунд в ленте).
@@ -1165,7 +1243,8 @@ class _AiSay extends StatelessWidget {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text('Раунд $roundNumber из $total', style: AppFonts.mono(fontSize: 9, color: AppColors.muted)),
+                  Text(total == null ? 'Раунд $roundNumber' : 'Раунд $roundNumber из $total',
+                      style: AppFonts.mono(fontSize: 9, color: AppColors.muted)),
                   const SizedBox(height: 5),
                   Text(
                     translateToLabel(targetLanguage),

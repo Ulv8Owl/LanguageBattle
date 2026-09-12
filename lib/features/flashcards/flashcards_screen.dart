@@ -1,31 +1,35 @@
-import 'dart:math';
-
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
-import '../../core/nav_state.dart';
 import '../../core/supabase_client.dart';
 import '../../core/theme.dart';
-import '../../core/word_packs.dart';
-import '../../data/flashcard_bank.dart';
+import '../../data/phrase_bank.dart';
+import '../../data/phrase_glossary.dart';
 import '../../data/player_rating.dart';
+import '../../data/remote_content.dart';
 import '../../data/training_session.dart';
+import '../../widgets/ai_avatar.dart';
 import '../../widgets/chrolingo_widgets.dart';
+import '../../widgets/speak_button.dart';
 
-/// «Тренировка» — карточки со словами на языковой паре из профиля.
-/// Единственный режим, который НЕ тратит энергию и не требует подписки: он
-/// не проходит через LLM/ASR пайплайн вообще, это чистая клиентская
-/// механика без AI-оценки, поэтому её незачем закрывать вместе с
-/// Одиночной Игрой/Состязанием/Дуэлью.
+/// «Тренировка» — три шага вокруг ОДНОЙ фразы.
 ///
-/// Слово показывается на изучаемом языке, переворот карточки открывает
-/// перевод на родном. "Знаю" начисляет монеты за КАЖДОЕ НОВОЕ слово (раз в
-/// жизни на слово, см. mark_word_learned) — "Не знаю" не наказывает и не
-/// платит, это самооценка без давления.
+/// 1. Игрок видит фразу на родном языке и отмечает слова, перевода которых
+///    не знает. Не набралось десяти — приходит следующая фраза.
+/// 2. Отмеченные слова он проходит карточками.
+/// 3. Ту фразу, слова которой он учил, он произносит вслух — раундом,
+///    ничем не отличающимся от Одиночной Игры.
 ///
-/// Банк слов разбит на 6 уровней (по числу лиг) × 10 паков по 100 слов.
-/// Уровень выбирается на плашке режима в Арене (по умолчанию — по лиге
-/// игрока), пак — прямо здесь через кнопку в правом верхнем углу.
+/// ЧЕМ ЭТО ЛУЧШЕ ПРЕЖНЕЙ ТРЕНИРОВКИ. Раньше это была колода из ста слов,
+/// купленных набором в Магазине: слова приходили сами, из списка, никак не
+/// связанного с тем, что игрок хотел сказать. Теперь слова выбирает он сам
+/// — ровно те, на которых спотыкается, — и учит их не отдельно, а внутри
+/// фразы, которую в конце и произносит.
+///
+/// ЭНЕРГИИ ЭТИ ДВА ШАГА НЕ СТОЯТ и подписки не требуют: ни выбор слов, ни
+/// карточки не ходят ни в ASR, ни в LLM. Платным остаётся только третий
+/// шаг — там говорит и оценивает уже обычный раунд.
 class FlashcardsScreen extends StatefulWidget {
   const FlashcardsScreen({super.key});
 
@@ -33,35 +37,51 @@ class FlashcardsScreen extends StatefulWidget {
   State<FlashcardsScreen> createState() => _FlashcardsScreenState();
 }
 
+/// Шаг тренировки.
+enum _Stage { loading, failed, picking, cards, cardsDone }
+
 class _FlashcardsScreenState extends State<FlashcardsScreen> {
-  bool _loading = true;
+  /// Сколько слов надо набрать, чтобы перейти к карточкам.
+  ///
+  /// Десять — не круглое число ради круглого: заход меньше десяти слов
+  /// заканчивается раньше, чем игрок успевает втянуться, а фраза обычно
+  /// даёт их две-три, то есть до карточек он доходит за три-четыре фразы и
+  /// успевает увидеть разные обороты.
+  static const int _minWords = 10;
+
+  _Stage _stage = _Stage.loading;
   String? _error;
-  String _targetLanguage = 'en';
+
   String _nativeLanguage = 'ru';
-
+  String _targetLanguage = 'en';
   int _levelIndex = 0;
-  int _packIndex = 0;
-  List<WordPackInfo> _catalog = [];
-  List<FlashcardEntry> _levelWords = [];
-  List<FlashcardEntry> _packWords = [];
 
-  /// Текущая тренировка: очередь карточек и правила их возврата.
-  late TrainingSession _session;
+  /// Фразы уровня в перемешанном порядке и место в этом порядке.
+  List<int> _phraseOrder = const [];
+  int _phraseCursor = 0;
 
-  /// С какой карточки колоды начата эта тренировка. Счётчик в шапке
-  /// показывает позицию в КОЛОДЕ (21 / 100), а не в тренировке (1 / 20):
-  /// игрок проходит сотню за несколько заходов, и важно, сколько её
-  /// осталось.
-  int _deckOffset = 0;
+  /// Фраза, которая показана сейчас.
+  int _phraseIndex = -1;
+  List<PhraseElement> _nativeElements = const [];
+  String _nativeTail = '';
 
-  /// Сколько карточек выдаётся за тренировку — настройка игрока (10..50).
-  int _deckSize = defaultTrainingDeckSize;
+  /// Слова текущей фразы: по элементам, в порядке показа.
+  List<List<GlossedWord>> _wordsByElement = const [];
 
+  /// Что отмечено на ТЕКУЩЕЙ фразе: «элемент.слово».
+  final Set<String> _markedHere = {};
+
+  /// Всё отобранное за эту тренировку, в порядке отметок.
+  final List<GlossedWord> _picked = [];
+
+  /// Из какой фразы пришло последнее отмеченное слово — её игрок и скажет
+  /// в конце (см. _startSpeaking).
+  int _lastPickedPhrase = -1;
+
+  /// Карточки: очередь и её правила — общие с прежней Тренировкой.
+  TrainingSession? _session;
   bool _flipped = false;
   int _known = 0;
-  int _unknown = 0;
-  int _coinsEarned = 0;
-  bool _done = false;
 
   @override
   void initState() {
@@ -69,17 +89,13 @@ class _FlashcardsScreenState extends State<FlashcardsScreen> {
     _load();
   }
 
-  List<WordPackInfo> get _levelPacks =>
-      _catalog.where((p) => p.levelIndex == _levelIndex).toList()
-        ..sort((a, b) => a.packIndex.compareTo(b.packIndex));
-
   Future<void> _load() async {
-    setState(() => _loading = true);
+    setState(() => _stage = _Stage.loading);
     try {
       final uid = currentUserId;
       final profile = await supabase
           .from('users')
-          .select('native_language, training_deck_size')
+          .select('native_language')
           .eq('id', uid)
           .maybeSingle();
       final learning = await supabase
@@ -91,263 +107,138 @@ class _FlashcardsScreenState extends State<FlashcardsScreen> {
           .limit(1)
           .maybeSingle();
       // native_for — родной язык ИМЕННО этой пары (миграция 0025): у
-      // полиглота она может быть anchored не на главном родном из профиля.
+      // полиглота она может быть привязана не к главному родному.
       final native = (learning?['native_for'] as String?) ?? profile?['native_language'] as String?;
       final target = learning?['language_code'] as String?;
       if (native == null || target == null) {
         setState(() {
-          _loading = false;
+          _stage = _Stage.failed;
           _error = 'Сначала выбери языковую пару в профиле.';
         });
         return;
       }
 
-      final requested = trainingLevelRequest.value;
-      trainingLevelRequest.value = -1; // разово — дальше снова по лиге
-      final defaultLevel = PlayerRating.fromRow(learning).levelIndex;
-      var level = (requested >= 0 && requested <= 5) ? requested : defaultLevel;
-
-      final catalog = await WordPackCatalog.fetch();
-
-      // Пак по умолчанию: первый купленный пак выбранного уровня; если в
-      // этом уровне ещё ничего не куплено (игрок только что поднялся в
-      // лигу, но набор не купил) — откатываемся на гарантированно
-      // бесплатный 0/0, а не показываем пустой/недоступный уровень.
-      var pack = 0;
-      final ownedInLevel = catalog.where((p) => p.levelIndex == level && p.owned).toList()
-        ..sort((a, b) => a.packIndex.compareTo(b.packIndex));
-      if (ownedInLevel.isNotEmpty) {
-        pack = ownedInLevel.first.packIndex;
-      } else if (level != 0) {
-        level = 0;
-        pack = 0;
-      }
-
-      final levelWords = await FlashcardBank.loadLevel(level);
-
-      // Слова для языка есть, только если для него переведён ВЕСЬ уровень
-      // (см. инвариант в FlashcardBank) — а переведены пока только en/ru/es.
-      // Игрок с редким языком в паре видит понятную причину вместо колоды
-      // из пустых карточек.
-      if (!FlashcardBank.hasContentFor(level, target) || !FlashcardBank.hasContentFor(level, native)) {
+      // Уровень — по лиге игрока, как и фразы раунда: тренировать слова
+      // выше своей лиги значит учить то, что в игре ещё не встретится.
+      final level = PlayerRating.fromRow(learning).levelIndex;
+      await PhraseBank.loadLevel(level);
+      if (!PhraseBank.hasContentFor(level, native, target)) {
         setState(() {
-          _loading = false;
-          _error = 'Для этой языковой пары в Тренировке пока нет слов — '
-              'контент на изучаемый и родной языки ещё не готов.';
+          _stage = _Stage.failed;
+          _error = 'Для этой языковой пары фразы ещё не переведены.';
         });
         return;
       }
-
-      final packWords = FlashcardBank.packSlice(levelWords, pack);
-      final deckSize = _clampDeckSize((profile?['training_deck_size'] as num?)?.toInt());
-      final offset = await _fetchProgress(uid, level, pack);
+      await PhraseGlossary.load(level, native, target);
 
       if (!mounted) return;
       setState(() {
         _nativeLanguage = native;
         _targetLanguage = target;
         _levelIndex = level;
-        _packIndex = pack;
-        _catalog = catalog;
-        _levelWords = levelWords;
-        _packWords = packWords;
-        _deckSize = deckSize;
-        _deckOffset = offset;
-        _session = _newSession(packWords.length, offset, deckSize);
-        _loading = false;
+        _phraseOrder = [
+          for (var i = 0; i < PhraseBank.perLevel; i++) level * PhraseBank.perLevel + i,
+        ]..shuffle();
+        _phraseCursor = 0;
+      });
+      _showPhrase();
+    } on ContentUnavailable {
+      if (!mounted) return;
+      setState(() {
+        _stage = _Stage.failed;
+        _error = 'Фразы не скачались — проверь связь и зайди ещё раз.';
       });
     } catch (e) {
       if (!mounted) return;
       setState(() {
-        _loading = false;
-        _error = 'Не удалось загрузить карточки: $e';
+        _stage = _Stage.failed;
+        _error = 'Не удалось начать тренировку: $e';
       });
     }
   }
 
-  /// Сколько карточек колоды игрок уже прошёл.
-  Future<int> _fetchProgress(String uid, int level, int pack) async {
-    try {
-      final row = await supabase
-          .from('user_pack_progress')
-          .select('served_count')
-          .eq('user_id', uid)
-          .eq('level_index', level)
-          .eq('pack_index', pack)
-          .maybeSingle();
-      return (row?['served_count'] as num?)?.toInt() ?? 0;
-    } catch (_) {
-      // Прогресс не прочитался — начнём колоду сначала. Хуже, чем точное
-      // место, но лучше, чем пустой экран.
-      return 0;
-    }
-  }
-
-  /// Очередной кусок колоды: [size] карточек начиная с [offset]. Ближе к
-  /// концу сотни кусок получается короче — добивать его началом колоды
-  /// нельзя, иначе одни и те же слова попадутся дважды за заход.
-  TrainingSession _newSession(int deckLength, int offset, int size) {
-    final end = min(deckLength, offset + size);
-    final indices = [for (var i = offset; i < end; i++) i]..shuffle();
-    return TrainingSession(indices);
-  }
-
-  int _clampDeckSize(int? value) {
-    if (value == null) return defaultTrainingDeckSize;
-    final steps = (value / 10).round().clamp(1, 5);
-    return steps * 10;
-  }
-
-  void _switchPack(WordPackInfo target) {
-    if (!target.owned) {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-        content: const Text('Сначала купи этот набор в Магазине'),
-        action: SnackBarAction(
-          label: 'Магазин',
-          onPressed: () {
-            openShopWordPacks();
-            context.go('/arena');
-          },
-        ),
-      ));
-      return;
-    }
-    _packWords = FlashcardBank.packSlice(_levelWords, target.packIndex);
-    // Прогресс у каждой колоды свой — переключились, читаем её место.
-    _fetchProgress(currentUserId, _levelIndex, target.packIndex).then((offset) {
-      if (!mounted) return;
-      setState(() {
-        _packIndex = target.packIndex;
-        _deckOffset = offset;
-        _session = _newSession(_packWords.length, offset, _deckSize);
-        _flipped = false;
-        _known = 0;
-        _unknown = 0;
-        _coinsEarned = 0;
-        _done = false;
-      });
+  /// Следующая фраза на разбор. Круг замыкается — лучше повтор, чем экран
+  /// без фразы: отмеченные слова из повтора всё равно уже отобраны.
+  void _showPhrase() {
+    final index = _phraseOrder[_phraseCursor % _phraseOrder.length];
+    _phraseCursor++;
+    final native = PhraseBank.elementsFor(index, _nativeLanguage);
+    final target = PhraseBank.elementsFor(index, _targetLanguage);
+    setState(() {
+      _phraseIndex = index;
+      _nativeElements = native;
+      _nativeTail = PhraseBank.entry(index)?.tailFor(_nativeLanguage) ?? '';
+      _wordsByElement = [
+        for (var i = 0; i < native.length; i++)
+          PhraseGlossary.wordsOf(
+            level: _levelIndex,
+            native: _nativeLanguage,
+            target: _targetLanguage,
+            phraseInLevel: index % PhraseBank.perLevel,
+            elementIndex: i,
+            nativeElement: native[i].text,
+            targetElement: i < target.length ? target[i].text : native[i].text,
+          ),
+      ];
+      _markedHere.clear();
+      _stage = _Stage.picking;
     });
   }
 
-  void _openPackMenu() {
-    final packs = _levelPacks;
-    showModalBottomSheet(
-      context: context,
-      backgroundColor: Colors.transparent,
-      builder: (sheetContext) => Container(
-        constraints: const BoxConstraints(maxHeight: 420),
-        padding: const EdgeInsets.fromLTRB(18, 16, 18, 20),
-        decoration: const BoxDecoration(
-          gradient: LinearGradient(
-            begin: Alignment.topCenter,
-            end: Alignment.bottomCenter,
-            colors: [AppColors.navy2, AppColors.navy1],
-          ),
-          borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
-        ),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Container(
-              width: 36,
-              height: 4,
-              margin: const EdgeInsets.only(bottom: 14),
-              alignment: Alignment.center,
-              decoration: BoxDecoration(color: AppColors.lineStrong, borderRadius: BorderRadius.circular(2)),
-            ),
-            Text('Наборы слов', style: AppFonts.ui(fontSize: 15, weight: FontWeight.w800)),
-            const SizedBox(height: 10),
-            Flexible(
-              child: ListView.separated(
-                shrinkWrap: true,
-                itemCount: packs.length,
-                separatorBuilder: (_, _) => const SizedBox(height: 8),
-                itemBuilder: (context, i) {
-                  final p = packs[i];
-                  final selected = p.packIndex == _packIndex;
-                  return _PackTile(
-                    pack: p,
-                    selected: selected,
-                    onTap: () {
-                      Navigator.pop(sheetContext);
-                      _switchPack(p);
-                    },
-                  );
-                },
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
+  String _slot(int element, int word) => '$element.$word';
+
+  void _toggleWord(int element, int word) {
+    final key = _slot(element, word);
+    final picked = _wordsByElement[element][word];
+    setState(() {
+      if (_markedHere.remove(key)) {
+        _picked.removeWhere((w) => w.key == picked.key);
+        return;
+      }
+      _markedHere.add(key);
+      // Одно и то же слово в одном значении не берём дважды: во второй
+      // фразе оно попалось бы второй карточкой с тем же переводом.
+      if (!_picked.any((w) => w.key == picked.key)) _picked.add(picked);
+      _lastPickedPhrase = _phraseIndex;
+    });
   }
 
-  void _flip() {
-    setState(() => _flipped = !_flipped);
+  void _confirm() {
+    if (_picked.length < _minWords) return;
+    setState(() {
+      _session = TrainingSession([for (var i = 0; i < _picked.length; i++) i]);
+      _flipped = false;
+      _known = 0;
+      _stage = _Stage.cards;
+    });
   }
 
-  void _next(bool known) {
-    final card = _session.current;
-    if (card == null) return;
-
-    if (known) {
-      final globalWordIndex = _packIndex * wordsPerPack + card;
-      WordPackCatalog.markLearned(_levelIndex, globalWordIndex).then((coins) {
-        if (!mounted || coins <= 0) return;
-        setState(() => _coinsEarned += coins);
-      });
-    }
-
-    // Подсмотренный ответ — не то же самое, что знание: такая карточка
-    // возвращается ещё раз в конце тренировки (см. TrainingSession).
+  void _answer(bool known) {
+    final session = _session;
+    if (session == null || session.current == null) return;
+    // Подсмотренный ответ — ещё не знание: такая карточка вернётся в конце
+    // (см. TrainingSession).
     final outcome = !known
         ? CardOutcome.unknown
         : _flipped
             ? CardOutcome.knownAfterFlip
             : CardOutcome.known;
-
     setState(() {
-      if (known) {
-        _known++;
-      } else {
-        _unknown++;
-      }
+      if (known) _known++;
       _flipped = false;
-      _session.answer(outcome);
-      _done = _session.isDone;
+      session.answer(outcome);
+      if (session.isDone) _stage = _Stage.cardsDone;
     });
-
-    if (_session.isDone) _saveProgress();
   }
 
-  /// Сдвинуть место в колоде на пройденные карточки. Сотня закрыта —
-  /// сервер сам обнулит счётчик, и колода начнётся заново.
-  Future<void> _saveProgress() async {
-    try {
-      final next = await supabase.rpc('advance_pack_progress', params: {
-        'p_level_index': _levelIndex,
-        'p_pack_index': _packIndex,
-        'p_completed': _session.total,
-      });
-      if (!mounted) return;
-      setState(() => _deckOffset = (next as num?)?.toInt() ?? _deckOffset);
-    } catch (e) {
-      debugPrint('advance_pack_progress failed: $e');
-    }
-  }
-
-  /// Ещё одна тренировка по той же колоде — со СЛЕДУЮЩИХ карточек, а не с
-  /// тех же самых: прогресс уже сдвинут, повторять пройденное незачем.
-  void _restart() {
-    setState(() {
-      _session = _newSession(_packWords.length, _deckOffset, _deckSize);
-      _flipped = false;
-      _known = 0;
-      _unknown = 0;
-      _coinsEarned = 0;
-      _done = false;
-    });
+  /// Последний шаг: сказать вслух фразу, слова которой учил.
+  ///
+  /// ФРАЗА — ТА, ИЗ КОТОРОЙ ПРИШЛО ПОСЛЕДНЕЕ ОТМЕЧЕННОЕ СЛОВО. Фраз за
+  /// подбор бывает несколько, а произнести нужно одну; последняя — та,
+  /// которую игрок видел только что, и вспоминать её не придётся.
+  void _startSpeaking() {
+    final index = _lastPickedPhrase >= 0 ? _lastPickedPhrase : _phraseIndex;
+    context.pushReplacement('/training?phrase=$index&title=Тренировка');
   }
 
   @override
@@ -356,333 +247,384 @@ class _FlashcardsScreenState extends State<FlashcardsScreen> {
       appBar: AppBar(
         title: const Text('Тренировка'),
         actions: [
-          if (!_loading && _error == null) ...[
-            if (!_done)
-              Padding(
-                padding: const EdgeInsets.only(right: 10),
-                child: Center(
-                  child: Text(
-                    '${_deckOffset + _session.completed + 1} / ${_packWords.length}',
-                    style: AppFonts.mono(fontSize: 11, weight: FontWeight.w700, color: AppColors.gold),
-                  ),
-                ),
-              ),
+          if (_stage == _Stage.picking || _stage == _Stage.cards)
             Padding(
-              padding: const EdgeInsets.only(right: 8),
+              padding: const EdgeInsets.only(right: 14),
               child: Center(
-                child: GestureDetector(
-                  onTap: _openPackMenu,
-                  child: ChPill(
-                    icon: const Icon(Icons.style, size: 12, color: AppColors.cyan),
-                    label: (_levelPacks.firstWhere(
-                      (p) => p.packIndex == _packIndex,
-                      orElse: () => WordPackInfo(
-                        levelIndex: _levelIndex,
-                        packIndex: _packIndex,
-                        price: 0,
-                        owned: true,
-                        leagueLocked: false,
-                      ),
-                    )).rangeLabel,
-                  ),
+                child: Text(
+                  _stage == _Stage.picking
+                      ? 'Слов: ${_picked.length}'
+                      : 'Знаю: $_known из ${_picked.length}',
+                  style: AppFonts.mono(fontSize: 11, weight: FontWeight.w700, color: AppColors.gold),
                 ),
               ),
             ),
-          ],
         ],
       ),
-      body: SafeArea(child: _buildBody()),
+      body: SafeArea(child: _body()),
     );
   }
 
-  Widget _buildBody() {
-    if (_loading) {
-      return const Center(child: CircularProgressIndicator());
-    }
-    if (_error != null) {
-      return Padding(
-        padding: const EdgeInsets.all(24),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            const Icon(Icons.style, size: 52, color: AppColors.muted),
-            const SizedBox(height: 16),
-            Text(_error!, textAlign: TextAlign.center, style: const TextStyle(color: AppColors.cream, fontSize: 13)),
-            const SizedBox(height: 24),
-            ElevatedButton(
-              onPressed: () => context.canPop() ? context.pop() : context.go('/arena'),
-              child: const Text('Назад на Арену'),
+  Widget _body() {
+    switch (_stage) {
+      case _Stage.loading:
+        return const Center(child: CircularProgressIndicator());
+      case _Stage.failed:
+        return Padding(
+          padding: const EdgeInsets.all(24),
+          child: Center(
+            child: Text(
+              _error ?? 'Что-то пошло не так',
+              textAlign: TextAlign.center,
+              style: const TextStyle(color: AppColors.muted, fontSize: 13, height: 1.4),
             ),
-          ],
-        ),
-      );
+          ),
+        );
+      case _Stage.picking:
+        return _picking();
+      case _Stage.cards:
+        return _cards();
+      case _Stage.cardsDone:
+        return _cardsDone();
     }
-    if (_done) {
-      return Padding(
-        padding: const EdgeInsets.all(24),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            ChPanel(
-              borderColor: AppColors.gold,
-              padding: const EdgeInsets.symmetric(vertical: 22, horizontal: 20),
-              child: Column(
-                children: [
-                  Text('Колода пройдена', style: AppFonts.ui(fontSize: 17, weight: FontWeight.w800, color: AppColors.gold)),
-                  const SizedBox(height: 14),
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+  }
+
+  // -------------------------------------------------------------------
+  // Шаг 1: выбор незнакомых слов
+  // -------------------------------------------------------------------
+
+  Widget _picking() {
+    final enough = _picked.length >= _minWords;
+    return Column(
+      children: [
+        Expanded(
+          child: ListView(
+            padding: const EdgeInsets.fromLTRB(14, 10, 14, 10),
+            children: [
+              _ChameleonSays(
+                level: _levelIndex,
+                text: 'Выбери слова, перевод которых ты не знаешь',
+              ),
+              const SizedBox(height: 10),
+              ChPanel(
+                child: _PickablePhrase(
+                  elements: _nativeElements,
+                  tail: _nativeTail,
+                  wordsByElement: _wordsByElement,
+                  marked: _markedHere,
+                  onTap: _toggleWord,
+                ),
+              ),
+              if (_picked.isNotEmpty) ...[
+                const SizedBox(height: 14),
+                // ВНИЗУ СОБИРАЮТСЯ ОТОБРАННЫЕ СЛОВА — все, а не только с
+                // этой фразы: игрок должен видеть, сколько уже набрал и
+                // что именно, не листая назад по фразам.
+                Wrap(
+                  spacing: 7,
+                  runSpacing: 7,
+                  children: [
+                    for (final word in _picked)
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 6),
+                        decoration: BoxDecoration(
+                          border: Border.all(color: AppColors.gold.withValues(alpha: 0.6)),
+                          color: AppColors.gold.withValues(alpha: 0.10),
+                          borderRadius: BorderRadius.circular(9),
+                        ),
+                        child: Text(
+                          word.word,
+                          style: AppFonts.ui(
+                              fontSize: 12, weight: FontWeight.w700, color: AppColors.gold),
+                        ),
+                      ),
+                  ],
+                ),
+              ],
+            ],
+          ),
+        ),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 4, 16, 14),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              if (!enough)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 8),
+                  child: Text(
+                    'Нужно набрать хотя бы $_minWords слов — '
+                    'осталось ${_minWords - _picked.length}',
+                    textAlign: TextAlign.center,
+                    style: AppFonts.mono(fontSize: 10, color: AppColors.muted),
+                  ),
+                ),
+              // КНОПКА ОДНА И МЕНЯЕТ СМЫСЛ. «Продолжить» — дай ещё фразу,
+              // «Подтвердить» — этих слов хватит. Две кнопки рядом
+              // заставляли бы выбирать там, где выбора нет: пока слов мало,
+              // подтверждать нечего.
+              ElevatedButton(
+                onPressed: enough ? _confirm : _showPhrase,
+                child: Text(enough ? 'ПОДТВЕРДИТЬ' : 'ПРОДОЛЖИТЬ'),
+              ),
+              if (enough)
+                TextButton(
+                  onPressed: _showPhrase,
+                  child: const Text('Ещё фраза'),
+                ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  // -------------------------------------------------------------------
+  // Шаг 2: карточки
+  // -------------------------------------------------------------------
+
+  Widget _cards() {
+    final session = _session!;
+    final index = session.current;
+    if (index == null) return const SizedBox.shrink();
+    final word = _picked[index];
+
+    return Column(
+      children: [
+        Expanded(
+          child: Center(
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 20),
+              child: GestureDetector(
+                onTap: () => setState(() => _flipped = !_flipped),
+                child: ChPanel(
+                  padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 28),
+                  borderColor: _flipped ? AppColors.gold : null,
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
                     children: [
-                      _ResultStat(value: '$_known', label: 'знаю', color: AppColors.ok),
-                      _ResultStat(value: '$_unknown', label: 'повторить', color: AppColors.danger),
-                      _ResultStat(value: '+$_coinsEarned', label: 'монет', color: AppColors.gold),
+                      Text(
+                        _flipped ? word.translation : word.word,
+                        textAlign: TextAlign.center,
+                        style: AppFonts.ui(
+                          fontSize: 26,
+                          weight: FontWeight.w800,
+                          color: _flipped ? AppColors.gold : AppColors.cream,
+                        ),
+                      ),
+                      // ДИНАМИК ТОЛЬКО НА ИЗУЧАЕМОЙ СТОРОНЕ. Слушать образец
+                      // произношения на родном языке незачем, а перепутать
+                      // стороны — значит выдать игроку чужое произношение с
+                      // видом образца.
+                      if (_flipped) ...[
+                        const SizedBox(height: 6),
+                        SpeakButton(text: word.translation, languageCode: _targetLanguage),
+                      ],
+                      const SizedBox(height: 14),
+                      Text(
+                        // Контекст — тот кусок фразы, из которого слово
+                        // взято: у слова в одиночестве смысл часто шире,
+                        // чем тот, который игроку нужен.
+                        word.context,
+                        textAlign: TextAlign.center,
+                        style: AppFonts.mono(fontSize: 11, color: AppColors.muted),
+                      ),
+                      const SizedBox(height: 10),
+                      Text(
+                        _flipped ? 'нажми, чтобы вернуть слово' : 'нажми, чтобы увидеть перевод',
+                        style: AppFonts.mono(fontSize: 9, color: AppColors.muted),
+                      ),
                     ],
                   ),
-                ],
-              ),
-            ),
-            const SizedBox(height: 20),
-            SizedBox(
-              width: double.infinity,
-              child: ElevatedButton(onPressed: _restart, child: const Text('Пройти заново')),
-            ),
-            const SizedBox(height: 8),
-            SizedBox(
-              width: double.infinity,
-              child: OutlinedButton(
-                style: OutlinedButton.styleFrom(
-                  foregroundColor: AppColors.cream,
-                  side: const BorderSide(color: AppColors.lineStrong),
-                  padding: const EdgeInsets.symmetric(vertical: 14),
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                 ),
-                onPressed: () => context.canPop() ? context.pop() : context.go('/arena'),
-                child: const Text('Назад на Арену'),
-              ),
-            ),
-          ],
-        ),
-      );
-    }
-
-    final entry = _packWords[_session.current!];
-    // Пустая строка здесь недостижима на практике: _load() уже проверил
-    // hasContentFor на оба языка до того, как показать хоть одну карточку.
-    final front = entry.forLanguage(_targetLanguage) ?? '';
-    final back = entry.forLanguage(_nativeLanguage) ?? '';
-
-    return Padding(
-      padding: const EdgeInsets.all(20),
-      child: Column(
-        children: [
-          Expanded(
-            child: Center(
-              child: _FlipCard(
-                key: ValueKey('$_levelIndex-$_packIndex-${_session.current}-${_session.completed}'),
-                front: front,
-                back: back,
-                flipped: _flipped,
-                onTap: _flip,
               ),
             ),
           ),
-          const SizedBox(height: 20),
-          Row(
+        ),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+          child: Row(
             children: [
               Expanded(
                 child: OutlinedButton(
-                  style: OutlinedButton.styleFrom(
-                    foregroundColor: AppColors.danger,
-                    side: const BorderSide(color: AppColors.danger),
-                    padding: const EdgeInsets.symmetric(vertical: 16),
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                  ),
-                  onPressed: () => _next(false),
+                  onPressed: () => _answer(false),
                   child: const Text('Не знаю'),
                 ),
               ),
-              const SizedBox(width: 12),
+              const SizedBox(width: 10),
               Expanded(
                 child: ElevatedButton(
-                  style: ElevatedButton.styleFrom(backgroundColor: AppColors.ok),
-                  onPressed: () => _next(true),
+                  onPressed: () => _answer(true),
                   child: const Text('Знаю'),
                 ),
               ),
             ],
           ),
+        ),
+      ],
+    );
+  }
+
+  Widget _cardsDone() {
+    return Padding(
+      padding: const EdgeInsets.all(24),
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          const Icon(Icons.check_circle_outline, size: 52, color: AppColors.ok),
+          const SizedBox(height: 14),
+          Text('Слова пройдены',
+              style: AppFonts.ui(fontSize: 18, weight: FontWeight.w800, color: AppColors.cream)),
+          const SizedBox(height: 8),
+          const Text(
+            'Теперь скажи вслух фразу, слова которой ты только что учил.',
+            textAlign: TextAlign.center,
+            style: TextStyle(color: AppColors.muted, fontSize: 13, height: 1.4),
+          ),
+          const SizedBox(height: 22),
+          SizedBox(
+            width: double.infinity,
+            child: ElevatedButton(
+              onPressed: _startSpeaking,
+              child: const Text('К ФРАЗЕ'),
+            ),
+          ),
         ],
       ),
     );
   }
 }
 
-class _PackTile extends StatelessWidget {
-  final WordPackInfo pack;
-  final bool selected;
-  final VoidCallback onTap;
+/// Реплика хамелеона — та же, что в Одиночной Игре, и по той же причине
+/// слева с аватаркой: говорит ИИ, а не игрок.
+class _ChameleonSays extends StatelessWidget {
+  final int level;
+  final String text;
 
-  const _PackTile({required this.pack, required this.selected, required this.onTap});
+  const _ChameleonSays({required this.level, required this.text});
 
   @override
   Widget build(BuildContext context) {
-    final locked = !pack.owned;
-    return InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(12),
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-        decoration: BoxDecoration(
-          color: selected ? AppColors.gold.withValues(alpha: 0.12) : Colors.transparent,
-          border: Border.all(color: selected ? AppColors.gold : AppColors.line),
-          borderRadius: BorderRadius.circular(12),
-        ),
-        child: Row(
-          children: [
-            Icon(
-              locked ? Icons.lock_outline : Icons.style,
-              size: 16,
-              color: locked ? AppColors.muted : (selected ? AppColors.gold : AppColors.cream),
-            ),
-            const SizedBox(width: 10),
-            Expanded(
-              child: Text(
-                pack.rangeLabel,
-                style: AppFonts.ui(
-                  fontSize: 13,
-                  weight: FontWeight.w700,
-                  color: locked ? AppColors.muted : AppColors.cream,
-                ),
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const AiAvatar(),
+        const SizedBox(width: 8),
+        Flexible(
+          child: Container(
+            padding: const EdgeInsets.all(12),
+            decoration: const BoxDecoration(
+              color: AppColors.navy3,
+              borderRadius: BorderRadius.only(
+                topLeft: Radius.circular(4),
+                topRight: Radius.circular(14),
+                bottomLeft: Radius.circular(14),
+                bottomRight: Radius.circular(14),
               ),
             ),
-            if (locked)
-              pack.leagueLocked
-                  ? Text('лига выше', style: AppFonts.mono(fontSize: 9, color: AppColors.muted))
-                  : ChPill(
-                      icon: const Icon(Icons.circle, size: 9, color: AppColors.gold),
-                      label: '${pack.price}',
-                    )
-            else if (selected)
-              const Icon(Icons.check_circle, size: 16, color: AppColors.gold),
-          ],
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('Уровень ${cefrNames[level]}',
+                    style: AppFonts.mono(fontSize: 9, color: AppColors.muted)),
+                const SizedBox(height: 5),
+                Text(text, style: const TextStyle(color: AppColors.cream, height: 1.4)),
+              ],
+            ),
+          ),
         ),
-      ),
-    );
-  }
-}
-
-class _ResultStat extends StatelessWidget {
-  final String value;
-  final String label;
-  final Color color;
-
-  const _ResultStat({required this.value, required this.label, required this.color});
-
-  @override
-  Widget build(BuildContext context) {
-    return Column(
-      children: [
-        Text(value, style: AppFonts.ui(fontSize: 24, weight: FontWeight.w800, color: color)),
-        Text(label, style: AppFonts.mono(fontSize: 10, color: AppColors.muted)),
       ],
     );
   }
 }
 
-/// Карточка с переворотом по оси Y. Обратная сторона контр-повёрнута,
-/// чтобы текст на ней не читался зеркально в момент прохождения 90°.
-class _FlipCard extends StatefulWidget {
-  final String front;
-  final String back;
-  final bool flipped;
-  final VoidCallback onTap;
+/// Названия уровней по индексу лиги — только для подписи над заданием.
+const List<String> cefrNames = ['A1', 'A2', 'B1', 'B2', 'C1', 'C2'];
 
-  const _FlipCard({super.key, required this.front, required this.back, required this.flipped, required this.onTap});
+/// Фраза, в которой нажимается КАЖДОЕ СЛОВО ПО ОТДЕЛЬНОСТИ.
+///
+/// В Одиночной Игре по нажатию переворачивается ЭЛЕМЕНТ — кусок смысла
+/// целиком, и там это правильно: подсказка нужна на обороте, а не на
+/// слове. Здесь наоборот: игрок отмечает то, чего не знает, а не знать
+/// можно «семь», прекрасно зная «в».
+class _PickablePhrase extends StatefulWidget {
+  final List<PhraseElement> elements;
+  final String tail;
+  final List<List<GlossedWord>> wordsByElement;
+
+  /// Отмеченные слова текущей фразы: «элемент.слово».
+  final Set<String> marked;
+
+  final void Function(int element, int word) onTap;
+
+  const _PickablePhrase({
+    required this.elements,
+    required this.tail,
+    required this.wordsByElement,
+    required this.marked,
+    required this.onTap,
+  });
 
   @override
-  State<_FlipCard> createState() => _FlipCardState();
+  State<_PickablePhrase> createState() => _PickablePhraseState();
 }
 
-class _FlipCardState extends State<_FlipCard> with SingleTickerProviderStateMixin {
-  late final AnimationController _controller = AnimationController(
-    vsync: this,
-    duration: const Duration(milliseconds: 350),
-  );
-
-  @override
-  void didUpdateWidget(covariant _FlipCard oldWidget) {
-    super.didUpdateWidget(oldWidget);
-    if (widget.flipped != oldWidget.flipped) {
-      widget.flipped ? _controller.forward() : _controller.reverse();
-    }
-  }
+class _PickablePhraseState extends State<_PickablePhrase> {
+  /// Распознаватели живут вместе с виджетом: TextSpan их не освобождает.
+  final Map<String, TapGestureRecognizer> _recognizers = {};
 
   @override
   void dispose() {
-    _controller.dispose();
+    for (final recognizer in _recognizers.values) {
+      recognizer.dispose();
+    }
     super.dispose();
   }
 
-  @override
-  Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: widget.onTap,
-      child: AnimatedBuilder(
-        animation: _controller,
-        builder: (context, child) {
-          final angle = _controller.value * 3.14159265;
-          final showBack = _controller.value >= 0.5;
-          return Transform(
-            alignment: Alignment.center,
-            transform: Matrix4.identity()
-              ..setEntry(3, 2, 0.0015)
-              ..rotateY(angle),
-            child: showBack
-                ? Transform(
-                    alignment: Alignment.center,
-                    transform: Matrix4.identity()..rotateY(3.14159265),
-                    child: _CardFace(text: widget.back, isFront: false),
-                  )
-                : _CardFace(text: widget.front, isFront: true),
-          );
-        },
-      ),
-    );
-  }
-}
-
-class _CardFace extends StatelessWidget {
-  final String text;
-  final bool isFront;
-
-  const _CardFace({required this.text, required this.isFront});
+  TapGestureRecognizer _recognizer(int element, int word) =>
+      _recognizers.putIfAbsent('$element.$word',
+          () => TapGestureRecognizer()..onTap = () => widget.onTap(element, word));
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      height: 220,
-      width: 280,
-      padding: const EdgeInsets.all(20),
-      decoration: BoxDecoration(
-        gradient: LinearGradient(
-          begin: Alignment.topCenter,
-          end: Alignment.bottomCenter,
-          colors: isFront
-              ? const [AppColors.navy3, AppColors.navy1]
-              : [AppColors.goldSoft, AppColors.navy1.withValues(alpha: 0.6)],
-        ),
-        border: Border.all(color: isFront ? AppColors.line : AppColors.gold, width: isFront ? 1 : 1.5),
-        borderRadius: BorderRadius.circular(20),
-        boxShadow: isFront
-            ? null
-            : [BoxShadow(color: AppColors.gold.withValues(alpha: 0.18), blurRadius: 24)],
-      ),
-      alignment: Alignment.center,
-      child: Text(
-        text,
-        textAlign: TextAlign.center,
-        style: AppFonts.ui(fontSize: 26, weight: FontWeight.w800, color: isFront ? AppColors.cream : AppColors.gold),
-      ),
-    );
+    const base = TextStyle(color: AppColors.cream, height: 1.6, fontSize: 16);
+    final spans = <TextSpan>[];
+
+    for (var i = 0; i < widget.elements.length; i++) {
+      spans.add(TextSpan(text: widget.elements[i].lead, style: base));
+      final text = widget.elements[i].text;
+      final words = i < widget.wordsByElement.length
+          ? widget.wordsByElement[i]
+          : const <GlossedWord>[];
+
+      // По тексту элемента идём ровно один раз, вырезая из него слова: так
+      // пробелы и запятые ВНУТРИ элемента остаются на своих местах и не
+      // становятся частью нажимаемого слова.
+      var cursor = 0;
+      for (var w = 0; w < words.length; w++) {
+        final word = words[w].word;
+        final at = text.indexOf(word, cursor);
+        if (at < 0) continue;
+        if (at > cursor) {
+          spans.add(TextSpan(text: text.substring(cursor, at), style: base));
+        }
+        final marked = widget.marked.contains('$i.$w');
+        spans.add(TextSpan(
+          text: word,
+          style: base.copyWith(
+            color: marked ? AppColors.gold : AppColors.cream,
+            fontWeight: marked ? FontWeight.w800 : FontWeight.w400,
+          ),
+          recognizer: _recognizer(i, w),
+        ));
+        cursor = at + word.length;
+      }
+      if (cursor < text.length) {
+        spans.add(TextSpan(text: text.substring(cursor), style: base));
+      }
+    }
+    spans.add(TextSpan(text: widget.tail, style: base));
+
+    return Text.rich(TextSpan(children: spans));
   }
 }

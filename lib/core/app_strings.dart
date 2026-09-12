@@ -27,7 +27,6 @@ class AppStrings {
   // --- настройки -----------------------------------------------------
   final String settingsTitle;
   final String sectionInterface;
-  final String sectionTraining;
   final String sectionDebug;
   final String sectionNotifications;
   final String sectionPrivacy;
@@ -36,7 +35,6 @@ class AppStrings {
 
   final String interfaceLanguage;
   final String nativeLanguages;
-  final String cardsPerTraining;
   final String ratingAndLeague;
   final String matchNotifications;
   final String hideFromLeaderboard;
@@ -92,7 +90,6 @@ class AppStrings {
     required this.continueAction,
     required this.settingsTitle,
     required this.sectionInterface,
-    required this.sectionTraining,
     required this.sectionDebug,
     required this.sectionNotifications,
     required this.sectionPrivacy,
@@ -100,7 +97,6 @@ class AppStrings {
     required this.sectionAccount,
     required this.interfaceLanguage,
     required this.nativeLanguages,
-    required this.cardsPerTraining,
     required this.ratingAndLeague,
     required this.matchNotifications,
     required this.hideFromLeaderboard,
@@ -144,7 +140,6 @@ class AppStrings {
     continueAction: 'Продолжить',
     settingsTitle: 'Настройки',
     sectionInterface: 'ИНТЕРФЕЙС',
-    sectionTraining: 'ТРЕНИРОВКА',
     sectionDebug: 'ОТЛАДКА',
     sectionNotifications: 'УВЕДОМЛЕНИЯ',
     sectionPrivacy: 'ПРИВАТНОСТЬ',
@@ -152,7 +147,6 @@ class AppStrings {
     sectionAccount: 'АККАУНТ',
     interfaceLanguage: 'Язык интерфейса',
     nativeLanguages: 'Родные языки',
-    cardsPerTraining: 'Карточек за тренировку',
     ratingAndLeague: 'Рейтинг и лига',
     matchNotifications: 'Уведомления о матчах',
     hideFromLeaderboard: 'Скрыть меня из рейтинга',
@@ -202,7 +196,6 @@ class AppStrings {
     continueAction: 'Continue',
     settingsTitle: 'Settings',
     sectionInterface: 'INTERFACE',
-    sectionTraining: 'TRAINING',
     sectionDebug: 'DEBUG',
     sectionNotifications: 'NOTIFICATIONS',
     sectionPrivacy: 'PRIVACY',
@@ -210,7 +203,6 @@ class AppStrings {
     sectionAccount: 'ACCOUNT',
     interfaceLanguage: 'Interface language',
     nativeLanguages: 'Native languages',
-    cardsPerTraining: 'Cards per training',
     ratingAndLeague: 'Rating and league',
     matchNotifications: 'Match notifications',
     hideFromLeaderboard: 'Hide me from the leaderboard',

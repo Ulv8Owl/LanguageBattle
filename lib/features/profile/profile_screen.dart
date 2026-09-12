@@ -6,6 +6,7 @@ import '../../core/game_access.dart';
 import '../../core/nav_state.dart';
 import '../../core/supabase_client.dart';
 import '../../core/theme.dart';
+import '../../data/achievements.dart';
 import '../../data/language_pairs.dart';
 import '../../data/player_rating.dart';
 import '../../data/avatar_parts.dart';
@@ -31,7 +32,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
   int _played = 0;
   int _winPct = 0;
   int _streak = 0;
-  List<Map<String, dynamic>> _inventory = [];
+  /// По одной плашке на вид достижения: полученная или серая (см.
+  /// AchievementSlot).
+  List<AchievementSlot> _achievements = const [];
   bool _loading = true;
   bool _switchingPair = false;
 
@@ -66,10 +69,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
         }
       }
 
-      final inventory = await supabase
-          .from('user_inventory')
-          .select('item_id, cosmetic_items(*)')
-          .eq('user_id', uid);
+      final achievements = await loadAchievements(uid);
       // sync_wallet заодно отдаёт актуальный статус подписки — нужен для
       // плашки пробного периода (задача итерации, п.5: плашка переехала
       // сюда из Арены).
@@ -83,12 +83,38 @@ class _ProfileScreenState extends State<ProfileScreen> {
         _played = played;
         _winPct = played == 0 ? 0 : ((wins / played) * 100).round();
         _streak = streak;
-        _inventory = List<Map<String, dynamic>>.from(inventory);
+        _achievements = achievements;
         _loading = false;
       });
     } catch (_) {
       if (mounted) setState(() => _loading = false);
     }
+  }
+
+  /// Что это за достижение. У полученного — описание, у серого — как его
+  /// получить: иначе серая плашка была бы загадкой без подсказки.
+  void _showAchievement(AchievementSlot slot) {
+    showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: AppColors.navy2,
+        title: Text(
+          slot.kind.title,
+          style: AppFonts.ui(
+            fontSize: 16,
+            weight: FontWeight.w800,
+            color: slot.earned ? AppColors.gold : AppColors.muted,
+          ),
+        ),
+        content: Text(slot.detail, style: const TextStyle(height: 1.4)),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(),
+            child: const Text('Понятно'),
+          ),
+        ],
+      ),
+    );
   }
 
   Widget _pairChip(LanguagePair pair) {
@@ -319,43 +345,22 @@ class _ProfileScreenState extends State<ProfileScreen> {
             ),
           ),
           const SizedBox(height: 18),
-          Text('ИНВЕНТАРЬ', style: AppFonts.mono(fontSize: 9, weight: FontWeight.w700, color: AppColors.gold)),
+          // ИНВЕНТАРЯ ЗДЕСЬ БОЛЬШЕ НЕТ. Он показывал купленные предметы —
+          // то же самое, что уже видно в Магазине и на самом аватаре, — а
+          // место занимал то, где игроку интереснее видеть, чего он добился.
+          Text('ДОСТИЖЕНИЯ', style: AppFonts.mono(fontSize: 9, weight: FontWeight.w700, color: AppColors.gold)),
           const SizedBox(height: 8),
-          if (_inventory.isEmpty)
-            const Text('Пока пусто — загляните в Магазин.', style: TextStyle(color: AppColors.muted, fontSize: 12))
-          else
-            Wrap(
-              spacing: 8,
-              runSpacing: 8,
-              children: _inventory.map((row) {
-                final item = row['cosmetic_items'] as Map<String, dynamic>?;
-                final equipped = item?['id'] == _profile?['equipped_frame_id'] || item?['id'] == _profile?['equipped_emote_id'];
-                return Container(
-                  width: 64,
-                  padding: const EdgeInsets.all(8),
-                  decoration: BoxDecoration(
-                    border: Border.all(color: equipped ? AppColors.gold : AppColors.line),
-                    borderRadius: BorderRadius.circular(10),
-                  ),
-                  child: Column(
-                    children: [
-                      Icon(
-                        item?['type'] == 'emote' ? Icons.emoji_emotions : Icons.circle_outlined,
-                        color: AppColors.gold,
-                      ),
-                      const SizedBox(height: 4),
-                      Text(
-                        (item?['name'] as String?) ?? '',
-                        textAlign: TextAlign.center,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(fontSize: 8, color: AppColors.muted),
-                      ),
-                    ],
-                  ),
-                );
-              }).toList(),
-            ),
+          Wrap(
+            spacing: 10,
+            runSpacing: 10,
+            children: [
+              for (final slot in _achievements)
+                _AchievementBadge(
+                  slot: slot,
+                  onTap: () => _showAchievement(slot),
+                ),
+            ],
+          ),
         ],
       ),
     );
@@ -467,6 +472,66 @@ class _StatTile extends StatelessWidget {
           const SizedBox(height: 2),
           Text(label, style: const TextStyle(fontSize: 8, color: AppColors.muted)),
         ],
+      ),
+    );
+  }
+}
+
+/// Плашка достижения. Полученная — золотая, ещё не полученная — серая, той
+/// же формы.
+///
+/// СЕРАЯ ИМЕННО ВЫРЕЗАНА, а не затемнена: форма и обводка те же, что у
+/// полученной, а внутри ровно серый цвет. Так видно, что место под
+/// достижение есть и оно ждёт, а не что картинка не загрузилась.
+class _AchievementBadge extends StatelessWidget {
+  final AchievementSlot slot;
+  final VoidCallback onTap;
+
+  const _AchievementBadge({required this.slot, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    final earned = slot.earned;
+    final color = earned ? AppColors.gold : AppColors.muted;
+    final tier = slot.earnedTier ?? slot.nextTier;
+    return GestureDetector(
+      onTap: onTap,
+      behavior: HitTestBehavior.opaque,
+      child: SizedBox(
+        width: 82,
+        child: Column(
+          children: [
+            Container(
+              height: 58,
+              width: 58,
+              decoration: BoxDecoration(
+                color: earned ? AppColors.gold.withValues(alpha: 0.12) : AppColors.navy3,
+                border: Border.all(color: earned ? AppColors.gold : AppColors.lineStrong, width: 2),
+                borderRadius: BorderRadius.circular(14),
+              ),
+              child: Center(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(Icons.local_fire_department, size: 22, color: color),
+                    Text(
+                      '$tier',
+                      style: AppFonts.mono(fontSize: 11, weight: FontWeight.w800, color: color),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            const SizedBox(height: 5),
+            Text(
+              slot.kind.title,
+              textAlign: TextAlign.center,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: AppFonts.mono(fontSize: 8, weight: FontWeight.w700, color: color),
+            ),
+          ],
+        ),
       ),
     );
   }

@@ -1,0 +1,60 @@
+1.1 «I get up» — I=yo; get=me levanto; up=me levanto
+1.2 «at seven» — at=a; seven=las siete
+1.3 «every morning» — every=todas; morning=las mañanas
+1.4 «Then I make» — Then=luego; I=yo; make=preparo
+1.5 «coffee» — coffee=café
+1.6 «and read the news» — and=y; read=leo; the=las; news=noticias
+2.1 «My office» — My=mi; office=oficina
+2.2 «is near» — is=está; near=cerca de
+2.3 «the train station» — the=la; train=tren; station=estación
+2.4 «I walk» — I=yo; walk=voy a pie
+2.5 «there» — there=allí
+2.6 «in ten minutes» — in=en; ten=diez; minutes=minutos
+3.1 «I don't like» — I=me; don't=no; like=gusta
+3.2 «cold weather» — cold=frío; weather=el frío
+3.3 «so I stay at home» — so=así que; I=yo; stay=me quedo; at=en; home=casa
+3.4 «Today» — Today=hoy
+3.5 «it is» — it=hace; is=hace
+3.6 «very windy» — very=mucho; windy=viento
+4.1 «My brother» — My=mi; brother=hermano
+4.2 «works» — works=trabaja
+4.3 «in a big hotel» — in=en; a=un; big=grande; hotel=hotel
+4.4 «He starts» — He=él; starts=empieza
+4.5 «work» — work=a trabajar
+4.6 «at six» — at=a; six=las seis
+5.1 «We have» — We=nosotros; have=tenemos
+5.2 «a small dog» — a=un; small=pequeño; dog=perro
+5.3 «and he sleeps a lot» — and=y; he=él; sleeps=duerme; a=mucho; lot=mucho
+5.4 «In the evening» — In=por; the=la; evening=tarde
+5.5 «we walk» — we=nosotros; walk=paseamos
+5.6 «in the park» — in=por; the=el; park=parque
+6.1 «I am» — I=yo; am=soy
+6.2 «a student» — a=un; student=estudiante
+6.3 «and I study Spanish» — and=y; I=yo; study=estudio; Spanish=español
+6.4 «My class» — My=mi; class=clase
+6.5 «is» — is=es
+6.6 «on Monday and Thursday» — on=los; Monday=lunes; and=y; Thursday=jueves
+7.1 «This shop» — This=esta; shop=tienda
+7.2 «is open» — is=está; open=abierta
+7.3 «every day» — every=todos; day=los días
+7.4 «I buy» — I=yo; buy=compro
+7.5 «bread and milk» — bread=pan; and=y; milk=leche
+7.6 «here» — here=aquí
+8.1 «My phone» — My=mi; phone=teléfono
+8.2 «is very old» — is=es; very=muy; old=viejo
+8.3 «so it is slow» — so=así que; it=él; is=va; slow=lento
+8.4 «I want» — I=yo; want=quiero
+8.5 «a new one» — a=uno; new=nuevo; one=uno
+8.6 «next year» — next=que viene; year=año
+9.1 «On Saturday» — On=los; Saturday=sábados
+9.2 «I clean» — I=yo; clean=limpio
+9.3 «my room» — my=mi; room=habitación
+9.4 «After that» — After=después; that=de eso
+9.5 «I cook» — I=yo; cook=cocino
+9.6 «lunch for my family» — lunch=la comida; for=para; my=mi; family=familia
+10.1 «I don't drink» — I=yo; don't=no; drink=bebo
+10.2 «coffee» — coffee=café
+10.3 «in the evening» — in=por; the=la; evening=noche
+10.4 «It is bad» — It=esto; is=es; bad=malo
+10.5 «for my sleep» — for=para; my=mi; sleep=sueño
+10.6 «so I drink tea» — so=así que; I=yo; drink=bebo; tea=té

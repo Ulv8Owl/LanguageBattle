@@ -56,7 +56,16 @@ final GoRouter appRouter = GoRouter(
     ),
     GoRoute(
       path: '/training',
-      builder: (context, state) => const TrainingScreen(),
+      // ?phrase=N&title=… — последний шаг Тренировки: та же Одиночная Игра,
+      // но на заранее известной фразе и в один раунд (см. TrainingScreen).
+      builder: (context, state) {
+        final phrase = int.tryParse(state.uri.queryParameters['phrase'] ?? '');
+        final title = state.uri.queryParameters['title'];
+        return TrainingScreen(
+          fixedPhraseIndex: phrase,
+          title: title == null || title.isEmpty ? null : title,
+        );
+      },
     ),
     GoRoute(
       path: '/flashcards',

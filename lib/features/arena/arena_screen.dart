@@ -189,53 +189,23 @@ class _ArenaScreenState extends State<ArenaScreen> {
   }
 
   Widget _buildTrainingSheet(BuildContext sheetContext) {
-    // По умолчанию — 1000 слов текущей лиги игрока; ниже своей лиги можно
-    // потренировать более простой набор, выше — нельзя (там ещё нечего
-    // покупать, см. word_pack_price/league_locked).
-    final maxLevel = _rating.levelIndex;
-    var selectedLevel = maxLevel;
-
-    return StatefulBuilder(
-      builder: (context, setSheetState) {
-        return _sheetChrome(
-          sheetContext: sheetContext,
-          title: 'Тренировка',
-          description: 'Карточки со словами на твоей языковой паре: смотришь слово, '
-              'вспоминаешь перевод, переворачиваешь. Не тратит энергию и работает '
-              'без подписки.',
-          stats: const [
-            _Stat(value: '1000', label: 'слов в наборе', color: AppColors.gold),
-            _Stat(value: '0', label: 'энергии', color: AppColors.ok),
-          ],
-          extraContent: Wrap(
-            alignment: WrapAlignment.center,
-            spacing: 8,
-            runSpacing: 8,
-            children: [
-              for (var i = 0; i <= maxLevel; i++)
-                ChoiceChip(
-                  label: Text(leagueBands[i].shortName),
-                  selected: selectedLevel == i,
-                  selectedColor: leagueBands[i].color.withValues(alpha: 0.25),
-                  side: BorderSide(color: selectedLevel == i ? leagueBands[i].color : AppColors.lineStrong),
-                  labelStyle: AppFonts.mono(
-                    fontSize: 10,
-                    weight: FontWeight.w700,
-                    color: selectedLevel == i ? leagueBands[i].color : AppColors.muted,
-                  ),
-                  backgroundColor: Colors.transparent,
-                  onSelected: (_) => setSheetState(() => selectedLevel = i),
-                ),
-            ],
-          ),
-          primaryLabel: 'Начать',
-          onPrimary: () {
-            trainingLevelRequest.value = selectedLevel;
-            context.push('/flashcards');
-          },
-          accent: AppColors.ok,
-        );
-      },
+    // ВЫБОРА УРОВНЯ ЗДЕСЬ БОЛЬШЕ НЕТ. Он выбирал набор слов из тысячи, а
+    // наборов не осталось: слова приходят из фразы раунда, а её уровень —
+    // лига игрока, ровно как в Одиночной Игре. Тренироваться на чужом
+    // уровне значило бы учить слова, которые в игре не встретятся.
+    return _sheetChrome(
+      sheetContext: sheetContext,
+      title: 'Тренировка',
+      description: 'Фраза твоего уровня: отмечаешь слова, перевода которых не '
+          'знаешь, проходишь их карточками и в конце говоришь эту фразу вслух. '
+          'Выбор слов и карточки не тратят энергию и работают без подписки.',
+      stats: const [
+        _Stat(value: '10+', label: 'слов за заход', color: AppColors.gold),
+        _Stat(value: '0', label: 'энергии', color: AppColors.ok),
+      ],
+      primaryLabel: 'Начать',
+      onPrimary: () => context.push('/flashcards'),
+      accent: AppColors.ok,
     );
   }
 

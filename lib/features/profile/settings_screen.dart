@@ -10,7 +10,6 @@ import '../../core/leagues.dart';
 import '../../core/supabase_client.dart';
 import '../../data/judge_models.dart';
 import '../../data/player_rating.dart';
-import '../../data/training_session.dart';
 import '../../core/theme.dart';
 import '../../widgets/chrolingo_widgets.dart';
 
@@ -39,8 +38,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
   /// + RPC ниже), здесь список только показывается и правится через RPC.
 
   /// Сколько карточек выдаётся за одну тренировку.
-  int _deckSize = defaultTrainingDeckSize;
-  bool _savingDeckSize = false;
 
   /// Рейтинг по изучаемому языку. Здесь его можно задать вручную — это
   /// отладочная возможность: дождаться перехода в следующую лигу честной
@@ -68,12 +65,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   Future<void> _loadNativeLanguage() async {
     try {
-      final row = await supabase
-          .from('users')
-          .select('training_deck_size')
-          .eq('id', currentUserId)
-          .maybeSingle();
-      if (!mounted) return;
       final learning = await supabase
           .from('user_languages')
           .select(PlayerRating.columns)
@@ -82,13 +73,119 @@ class _SettingsScreenState extends State<SettingsScreen> {
           .eq('is_active', true)
           .limit(1)
           .maybeSingle();
+      if (!mounted) return;
       setState(() {
-        final size = (row?['training_deck_size'] as num?)?.toInt();
-        if (size != null && trainingDeckSizes.contains(size)) _deckSize = size;
         _rating = learning == null ? null : PlayerRating.fromRow(learning);
       });
     } catch (_) {
       // Не удалось — покажем прочерк, менять язык это не мешает.
+    }
+  }
+
+  Future<void> _editRating() async {
+    final current = _rating ?? PlayerRating.newcomer;
+    final ratingController =
+        TextEditingController(text: '${current.display}');
+    final matchesController =
+        TextEditingController(text: '${current.matchesPlayed}');
+    final entered = await showDialog<List<int>>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: AppColors.navy2,
+        title: const Text('Рейтинг'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              'Отладочная настройка. Рейтинг Эло — он же лига, он же '
+              'сложность фраз и доступные наборы слов: одно число, пороги '
+              'лиг ниже даны в нём же.',
+              style: TextStyle(color: AppColors.muted, fontSize: 12, height: 1.4),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: ratingController,
+              autofocus: true,
+              keyboardType: TextInputType.number,
+              decoration: const InputDecoration(labelText: 'Рейтинг'),
+            ),
+            const SizedBox(height: 8),
+            TextField(
+              controller: matchesController,
+              keyboardType: TextInputType.number,
+              decoration: const InputDecoration(
+                labelText: 'Сыграно матчей: <10 — рейтинг предварительный',
+              ),
+            ),
+            const SizedBox(height: 10),
+            for (final band in leagueBands)
+              Text(
+                '${band.titleWithLevel}: от ${band.min}'
+                '${band.max > 90000 ? '' : ' до ${band.max - 1}'}',
+                style: AppFonts.mono(fontSize: 10, color: band.color),
+              ),
+          ],
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.of(ctx).pop(), child: const Text('Отмена')),
+          TextButton(
+            onPressed: () {
+              final value = int.tryParse(ratingController.text.trim());
+              final matches = int.tryParse(matchesController.text.trim());
+              Navigator.of(ctx).pop(
+                value == null || matches == null ? null : [value, matches],
+              );
+            },
+            child: const Text('Применить'),
+          ),
+        ],
+      ),
+    );
+    if (entered == null || !mounted) return;
+    // Нижняя граница 0 — та же, что в базе: sync_rating_mirrors не даёт
+    // рейтингу уйти в минус, и отладка не должна показывать то, чего
+    // в игре быть не может.
+    final value = entered[0].clamp(0, 99999);
+    final matches = entered[1].clamp(0, 9999);
+
+    setState(() => _savingRating = true);
+    try {
+      // elo, league_rating, league и cefr_level пересчитает триггер
+      // trg_sync_rating_mirrors — их отсюда трогать нельзя.
+      await supabase
+          .from('user_languages')
+          .update({
+            'rating': value.toDouble(),
+            'matches_played': matches,
+            'rating_updated_at': DateTime.now().toUtc().toIso8601String(),
+          })
+          .eq('user_id', currentUserId)
+          .eq('role', 'learning')
+          .eq('is_active', true);
+      if (!mounted) return;
+      setState(() {
+        _rating = PlayerRating(
+          rating: value.toDouble(),
+          leagueRating: value,
+          matchesPlayed: matches,
+        );
+        _savingRating = false;
+      });
+      // Арена держит рейтинг в своём состоянии и сама его не перечитывает.
+      notifyProfileChanged();
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Рейтинг $value · ${leagueFor(value).titleWithLevel} '
+              '· матчей $matches'),
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _savingRating = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Не удалось изменить рейтинг: $e')),
+      );
     }
   }
 
@@ -277,175 +374,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
     }
   }
 
-  Future<void> _pickDeckSize() async {
-    final picked = await showModalBottomSheet<int>(
-      context: context,
-      backgroundColor: AppColors.navy2,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-      ),
-      builder: (ctx) => SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const SizedBox(height: 16),
-            Text('Карточек за тренировку',
-                style: AppFonts.ui(fontSize: 15, weight: FontWeight.w800, color: AppColors.cream)),
-            const SizedBox(height: 4),
-            const Text(
-              'В колоде 100 карточек. За один заход выдаётся столько,\nследующий заход продолжит с того же места.',
-              textAlign: TextAlign.center,
-              style: TextStyle(color: AppColors.muted, fontSize: 11, height: 1.4),
-            ),
-            const SizedBox(height: 8),
-            for (final size in trainingDeckSizes)
-              ListTile(
-                title: Text('$size'),
-                trailing: size == _deckSize ? const Icon(Icons.check, color: AppColors.gold) : null,
-                onTap: () => Navigator.of(ctx).pop(size),
-              ),
-            const SizedBox(height: 12),
-          ],
-        ),
-      ),
-    );
-    if (picked == null || picked == _deckSize || !mounted) return;
-
-    setState(() => _savingDeckSize = true);
-    try {
-      await supabase
-          .from('users')
-          .update({'training_deck_size': picked})
-          .eq('id', currentUserId);
-      if (!mounted) return;
-      setState(() {
-        _deckSize = picked;
-        _savingDeckSize = false;
-      });
-    } catch (e) {
-      if (!mounted) return;
-      setState(() => _savingDeckSize = false);
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Не удалось сохранить: $e')),
-      );
-    }
-  }
-
-  /// На Эло правится одно число: рейтинг, он же лига, он же сложность
-  /// фраз. На Glicko-2 здесь было два поля (рейтинг в зачёт лиги и
-  /// отклонение), потому что выставить «рейтинг 2400» и увидеть у себя
-  /// Алмаз было нельзя — лига считалась на два отклонения ниже.
-  ///
-  /// Второе поле — сыгранные матчи: от них зависит цена матча K и пометка
-  /// «рейтинг ещё уточняется», и проверить оба состояния (новичок / уже
-  /// откалиброван) иначе нечем.
-  Future<void> _editRating() async {
-    final current = _rating ?? PlayerRating.newcomer;
-    final ratingController =
-        TextEditingController(text: '${current.display}');
-    final matchesController =
-        TextEditingController(text: '${current.matchesPlayed}');
-    final entered = await showDialog<List<int>>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        backgroundColor: AppColors.navy2,
-        title: const Text('Рейтинг'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Text(
-              'Отладочная настройка. Рейтинг Эло — он же лига, он же '
-              'сложность фраз и доступные наборы слов: одно число, пороги '
-              'лиг ниже даны в нём же.',
-              style: TextStyle(color: AppColors.muted, fontSize: 12, height: 1.4),
-            ),
-            const SizedBox(height: 12),
-            TextField(
-              controller: ratingController,
-              autofocus: true,
-              keyboardType: TextInputType.number,
-              decoration: const InputDecoration(labelText: 'Рейтинг'),
-            ),
-            const SizedBox(height: 8),
-            TextField(
-              controller: matchesController,
-              keyboardType: TextInputType.number,
-              decoration: const InputDecoration(
-                labelText: 'Сыграно матчей: <10 — рейтинг предварительный',
-              ),
-            ),
-            const SizedBox(height: 10),
-            for (final band in leagueBands)
-              Text(
-                '${band.titleWithLevel}: от ${band.min}'
-                '${band.max > 90000 ? '' : ' до ${band.max - 1}'}',
-                style: AppFonts.mono(fontSize: 10, color: band.color),
-              ),
-          ],
-        ),
-        actions: [
-          TextButton(onPressed: () => Navigator.of(ctx).pop(), child: const Text('Отмена')),
-          TextButton(
-            onPressed: () {
-              final value = int.tryParse(ratingController.text.trim());
-              final matches = int.tryParse(matchesController.text.trim());
-              Navigator.of(ctx).pop(
-                value == null || matches == null ? null : [value, matches],
-              );
-            },
-            child: const Text('Применить'),
-          ),
-        ],
-      ),
-    );
-    if (entered == null || !mounted) return;
-    // Нижняя граница 0 — та же, что в базе: sync_rating_mirrors не даёт
-    // рейтингу уйти в минус, и отладка не должна показывать то, чего
-    // в игре быть не может.
-    final value = entered[0].clamp(0, 99999);
-    final matches = entered[1].clamp(0, 9999);
-
-    setState(() => _savingRating = true);
-    try {
-      // elo, league_rating, league и cefr_level пересчитает триггер
-      // trg_sync_rating_mirrors — их отсюда трогать нельзя.
-      await supabase
-          .from('user_languages')
-          .update({
-            'rating': value.toDouble(),
-            'matches_played': matches,
-            'rating_updated_at': DateTime.now().toUtc().toIso8601String(),
-          })
-          .eq('user_id', currentUserId)
-          .eq('role', 'learning')
-          .eq('is_active', true);
-      if (!mounted) return;
-      setState(() {
-        _rating = PlayerRating(
-          rating: value.toDouble(),
-          leagueRating: value,
-          matchesPlayed: matches,
-        );
-        _savingRating = false;
-      });
-      // Арена держит рейтинг в своём состоянии и сама его не перечитывает.
-      notifyProfileChanged();
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Рейтинг $value · ${leagueFor(value).titleWithLevel} '
-              '· матчей $matches'),
-        ),
-      );
-    } catch (e) {
-      if (!mounted) return;
-      setState(() => _savingRating = false);
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Не удалось изменить рейтинг: $e')),
-      );
-    }
-  }
-
   @override
   Widget build(BuildContext context) {
     final t = AppLocale.strings;
@@ -473,20 +401,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 ],
               ),
             ),
-            const SizedBox(height: 18),
-            Text(t.sectionTraining, style: AppFonts.mono(fontSize: 9, weight: FontWeight.w700, color: AppColors.gold)),
-            const SizedBox(height: 8),
-            ChPanel(
-              padding: EdgeInsets.zero,
-              child: _Row(
-                icon: Icons.style,
-                title: t.cardsPerTraining,
-                trailing: _savingDeckSize
-                    ? const SizedBox(height: 14, width: 14, child: CircularProgressIndicator(strokeWidth: 2))
-                    : Text('$_deckSize', style: AppFonts.mono(fontSize: 11, color: AppColors.muted)),
-                onTap: _savingDeckSize ? null : _pickDeckSize,
-              ),
-            ),
+            // РАЗДЕЛА «ТРЕНИРОВКА» ЗДЕСЬ БОЛЬШЕ НЕТ. В нём выбиралось,
+            // сколько карточек выдавать за заход, — а колоды, которую надо
+            // резать на заходы, не осталось: слова в Тренировку приходят
+            // из фразы раунда, и сколько их будет, решает сам игрок, отмечая
+            // незнакомые.
             const SizedBox(height: 18),
             Text(t.sectionDebug, style: AppFonts.mono(fontSize: 9, weight: FontWeight.w700, color: AppColors.danger)),
             const SizedBox(height: 8),
