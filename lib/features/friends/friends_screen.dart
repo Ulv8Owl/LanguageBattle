@@ -8,8 +8,9 @@ import '../../core/theme.dart';
 import '../../data/player_rating.dart';
 import '../../data/avatar_parts.dart';
 import '../../widgets/chrolingo_widgets.dart';
+import '../../widgets/pull_handle.dart';
 import '../battle/player_card_sheet.dart';
-import 'friends_chat_screen.dart';
+import 'friends_chat_panel.dart';
 
 /// Флаг по коду языка. Отдельного поля "страна" в схеме нет (раздел 4),
 /// поэтому флаг берётся по родному языку игрока — это ближайшие реальные
@@ -111,7 +112,21 @@ class _FriendsListTab extends StatefulWidget {
   State<_FriendsListTab> createState() => _FriendsListTabState();
 }
 
-class _FriendsListTabState extends State<_FriendsListTab> {
+class _FriendsListTabState extends State<_FriendsListTab>
+    with SingleTickerProviderStateMixin {
+  /// Насколько раскрыт чат: 0 — закрыт, 1 — раскрыт до самого низа.
+  ///
+  /// ЭТО НЕ «ОТКРЫТ/ЗАКРЫТ», А ДОЛЯ. Полоску тянут пальцем, и панель обязана
+  /// идти за пальцем, а не прыгать между двумя состояниями: иначе жест
+  /// перестаёт быть перетаскиванием и становится длинным нажатием.
+  late final AnimationController _chat = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 220),
+  );
+
+  /// С кем открыт чат. null — панель покажет первого в ленте.
+  String? _chatWith;
+
   List<PlayerRef> _friends = [];
   bool _loading = true;
   bool _busy = false;
@@ -142,6 +157,7 @@ class _FriendsListTabState extends State<_FriendsListTab> {
   @override
   void dispose() {
     _inviteSub?.cancel();
+    _chat.dispose();
     super.dispose();
   }
 
@@ -205,11 +221,44 @@ class _FriendsListTabState extends State<_FriendsListTab> {
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
   }
 
-  /// Открывает переписку. [friendId] пусто — откроется первый в ленте.
+  /// Раскрывает переписку. [friendId] пусто — останется выбранный ранее.
   void _openChat([String? friendId]) {
-    Navigator.of(context).push(MaterialPageRoute<void>(
-      builder: (_) => FriendsChatScreen(initialFriendId: friendId),
-    ));
+    setState(() {
+      if (friendId != null) _chatWith = friendId;
+    });
+    _chat.animateTo(1, curve: Curves.easeOut);
+  }
+
+  /// Нажатие на полоску: закрыт — раскрыть, раскрыт — свернуть.
+  void _toggleChat() {
+    if (_chat.value > 0.5) {
+      _chat.animateBack(0, curve: Curves.easeOut);
+    } else {
+      _chat.animateTo(1, curve: Curves.easeOut);
+    }
+  }
+
+  /// Палец ведёт панель за собой. Тянут ВНИЗ — раскрывается, ВВЕРХ —
+  /// сворачивается; доля считается от той высоты, до которой чат может
+  /// вырасти, поэтому панель идёт ровно за пальцем, а не быстрее его.
+  void _dragChat(double dy, double maxHeight) {
+    if (maxHeight <= 0) return;
+    _chat.value = (_chat.value + dy / maxHeight).clamp(0.0, 1.0);
+  }
+
+  /// Палец отпущен. Решает БРОСОК, а не место, где отпустили: короткий
+  /// резкий свайп должен срабатывать, даже если панель отъехала на
+  /// четверть. Броска не было — доводим до ближней стороны.
+  void _settleChat(double velocity) {
+    if (velocity > 200) {
+      _chat.animateTo(1, curve: Curves.easeOut);
+    } else if (velocity < -200) {
+      _chat.animateBack(0, curve: Curves.easeOut);
+    } else if (_chat.value > 0.5) {
+      _chat.animateTo(1, curve: Curves.easeOut);
+    } else {
+      _chat.animateBack(0, curve: Curves.easeOut);
+    }
   }
 
   Future<void> _call(PlayerRef friend) async {
@@ -269,6 +318,50 @@ class _FriendsListTabState extends State<_FriendsListTab> {
   Widget build(BuildContext context) {
     if (_loading) return const Center(child: CircularProgressIndicator());
 
+    // ЧАТ ЖИВЁТ ВНУТРИ РАЗДЕЛА И РАСТЁТ ВНИЗ. Полоска — его нижний край:
+    // закрыт — она стоит сразу под вкладками, раскрыт — уезжает вниз, под
+    // строку ввода, и остаётся над нижней панелью приложения. Отдельным
+    // экраном это было бы уходом из раздела, а не раскрытием окна в нём.
+    //
+    // ПАНЕЛЬ ВСЕГДА В ДЕРЕВЕ, просто закрытая имеет нулевую высоту (Align с
+    // heightFactor). Поэтому переписка грузится вместе с разделом, и
+    // раскрытый чат не начинается со спиннера.
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final maxChat = (constraints.maxHeight - pullHandleHeight).clamp(0.0, double.infinity);
+        return AnimatedBuilder(
+          animation: _chat,
+          builder: (context, _) => Column(
+            children: [
+              ClipRect(
+                child: Align(
+                  alignment: Alignment.topCenter,
+                  heightFactor: _chat.value,
+                  child: SizedBox(
+                    height: maxChat,
+                    child: FriendsChatPanel(
+                      selectedFriendId: _chatWith,
+                      onSelected: (id) => setState(() => _chatWith = id),
+                    ),
+                  ),
+                ),
+              ),
+              PullHandle(
+                onTap: _toggleChat,
+                onDrag: (dy) => _dragChat(dy, maxChat),
+                onSettle: _settleChat,
+              ),
+              // Список друзей отдаёт место чату: раскрытому остаётся ноль, и
+              // это не ошибка — раздел тот же, просто занят перепиской.
+              Expanded(child: ClipRect(child: _friendsList())),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _friendsList() {
     // Группа считается собранной, когда в ней есть кто-то кроме меня.
     final inParty = _party.length > 1;
 
@@ -276,7 +369,6 @@ class _FriendsListTabState extends State<_FriendsListTab> {
       onRefresh: _load,
       child: ListView(
         children: [
-          _ChatHandle(onOpen: _openChat),
           for (final invite in _invites)
             Padding(
               padding: const EdgeInsets.only(bottom: 10),
@@ -700,53 +792,6 @@ class _SearchTabState extends State<_SearchTab> {
           ),
         ),
       ],
-    );
-  }
-}
-
-/// Полоска-ручка над списком друзей: за неё открывается переписка.
-///
-/// ПОЧЕМУ ПОЛОСКА, А НЕ КНОПКА. Чат — спутник списка друзей, а не пятый
-/// раздел: внизу и так четыре кнопки, и пятая размыла бы то, ради чего в
-/// приложение заходят. Полоска занимает строку и говорит «здесь что-то
-/// выдвигается» тем же жестом, каким выдвигаются шторки во всей системе.
-///
-/// РАБОТАЕТ И ПО НАЖАТИЮ. Потянуть догадается не каждый, а спрятанная
-/// намертво возможность — это возможность, которой нет.
-class _ChatHandle extends StatelessWidget {
-  final VoidCallback onOpen;
-
-  const _ChatHandle({required this.onOpen});
-
-  @override
-  Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: onOpen,
-      // Тянуть вниз: чат «выезжает» сверху, как шторка.
-      onVerticalDragEnd: (details) {
-        if ((details.primaryVelocity ?? 0) > 0) onOpen();
-      },
-      behavior: HitTestBehavior.opaque,
-      child: Padding(
-        padding: const EdgeInsets.only(bottom: 10),
-        child: Column(
-          children: [
-            Container(
-              width: 46,
-              height: 4,
-              decoration: BoxDecoration(
-                color: AppColors.gold,
-                borderRadius: BorderRadius.circular(2),
-              ),
-            ),
-            const SizedBox(height: 4),
-            Text(
-              'сообщения',
-              style: AppFonts.mono(fontSize: 9, weight: FontWeight.w700, color: AppColors.muted),
-            ),
-          ],
-        ),
-      ),
     );
   }
 }

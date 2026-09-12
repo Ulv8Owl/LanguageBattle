@@ -15,7 +15,7 @@ void main() {
 
   String results() => read('lib/features/battle/battle_results_screen.dart');
   String matchChat() => read('lib/widgets/match_chat_panel.dart');
-  String friendsChat() => read('lib/features/friends/friends_chat_screen.dart');
+  String friendsChat() => read('lib/features/friends/friends_chat_panel.dart');
   String friends() => read('lib/features/friends/friends_screen.dart');
   String migration() => read('supabase/migrations/0049_chats_and_rematch.sql');
 
@@ -124,16 +124,15 @@ void main() {
           contains("label: const Text('Позвать')"));
     });
 
-    test('чат — не раздел, а экран за полоской', () {
+    test('чат — не раздел и не экран, а панель внутри «Друзей»', () {
+      // Подробности раскладки и жеста — в friends_chat_panel_test.dart;
+      // здесь закреплено само решение.
       final s = friends();
-      expect(s, contains('class _ChatHandle'));
-      expect(s, contains('onVerticalDragEnd'));
-      // И по нажатию тоже: спрятанная намертво возможность — это
-      // возможность, которой нет.
-      expect(s, contains('onTap: onOpen'));
-      expect(s, contains('FriendsChatScreen(initialFriendId: friendId)'));
-      // Пятой кнопки внизу не появилось.
-      expect(read('lib/features/arena/arena_shell.dart').contains('FriendsChatScreen'), isFalse);
+      expect(s, contains('PullHandle('));
+      expect(s, contains('child: FriendsChatPanel('));
+      // Пятой кнопки внизу не появилось, и отдельного экрана тоже.
+      expect(read('lib/features/arena/arena_shell.dart').contains('FriendsChat'), isFalse);
+      expect(s.contains('MaterialPageRoute'), isFalse);
     });
 
     test('лента собеседников: закреплённые слева, потом по последнему слову', () {

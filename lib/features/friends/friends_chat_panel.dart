@@ -9,11 +9,19 @@ import '../../widgets/chrolingo_widgets.dart';
 import '../battle/player_card_sheet.dart';
 import 'friends_screen.dart';
 
-/// Переписка с друзьями — отдельный экран, а не раздел.
+/// Переписка с друзьями — ВЫДВИЖНАЯ ПАНЕЛЬ ВНУТРИ РАЗДЕЛА, не экран.
 ///
-/// ПОЧЕМУ НЕ РАЗДЕЛ. Внизу четыре кнопки, и пятая размыла бы то, ради чего
-/// в приложение заходят: играть. Переписка — спутник списка друзей, и живёт
-/// она за ним: потянул ленту вниз — открылся чат.
+/// ПОЧЕМУ НЕ ЭКРАН И НЕ РАЗДЕЛ. Внизу четыре кнопки, и пятая размыла бы
+/// то, ради чего в приложение заходят: играть. Отдельный экран не лучше:
+/// открыть его — значит уйти из списка друзей, а переписка это спутник
+/// списка, а не другое место. Поэтому чат живёт ЗДЕСЬ ЖЕ, под вкладками,
+/// и раскрывается вниз — панель растёт, а раздел остаётся тем же.
+///
+/// ГРУЗИТСЯ ВМЕСТЕ С РАЗДЕЛОМ, А НЕ ПРИ ОТКРЫТИИ. Панель живёт в дереве
+/// всегда — в закрытом виде у неё просто нулевая высота (см. Align с
+/// heightFactor в friends_screen.dart). Поэтому подписка на переписку уже
+/// работает к тому моменту, когда игрок потянул полоску, и раскрытый чат
+/// не начинается с пустого экрана и спиннера.
 ///
 /// ЛЕНТА АВАТАРОК СВЕРХУ — ЭТО И ЕСТЬ СПИСОК ДИАЛОГОВ. Списка строк с
 /// последним сообщением здесь нет намеренно: на телефоне он занял бы
@@ -24,17 +32,25 @@ import 'friends_screen.dart';
 /// ЗАКРЕПЛЕНИЕ держит нужного человека на месте, когда лента двигается.
 /// Оно своё у каждого (см. friend_chat_pins в миграции 0049): закрепив
 /// друга, я не закрепляю себя у него.
-class FriendsChatScreen extends StatefulWidget {
-  /// С кем открыть чат сразу. null — откроется первый в ленте.
-  final String? initialFriendId;
+class FriendsChatPanel extends StatefulWidget {
+  /// С кем открыт чат. Значением владеет раздел: «Написать» в строке друга
+  /// выбирает собеседника и раскрывает панель одним действием.
+  final String? selectedFriendId;
 
-  const FriendsChatScreen({super.key, this.initialFriendId});
+  /// Игрок выбрал собеседника сам — тапом по аватарке в ленте.
+  final ValueChanged<String> onSelected;
+
+  const FriendsChatPanel({
+    super.key,
+    required this.selectedFriendId,
+    required this.onSelected,
+  });
 
   @override
-  State<FriendsChatScreen> createState() => _FriendsChatScreenState();
+  State<FriendsChatPanel> createState() => _FriendsChatPanelState();
 }
 
-class _FriendsChatScreenState extends State<FriendsChatScreen> {
+class _FriendsChatPanelState extends State<FriendsChatPanel> {
   final String _myId = currentUserId;
   final _input = TextEditingController();
   final _scroll = ScrollController();
@@ -43,9 +59,14 @@ class _FriendsChatScreenState extends State<FriendsChatScreen> {
   Map<String, String> _myAvatarByPart = const {};
   String _myName = 'Ты';
   Set<String> _pinned = {};
-  String? _selected;
+
+  /// Кого показываем, когда раздел ничего не выбрал: первый в ленте.
+  String? _fallback;
   bool _loading = true;
   bool _sending = false;
+
+  /// Выбранный собеседник: сначала то, что просит раздел, иначе первый.
+  String? get _selected => widget.selectedFriendId ?? _fallback;
 
   List<DirectMessage> _messages = [];
   StreamSubscription? _messagesSub;
@@ -53,7 +74,6 @@ class _FriendsChatScreenState extends State<FriendsChatScreen> {
   @override
   void initState() {
     super.initState();
-    _selected = widget.initialFriendId;
     _load();
     // Одна подписка на всю переписку: переключение собеседника не должно
     // пересоздавать сессию Realtime на каждом нажатии (см. chat.dart).
@@ -96,7 +116,7 @@ class _FriendsChatScreenState extends State<FriendsChatScreen> {
         _myName = players[_myId]?.username ?? 'Ты';
         _myAvatarByPart = players[_myId]?.avatar ?? const {};
         _pinned = pins;
-        _selected ??= _friends.isNotEmpty ? _ordered().first.id : null;
+        _fallback = _friends.isNotEmpty ? _ordered().first.id : null;
         _loading = false;
       });
     } catch (e) {
@@ -203,31 +223,37 @@ class _FriendsChatScreenState extends State<FriendsChatScreen> {
     final selected = _selected;
     final friend = friends.where((f) => f.id == selected).firstOrNull;
 
-    return Scaffold(
-      appBar: AppBar(title: const Text('Сообщения')),
-      body: SafeArea(
-        child: _loading
-            ? const Center(child: CircularProgressIndicator())
-            : friends.isEmpty
-                ? const Center(
-                    child: Padding(
-                      padding: EdgeInsets.symmetric(horizontal: 32),
-                      child: Text(
-                        'Писать пока некому — добавь друзей во вкладке «Поиск».',
-                        textAlign: TextAlign.center,
-                        style: TextStyle(color: AppColors.muted, fontSize: 12),
-                      ),
-                    ),
-                  )
-                : Column(
-                    children: [
-                      _strip(friends),
-                      const Divider(height: 1, color: AppColors.line),
-                      Expanded(child: friend == null ? const SizedBox.shrink() : _threadView(friend)),
-                      if (friend != null) _composer(friend),
-                    ],
-                  ),
+    // ПАНЕЛЬ, А НЕ ЭКРАН: ни Scaffold, ни шапки. Заголовок здесь был бы
+    // вторым после вкладок раздела, а сама панель по ширине такая же, как
+    // плашки друзей под ней, — она их продолжение, а не отдельное окно.
+    return Container(
+      decoration: BoxDecoration(
+        color: AppColors.navy2,
+        border: Border.all(color: AppColors.line),
+        borderRadius: BorderRadius.circular(14),
       ),
+      clipBehavior: Clip.antiAlias,
+      child: _loading
+          ? const Center(child: CircularProgressIndicator())
+          : friends.isEmpty
+              ? const Center(
+                  child: Padding(
+                    padding: EdgeInsets.symmetric(horizontal: 32),
+                    child: Text(
+                      'Писать пока некому — добавь друзей во вкладке «Поиск».',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(color: AppColors.muted, fontSize: 12),
+                    ),
+                  ),
+                )
+              : Column(
+                  children: [
+                    _strip(friends),
+                    const Divider(height: 1, color: AppColors.line),
+                    Expanded(child: friend == null ? const SizedBox.shrink() : _threadView(friend)),
+                    if (friend != null) _composer(friend),
+                  ],
+                ),
     );
   }
 
@@ -246,7 +272,7 @@ class _FriendsChatScreenState extends State<FriendsChatScreen> {
           final isSelected = f.id == _selected;
           final isPinned = _pinned.contains(f.id);
           return GestureDetector(
-            onTap: () => setState(() => _selected = f.id),
+            onTap: () => widget.onSelected(f.id),
             onLongPress: () => _togglePin(f),
             behavior: HitTestBehavior.opaque,
             child: SizedBox(
