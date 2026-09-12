@@ -25,6 +25,18 @@ class VoiceMessageBubble extends StatefulWidget {
   /// акцент, как входящее сообщение.
   final bool alignRight;
 
+  /// Почему это голосовое сейчас не слушается. null — слушается.
+  ///
+  /// ЗАЧЕМ ЗАПРЕТ. Чужой ответ в бою — это готовый перевод той же фразы.
+  /// Послушав его до своего ответа, игрок переводит не задание, а речь
+  /// соперника, и раунд превращается в диктант. Кнопка при этом остаётся
+  /// на месте и гаснет: спрятать её значило бы, что сообщения соперника
+  /// то появляются, то исчезают.
+  final String? lockedReason;
+
+  /// Тап по аватарке — карточка игрока. null — аватарка не нажимается.
+  final VoidCallback? onAvatarTap;
+
   /// Балл за это голосовое, если он предусмотрен и уже выставлен.
   ///
   /// В бою балла здесь больше нет: он и разбор приходят отдельным
@@ -40,6 +52,8 @@ class VoiceMessageBubble extends StatefulWidget {
     this.avatar = const {},
     required this.alignRight,
     this.score,
+    this.lockedReason,
+    this.onAvatarTap,
   });
 
   @override
@@ -58,6 +72,11 @@ class _VoiceMessageBubbleState extends State<VoiceMessageBubble> {
   }
 
   Future<void> _togglePlay() async {
+    final locked = widget.lockedReason;
+    if (locked != null) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(locked)));
+      return;
+    }
     if (_isPlaying) {
       await _player.stop();
       if (mounted) setState(() => _isPlaying = false);
@@ -92,6 +111,10 @@ class _VoiceMessageBubbleState extends State<VoiceMessageBubble> {
     // акцентом. Было наоборот: подсвечивался чужой ответ, и в ленте
     // взгляд цеплялся не за то.
     final accent = widget.alignRight ? AppColors.gold : AppColors.cyan;
+    // Закрытое голосовое видно, но тускло: игрок должен понимать, что
+    // соперник ответил, и при этом не иметь соблазна нажать.
+    final locked = widget.lockedReason != null;
+    final iconColor = locked ? AppColors.muted : accent;
 
     final bubble = Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
@@ -107,10 +130,16 @@ class _VoiceMessageBubbleState extends State<VoiceMessageBubble> {
             onTap: _loadingUrl ? null : _togglePlay,
             child: _loadingUrl
                 ? const SizedBox(height: 18, width: 18, child: CircularProgressIndicator(strokeWidth: 2))
-                : Icon(_isPlaying ? Icons.stop : Icons.play_arrow, color: accent, size: 22),
+                : Icon(
+                    locked
+                        ? Icons.lock_outline
+                        : (_isPlaying ? Icons.stop : Icons.play_arrow),
+                    color: iconColor,
+                    size: 22,
+                  ),
           ),
           const SizedBox(width: 8),
-          ChWaveform(width: 96, color: accent),
+          ChWaveform(width: 96, color: iconColor),
           if (widget.score != null) ...[
             const SizedBox(width: 10),
             Container(
@@ -126,11 +155,15 @@ class _VoiceMessageBubbleState extends State<VoiceMessageBubble> {
       ),
     );
 
-    final avatar = ChAvatar(
-        name: widget.name,
-        avatar: widget.avatar,
-        size: avatarSize,
-        ringColor: accent.withValues(alpha: 0.6));
+    final Widget avatar = GestureDetector(
+      onTap: widget.onAvatarTap,
+      behavior: HitTestBehavior.opaque,
+      child: ChAvatar(
+          name: widget.name,
+          avatar: widget.avatar,
+          size: avatarSize,
+          ringColor: accent.withValues(alpha: 0.6)),
+    );
 
     return Padding(
       // Одинаковый вертикальный ритм со всеми остальными сообщениями ленты:

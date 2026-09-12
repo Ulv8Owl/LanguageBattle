@@ -721,6 +721,10 @@ class _BattleScreenState extends State<BattleScreen> {
       final spoken = _recordings.where((r) => r.roundId == round.id).toList()
         ..sort((a, b) => a.createdAt.compareTo(b.createdAt));
 
+      // ОТВЕТИЛ ЛИ Я В ЭТОМ РАУНДЕ. От этого зависит, слушается ли чужое
+      // голосовое: до своего ответа оно закрыто (см. lockedReason ниже).
+      final iAnswered = _recordingFor(round.id, _myId, 'target') != null;
+
       for (final rec in spoken) {
         final isMine = rec.userId == _myId;
         if (!isMine && rec.userId != opponentId) continue;
@@ -731,6 +735,18 @@ class _BattleScreenState extends State<BattleScreen> {
           avatar: isMine ? _myAvatar : _opponentAvatar,
           // Свои сообщения справа, чужие слева — как в любом мессенджере.
           alignRight: isMine,
+          // Чужой ответ — это готовый перевод той же фразы. Послушав его
+          // первым, игрок переводил бы не задание, а речь соперника.
+          lockedReason: isMine || iAnswered
+              ? null
+              : 'Вы не можете прослушать чужой ответ пока сами '
+                  'не ответили в этом раунде.',
+          onAvatarTap: () => showPlayerCard(
+            context,
+            userId: rec.userId,
+            name: isMine ? _myName : _opponentName,
+            isMe: isMine,
+          ),
         ));
 
         // В Дуэли за переводом идёт та же фраза на родном языке. Пока она
@@ -765,9 +781,21 @@ class _BattleScreenState extends State<BattleScreen> {
         if (rec.recordingSlot != 'target') continue;
         // РАЗБОР ВИДИТ ТОЛЬКО СВОЙ ХОЗЯИН. Чужие ошибки сопернику ни к
         // чему, а объяснения к ним написаны на его родном языке — в Дуэли
-        // это язык, которого второй игрок может не знать вовсе. Счёт
-        // соперника при этом никуда не делся: он в шапке боя.
-        if (!isMine) continue;
+        // это язык, которого второй игрок может не знать вовсе.
+        //
+        // А ВОТ БАЛЛ СОПЕРНИКА ПОКАЗЫВАЕМ. Без него раунд выигрывался и
+        // проигрывался молча: своя оценка видна, чужая — нет, и понять,
+        // почему очко ушло, было не по чему. Балл говорит ровно столько,
+        // сколько нужно для счёта, и ничего из разбора не выдаёт.
+        if (!isMine) {
+          items.add(_OpponentScore(
+            key: ValueKey('${rec.id}-score'),
+            name: _opponentName,
+            avatar: _opponentAvatar,
+            score: _scoreFor(round.id, rec.userId),
+          ));
+          continue;
+        }
         items.add(_AiVerdict(
           key: ValueKey('${rec.id}-verdict'),
           recording: rec,
@@ -776,8 +804,165 @@ class _BattleScreenState extends State<BattleScreen> {
           errors: _errorsFor(rec.id),
         ));
       }
+
+      // ПРОПУСК ХОДА — тоже событие ленты, и молчать о нём нельзя. Балл за
+      // такой раунд уже выставлен сервером (auto_skip_stale_rounds), а
+      // голосового нет вовсе: раньше на месте ответа не было НИЧЕГО, и
+      // выигранный по чужому молчанию раунд выглядел так же, как ещё не
+      // доигранный. Признак структурный: балл есть, записи нет.
+      for (final userId in [opponentId, _myId]) {
+        if (userId == null) continue;
+        if (_recordingFor(round.id, userId, 'target') != null) continue;
+        if (_scoreFor(round.id, userId) == null) continue;
+        final isMine = userId == _myId;
+        items.add(_SkippedTurn(
+          key: ValueKey('${round.id}-$userId-skip'),
+          name: isMine ? _myName : _opponentName,
+          avatar: isMine ? _myAvatar : _opponentAvatar,
+          alignRight: isMine,
+          onAvatarTap: () => showPlayerCard(
+            context,
+            userId: userId,
+            name: isMine ? _myName : _opponentName,
+            isMe: isMine,
+          ),
+        ));
+      }
     }
     return items;
+  }
+}
+
+/// Балл соперника за раунд — без единого слова разбора.
+///
+/// Стоит там же, где у своего голосового стоит разбор: сразу под ответом.
+/// Разбор соперника не показываем НИКОГДА (его ошибки игроку ни к чему, а
+/// объяснения написаны на чужом родном языке), но балл — единственное, что
+/// решает раунд, и прятать его значит прятать причину счёта.
+class _OpponentScore extends StatelessWidget {
+  final String name;
+  final Map<String, String> avatar;
+
+  /// null — судья ещё считает.
+  final int? score;
+
+  const _OpponentScore({super.key, required this.name, required this.avatar, required this.score});
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(right: 40, top: feedGap / 2, bottom: feedGap / 2),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const AiAvatar(),
+          const SizedBox(width: 8),
+          Flexible(
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+              decoration: BoxDecoration(
+                color: AppColors.navy3,
+                border: Border.all(color: AppColors.line),
+                borderRadius: const BorderRadius.only(
+                  topLeft: Radius.circular(4),
+                  topRight: Radius.circular(14),
+                  bottomLeft: Radius.circular(14),
+                  bottomRight: Radius.circular(14),
+                ),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  if (score == null)
+                    const SizedBox(
+                      height: 13,
+                      width: 13,
+                      child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.gold),
+                    )
+                  else
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+                      decoration: BoxDecoration(
+                        color: AppColors.cyan,
+                        borderRadius: BorderRadius.circular(7),
+                      ),
+                      child: Text(
+                        '$score',
+                        style: AppFonts.ui(fontSize: 12, weight: FontWeight.w800, color: Colors.black),
+                      ),
+                    ),
+                  const SizedBox(width: 8),
+                  Flexible(
+                    child: Text(
+                      'балл соперника за раунд',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: AppFonts.mono(fontSize: 9, weight: FontWeight.w700, color: AppColors.muted),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// «Пропуск хода» — сообщение на месте несказанного ответа.
+///
+/// Стоит ровно там, где стояло бы голосовое, и с той же стороны ленты: это
+/// реплика игрока, просто вместо голоса в ней написано, что голоса не
+/// будет. Красным — потому что раунд для него проигран.
+class _SkippedTurn extends StatelessWidget {
+  final String name;
+  final Map<String, String> avatar;
+  final bool alignRight;
+  final VoidCallback? onAvatarTap;
+
+  const _SkippedTurn({
+    super.key,
+    required this.name,
+    required this.avatar,
+    required this.alignRight,
+    this.onAvatarTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final face = GestureDetector(
+      onTap: onAvatarTap,
+      behavior: HitTestBehavior.opaque,
+      child: ChAvatar(
+        name: name,
+        avatar: avatar,
+        size: avatarSize,
+        ringColor: AppColors.danger.withValues(alpha: 0.6),
+      ),
+    );
+    final bubble = Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
+      decoration: BoxDecoration(
+        color: AppColors.danger.withValues(alpha: 0.12),
+        border: Border.all(color: AppColors.danger.withValues(alpha: 0.5)),
+        borderRadius: BorderRadius.circular(14),
+      ),
+      child: Text(
+        'Пропуск хода',
+        style: AppFonts.ui(fontSize: 13, weight: FontWeight.w800, color: AppColors.danger),
+      ),
+    );
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: feedGap / 2),
+      child: Row(
+        mainAxisAlignment: alignRight ? MainAxisAlignment.end : MainAxisAlignment.start,
+        crossAxisAlignment: CrossAxisAlignment.end,
+        children: alignRight
+            ? [Flexible(child: bubble), const SizedBox(width: 8), face]
+            : [face, const SizedBox(width: 8), Flexible(child: bubble)],
+      ),
+    );
   }
 }
 

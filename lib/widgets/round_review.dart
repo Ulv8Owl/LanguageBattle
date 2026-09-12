@@ -166,12 +166,22 @@ class MistakeChip extends StatelessWidget {
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Text(
-              text,
-              style: TextStyle(
-                color: missed ? AppColors.danger : AppColors.cream,
-                fontSize: 12.5,
-                height: 1.2,
+            // ТЕКСТ НЕ ВЫЛЕЗАЕТ ЗА ПЛАШКУ. Плашка это цитата игрока, а она
+            // бывает длиной в половину фразы: без ограничения она уезжала
+            // за край панели разбора и обрывалась там, где её обрезал
+            // экран. Flexible + ellipsis оставляет плашку по размеру
+            // текста, пока он помещается, и добавляет «…», когда нет.
+            // Целиком цитата всё равно видна — в раскрытой плашке.
+            Flexible(
+              child: Text(
+                text,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  color: missed ? AppColors.danger : AppColors.cream,
+                  fontSize: 12.5,
+                  height: 1.2,
+                ),
               ),
             ),
             if (onTap != null) ...[

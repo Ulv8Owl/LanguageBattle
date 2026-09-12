@@ -8,6 +8,8 @@ import '../../core/theme.dart';
 import '../../data/player_rating.dart';
 import '../../data/avatar_parts.dart';
 import '../../widgets/chrolingo_widgets.dart';
+import '../battle/player_card_sheet.dart';
+import 'friends_chat_screen.dart';
 
 /// Флаг по коду языка. Отдельного поля "страна" в схеме нет (раздел 4),
 /// поэтому флаг берётся по родному языку игрока — это ближайшие реальные
@@ -203,6 +205,13 @@ class _FriendsListTabState extends State<_FriendsListTab> {
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
   }
 
+  /// Открывает переписку. [friendId] пусто — откроется первый в ленте.
+  void _openChat([String? friendId]) {
+    Navigator.of(context).push(MaterialPageRoute<void>(
+      builder: (_) => FriendsChatScreen(initialFriendId: friendId),
+    ));
+  }
+
   Future<void> _call(PlayerRef friend) async {
     setState(() => _busy = true);
     try {
@@ -267,6 +276,7 @@ class _FriendsListTabState extends State<_FriendsListTab> {
       onRefresh: _load,
       child: ListView(
         children: [
+          _ChatHandle(onOpen: _openChat),
           for (final invite in _invites)
             Padding(
               padding: const EdgeInsets.only(bottom: 10),
@@ -294,14 +304,16 @@ class _FriendsListTabState extends State<_FriendsListTab> {
                   padding: const EdgeInsets.only(bottom: 8),
                   child: PlayerRow(
                     player: f,
-                    // Если группа уже собрана — кнопок "Позвать" нет
-                    // (раздел 5.1, п.8).
-                    trailing: inParty
-                        ? null
-                        : TextButton(
-                            onPressed: _busy ? null : () => _call(f),
-                            child: const Text('Позвать', style: TextStyle(color: AppColors.gold, fontSize: 11)),
-                          ),
+                    // «ПОЗВАТЬ» ОТСЮДА УЕХАЛО В КАРТОЧКУ ИГРОКА. Строка
+                    // друга — это прежде всего способ с ним заговорить, а
+                    // приглашение в группу нужно куда реже и стоит там же,
+                    // где остальные действия над человеком.
+                    onInvite: inParty || _busy ? null : () => _call(f),
+                    trailing: TextButton(
+                      onPressed: () => _openChat(f.id),
+                      child: const Text('Написать',
+                          style: TextStyle(color: AppColors.gold, fontSize: 11)),
+                    ),
                   ),
                 )),
         ],
@@ -425,6 +437,9 @@ class PlayerRow extends StatelessWidget {
   final Color? borderColor;
   final Color? accent;
 
+  /// «Позвать» в карточке игрока. null — кнопки там не будет.
+  final VoidCallback? onInvite;
+
   const PlayerRow({
     super.key,
     required this.player,
@@ -432,11 +447,29 @@ class PlayerRow extends StatelessWidget {
     this.trailing,
     this.borderColor,
     this.accent,
+    this.onInvite,
   });
 
   @override
   Widget build(BuildContext context) {
     final color = accent ?? AppColors.cream;
+    // ВСЯ СТРОКА ОТКРЫВАЕТ КАРТОЧКУ — во всех трёх вкладках одинаково.
+    // Раньше игрок в Рейтинге или в Поиске был просто именем с числом:
+    // посмотреть, кто это, лигу и языковую пару, было негде.
+    return GestureDetector(
+      onTap: () => showPlayerCard(
+        context,
+        userId: player.id,
+        name: player.username,
+        isMe: player.id == currentUserId,
+        onInvite: onInvite,
+      ),
+      behavior: HitTestBehavior.opaque,
+      child: _panel(color),
+    );
+  }
+
+  Widget _panel(Color color) {
     return ChPanel(
       padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 9),
       borderColor: borderColor,
@@ -667,6 +700,53 @@ class _SearchTabState extends State<_SearchTab> {
           ),
         ),
       ],
+    );
+  }
+}
+
+/// Полоска-ручка над списком друзей: за неё открывается переписка.
+///
+/// ПОЧЕМУ ПОЛОСКА, А НЕ КНОПКА. Чат — спутник списка друзей, а не пятый
+/// раздел: внизу и так четыре кнопки, и пятая размыла бы то, ради чего в
+/// приложение заходят. Полоска занимает строку и говорит «здесь что-то
+/// выдвигается» тем же жестом, каким выдвигаются шторки во всей системе.
+///
+/// РАБОТАЕТ И ПО НАЖАТИЮ. Потянуть догадается не каждый, а спрятанная
+/// намертво возможность — это возможность, которой нет.
+class _ChatHandle extends StatelessWidget {
+  final VoidCallback onOpen;
+
+  const _ChatHandle({required this.onOpen});
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onOpen,
+      // Тянуть вниз: чат «выезжает» сверху, как шторка.
+      onVerticalDragEnd: (details) {
+        if ((details.primaryVelocity ?? 0) > 0) onOpen();
+      },
+      behavior: HitTestBehavior.opaque,
+      child: Padding(
+        padding: const EdgeInsets.only(bottom: 10),
+        child: Column(
+          children: [
+            Container(
+              width: 46,
+              height: 4,
+              decoration: BoxDecoration(
+                color: AppColors.gold,
+                borderRadius: BorderRadius.circular(2),
+              ),
+            ),
+            const SizedBox(height: 4),
+            Text(
+              'сообщения',
+              style: AppFonts.mono(fontSize: 9, weight: FontWeight.w700, color: AppColors.muted),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }

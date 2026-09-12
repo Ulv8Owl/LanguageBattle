@@ -12,11 +12,17 @@ import '../../widgets/chrolingo_widgets.dart';
 /// Показывает только то, что и так видно сопернику по ходу матча: имя,
 /// рейтинг и лигу, языковую пару. Ни почты, ни внутренних идентификаторов
 /// — карточку смотрит посторонний человек.
+/// [onRematch] и [onInvite] — действия, которые есть не везде, поэтому их
+/// передаёт тот экран, где они имеют смысл. Кнопка появляется только с
+/// переданным обработчиком и только в чужой карточке; лист закрывается
+/// перед вызовом, иначе действие происходило бы за перекрытым экраном.
 Future<void> showPlayerCard(
   BuildContext context, {
   required String userId,
   required String name,
   required bool isMe,
+  VoidCallback? onRematch,
+  VoidCallback? onInvite,
 }) {
   return showModalBottomSheet<void>(
     context: context,
@@ -25,7 +31,13 @@ Future<void> showPlayerCard(
     shape: const RoundedRectangleBorder(
       borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
     ),
-    builder: (_) => _PlayerCard(userId: userId, name: name, isMe: isMe),
+    builder: (_) => _PlayerCard(
+      userId: userId,
+      name: name,
+      isMe: isMe,
+      onRematch: onRematch,
+      onInvite: onInvite,
+    ),
   );
 }
 
@@ -33,8 +45,16 @@ class _PlayerCard extends StatefulWidget {
   final String userId;
   final String name;
   final bool isMe;
+  final VoidCallback? onRematch;
+  final VoidCallback? onInvite;
 
-  const _PlayerCard({required this.userId, required this.name, required this.isMe});
+  const _PlayerCard({
+    required this.userId,
+    required this.name,
+    required this.isMe,
+    this.onRematch,
+    this.onInvite,
+  });
 
   @override
   State<_PlayerCard> createState() => _PlayerCardState();
@@ -183,6 +203,39 @@ class _PlayerCardState extends State<_PlayerCard> {
                 ),
               ),
               if (!widget.isMe) ...[
+                // РЕВАНШ СТОИТ ПЕРВЫМ. На экране итогов это то, ради чего
+                // карточку и открывают: позвать того же соперника ещё раз.
+                if (widget.onRematch != null) ...[
+                  const SizedBox(height: 16),
+                  SizedBox(
+                    width: double.infinity,
+                    child: ElevatedButton.icon(
+                      onPressed: () {
+                        Navigator.of(context).pop();
+                        widget.onRematch!();
+                      },
+                      icon: const Icon(Icons.replay),
+                      label: const Text('Реванш'),
+                    ),
+                  ),
+                ],
+                // «Позвать» переехало сюда из списка друзей: в списке его
+                // место занял чат, а приглашение в группу — действие того
+                // же разряда, что и заявка в друзья.
+                if (widget.onInvite != null) ...[
+                  const SizedBox(height: 10),
+                  SizedBox(
+                    width: double.infinity,
+                    child: OutlinedButton.icon(
+                      onPressed: () {
+                        Navigator.of(context).pop();
+                        widget.onInvite!();
+                      },
+                      icon: const Icon(Icons.group_add_outlined),
+                      label: const Text('Позвать'),
+                    ),
+                  ),
+                ],
                 const SizedBox(height: 16),
                 SizedBox(
                   width: double.infinity,

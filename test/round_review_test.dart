@@ -104,13 +104,47 @@ void main() {
       expect(source, contains("import '../../widgets/round_review.dart';"));
     });
 
-    test('разбор видит только его хозяин', () {
+    test('разбор видит только его хозяин, а балл — оба', () {
       // Объяснения написаны на родном языке хозяина — в Дуэли соперник
       // этого языка может не знать вовсе, а чужие ошибки ему и не нужны.
       final verdict = source.indexOf('items.add(_AiVerdict(');
       expect(verdict, greaterThan(0));
-      final guard = source.lastIndexOf('if (!isMine) continue;', verdict);
+      final guard = source.lastIndexOf('if (!isMine) {', verdict);
       expect(guard, greaterThan(0), reason: 'перед вердиктом должен стоять отсев чужих записей');
+      // Но БАЛЛ соперника показывается: без него раунд выигрывался и
+      // проигрывался молча — своя оценка видна, чужая нет.
+      expect(source.substring(guard, verdict), contains('_OpponentScore('));
+      // И ничего из разбора при этом не уезжает: у чужого балла нет ни
+      // ленты, ни плашек.
+      final opponentScore = source.indexOf('class _OpponentScore');
+      expect(opponentScore, greaterThan(0));
+      final body = source.substring(opponentScore, source.indexOf('class _SkippedTurn'));
+      expect(body.contains('RoundReview'), isFalse);
+      expect(body.contains('mistakes'), isFalse);
+    });
+
+    test('чужое голосовое закрыто, пока сам не ответил', () {
+      // Чужой ответ — готовый перевод той же фразы. Послушав его первым,
+      // игрок переводил бы не задание, а речь соперника.
+      expect(source, contains("final iAnswered = _recordingFor(round.id, _myId, 'target') != null;"));
+      expect(source, contains('lockedReason: isMine || iAnswered'));
+      expect(source, contains('Вы не можете прослушать чужой ответ пока сами'));
+      // Запрет держит сам виджет: кнопка гаснет и отвечает объяснением, а
+      // не пропадает — пропавшее сообщение выглядело бы как сбой.
+      final bubble = File('lib/widgets/voice_message_bubble.dart').readAsStringSync();
+      expect(bubble, contains('final locked = widget.lockedReason;'));
+      expect(bubble, contains('if (locked != null) {'));
+    });
+
+    test('пропущенный ход виден в ленте, а не превращается в пустоту', () {
+      // Балл за пропуск сервер уже выставил, а голосового нет вовсе:
+      // раньше на месте ответа не было ничего, и выигранный по чужому
+      // молчанию раунд выглядел как ещё не доигранный.
+      expect(source, contains('class _SkippedTurn'));
+      expect(source, contains("'Пропуск хода'"));
+      // Признак структурный: балл есть, записи нет.
+      expect(source, contains("if (_recordingFor(round.id, userId, 'target') != null) continue;"));
+      expect(source, contains('if (_scoreFor(round.id, userId) == null) continue;'));
     });
 
     test('после «прочитай на своём языке» хамелеон молчит', () {
