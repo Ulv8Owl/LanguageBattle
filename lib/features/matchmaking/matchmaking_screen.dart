@@ -10,6 +10,7 @@ import '../../data/phrase_bank.dart';
 import '../../data/avatar_parts.dart';
 import '../../data/player_rating.dart';
 import '../battle/battle_models.dart';
+import '../../widgets/ai_avatar.dart';
 import '../../widgets/chrolingo_widgets.dart';
 
 enum _Phase { searching, found, notFound, failed }
@@ -491,7 +492,7 @@ class _MatchmakingScreenState extends State<MatchmakingScreen> {
               ChAvatar(
                   name: _opponentName,
                   avatar: _opponentAvatar,
-                  size: 48,
+                  size: avatarSize,
                   ringColor: AppColors.gold),
               const SizedBox(width: 14),
               Expanded(

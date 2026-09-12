@@ -173,7 +173,14 @@ class _PlayerCardState extends State<_PlayerCard> {
             const SizedBox(height: 18),
             // Аватарка крупно — «рассмотреть поближе» и есть одна из причин
             // сюда заходить.
-            ChAvatar(name: widget.name, avatar: _avatar, size: 96, ringColor: league.color),
+            // Своя аватарка всегда в золотой обводке, чужая — в цвете лиги:
+            // себя игрок должен узнавать по одному и тому же ободку везде.
+            ChAvatar(
+              name: widget.name,
+              avatar: _avatar,
+              size: 96,
+              ringColor: widget.isMe ? AppColors.gold : league.color,
+            ),
             const SizedBox(height: 12),
             Text(widget.name, style: AppFonts.ui(fontSize: 18, weight: FontWeight.w800, color: AppColors.cream)),
             const SizedBox(height: 16),

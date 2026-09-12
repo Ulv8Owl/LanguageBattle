@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import '../../core/supabase_client.dart';
 import '../../core/theme.dart';
 import '../../data/chat.dart';
+import '../../widgets/ai_avatar.dart';
 import '../../widgets/chrolingo_widgets.dart';
 import '../battle/player_card_sheet.dart';
 import 'friends_screen.dart';
@@ -223,17 +224,11 @@ class _FriendsChatPanelState extends State<FriendsChatPanel> {
     final selected = _selected;
     final friend = friends.where((f) => f.id == selected).firstOrNull;
 
-    // ПАНЕЛЬ, А НЕ ЭКРАН: ни Scaffold, ни шапки. Заголовок здесь был бы
-    // вторым после вкладок раздела, а сама панель по ширине такая же, как
-    // плашки друзей под ней, — она их продолжение, а не отдельное окно.
-    return Container(
-      decoration: BoxDecoration(
-        color: AppColors.navy2,
-        border: Border.all(color: AppColors.line),
-        borderRadius: BorderRadius.circular(14),
-      ),
-      clipBehavior: Clip.antiAlias,
-      child: _loading
+    // ПАНЕЛЬ, А НЕ ЭКРАН: ни Scaffold, ни шапки, ни своей рамки. Рамку и фон
+    // рисует шторка, внутри которой панель живёт (ChatDrawer): чат и
+    // полоска под ним должны читаться как ОДИН предмет, а две вложенные
+    // рамки выдавали бы их за два.
+    return _loading
           ? const Center(child: CircularProgressIndicator())
           : friends.isEmpty
               ? const Center(
@@ -253,18 +248,28 @@ class _FriendsChatPanelState extends State<FriendsChatPanel> {
                     Expanded(child: friend == null ? const SizedBox.shrink() : _threadView(friend)),
                     if (friend != null) _composer(friend),
                   ],
-                ),
-    );
+                );
   }
 
   /// Лента собеседников. Долгое нажатие закрепляет — отдельной кнопки на
   /// аватарке нет: она бы стояла на каждой из них ради редкого действия.
+  ///
+  /// СВЕЧЕНИЯ ЗДЕСЬ НЕТ НИ У КОГО. В ленте аватарки стоят вплотную, и ореол
+  /// вокруг выбранной расплывался на соседние — вместо «вот этот открыт»
+  /// получалось мутное пятно. Выбранный отмечен золотой обводкой, и этого
+  /// достаточно: другого золотого в ленте нет.
+  ///
+  /// НАЖАТИЕ НА УЖЕ ВЫБРАННОГО ОТКРЫВАЕТ ЕГО КАРТОЧКУ. Переключать диалог
+  /// на тот же самый нечего, а посмотреть, с кем разговариваешь, хочется
+  /// ровно в этот момент.
   Widget _strip(List<PlayerRef> friends) {
     return SizedBox(
-      height: 92,
+      // Высота ровно под содержимое: аватарка, промежуток и имя. Раньше она
+      // была задана на глаз, и аватарки стояли выше середины ленты.
+      height: avatarSize + 22,
       child: ListView.separated(
         scrollDirection: Axis.horizontal,
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        padding: const EdgeInsets.symmetric(horizontal: 12),
         itemCount: friends.length,
         separatorBuilder: (context, i) => const SizedBox(width: 10),
         itemBuilder: (context, i) {
@@ -272,13 +277,16 @@ class _FriendsChatPanelState extends State<FriendsChatPanel> {
           final isSelected = f.id == _selected;
           final isPinned = _pinned.contains(f.id);
           return GestureDetector(
-            onTap: () => widget.onSelected(f.id),
+            onTap: () => isSelected
+                ? _openCard(f.id, f.username, false)
+                : widget.onSelected(f.id),
             onLongPress: () => _togglePin(f),
             behavior: HitTestBehavior.opaque,
             child: SizedBox(
-              width: 62,
+              width: avatarSize + 14,
               child: Column(
                 mainAxisSize: MainAxisSize.min,
+                mainAxisAlignment: MainAxisAlignment.center,
                 children: [
                   Stack(
                     clipBehavior: Clip.none,
@@ -286,11 +294,11 @@ class _FriendsChatPanelState extends State<FriendsChatPanel> {
                       ChAvatar(
                         name: f.username,
                         avatar: f.avatar,
-                        size: 48,
+                        size: avatarSize,
                         // Золотая обводка = выбранный диалог. Другого
                         // признака «этот открыт» на ленте нет.
                         ringColor: isSelected ? AppColors.gold : AppColors.lineStrong,
-                        glow: isSelected,
+                        glow: false,
                       ),
                       if (isPinned)
                         const Positioned(
@@ -350,7 +358,7 @@ class _FriendsChatPanelState extends State<FriendsChatPanel> {
           child: ChAvatar(
             name: name,
             avatar: isMine ? _myAvatarByPart : friend.avatar,
-            size: 28,
+            size: avatarSize,
             ringColor: accent.withValues(alpha: 0.6),
           ),
         );

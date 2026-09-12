@@ -288,7 +288,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
               AvatarButton(
                 name: username,
                 avatar: avatarFromJson(_profile?['equipped_avatar']),
-                ringColor: league.color,
+                // Своя аватарка всегда золотая — см. тот же довод на Арене.
+                ringColor: AppColors.gold,
                 onDone: _load,
               ),
               const SizedBox(width: 12),

@@ -315,7 +315,11 @@ class _ArenaScreenState extends State<ArenaScreen> {
               AvatarButton(
                 name: (_profile?['username'] as String?) ?? '?',
                 avatar: avatarFromJson(_profile?['equipped_avatar']),
-                ringColor: league.color,
+                // СВОЯ АВАТАРКА ВСЕГДА В ЗОЛОТОЙ ОБВОДКЕ, какой бы ни была
+                // лига. Цвет лиги на своём лице менялся от матча к матчу, и
+                // игрок переставал узнавать себя на экране; лигу и так
+                // видно рядом — кубком и числом.
+                ringColor: AppColors.gold,
                 onDone: _load,
               ),
               const SizedBox(width: 10),
@@ -364,7 +368,9 @@ class _ArenaScreenState extends State<ArenaScreen> {
           ],
           const SizedBox(height: 22),
           ChMenuRow(
-            icon: const ChModeIcon(icon: Icons.style, gradient: [AppColors.ok, Color(0xFF2E7D52)]),
+            // Значок ЗОЛОТОЙ, как у остальных режимов: зелёный выбивался из
+            // ряда и читался как «другое», хотя Тренировка — такой же режим.
+            icon: const ChModeIcon(icon: Icons.style, gradient: [AppColors.gold, Color(0xFFFFE066)]),
             title: 'Тренировка',
             flagship: _selectedMode == _ModeKey.training,
             onTap: () => _onModeTap(_ModeKey.training, aiGated: false, sheetBuilder: _buildTrainingSheet),

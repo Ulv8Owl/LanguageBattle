@@ -6,6 +6,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import '../core/supabase_client.dart';
 import '../core/theme.dart';
 import '../data/chat.dart';
+import 'ai_avatar.dart';
 import 'chrolingo_widgets.dart';
 
 /// Мини-чат с соперником на экране итогов.
@@ -269,7 +270,7 @@ class _MatchChatPanelState extends State<MatchChatPanel> {
     final face = GestureDetector(
       onTap: () => widget.onAvatarTap(message.userId, isMine),
       behavior: HitTestBehavior.opaque,
-      child: ChAvatar(name: name, avatar: avatar, size: 26, ringColor: accent.withValues(alpha: 0.6)),
+      child: ChAvatar(name: name, avatar: avatar, size: avatarSize, ringColor: accent.withValues(alpha: 0.6)),
     );
     final bubble = Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),

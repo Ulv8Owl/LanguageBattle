@@ -8,7 +8,8 @@ import '../../core/theme.dart';
 import '../../data/player_rating.dart';
 import '../../data/avatar_parts.dart';
 import '../../widgets/chrolingo_widgets.dart';
-import '../../widgets/pull_handle.dart';
+import '../../widgets/ai_avatar.dart';
+import '../../widgets/chat_drawer.dart';
 import '../battle/player_card_sheet.dart';
 import 'friends_chat_panel.dart';
 
@@ -74,28 +75,140 @@ class FriendsScreen extends StatefulWidget {
   State<FriendsScreen> createState() => _FriendsScreenState();
 }
 
-class _FriendsScreenState extends State<FriendsScreen> {
+class _FriendsScreenState extends State<FriendsScreen>
+    with SingleTickerProviderStateMixin {
   int _tab = 0;
+
+  /// Насколько раскрыт чат: 0 — видна одна полоска, 1 — во всю высоту.
+  ///
+  /// ЭТО НЕ «ОТКРЫТ/ЗАКРЫТ», А ДОЛЯ. Полоску тянут пальцем, и шторка обязана
+  /// идти за пальцем, а не прыгать между двумя состояниями: жест,
+  /// срабатывающий только по отпусканию, — длинное нажатие, а не
+  /// перетаскивание.
+  late final AnimationController _chat = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 220),
+  );
+
+  /// С кем открыт чат. null — панель покажет первого в ленте.
+  String? _chatWith;
+
+  @override
+  void dispose() {
+    _chat.dispose();
+    super.dispose();
+  }
+
+  /// Раскрывает переписку. [friendId] пусто — останется выбранный ранее.
+  void _openChat([String? friendId]) {
+    if (friendId != null) setState(() => _chatWith = friendId);
+    _chat.animateTo(1, curve: Curves.easeOut);
+  }
+
+  void _toggleChat() {
+    if (_chat.value > 0.5) {
+      _collapseChat();
+    } else {
+      _chat.animateTo(1, curve: Curves.easeOut);
+    }
+  }
+
+  /// Свернуть — и убрать клавиатуру, если она открыта: шторка уезжает
+  /// вверх, а клавиатура осталась бы висеть над пустым разделом.
+  void _collapseChat() {
+    FocusScope.of(context).unfocus();
+    _chat.animateBack(0, curve: Curves.easeOut);
+  }
+
+  /// Палец ведёт шторку за собой. Тянут ВНИЗ — раскрывается, ВВЕРХ —
+  /// сворачивается; доля считается от той высоты, на которую чат может
+  /// вырасти, поэтому шторка идёт ровно за пальцем, а не быстрее его.
+  ///
+  /// ПРИ ОТКРЫТОЙ КЛАВИАТУРЕ ДВИЖЕНИЕ ВНИЗ УБИРАЕТ КЛАВИАТУРУ и шторку не
+  /// трогает. Иначе закрыть её было нечем: низ экрана, где в других
+  /// приложениях тянут вниз, занят самой клавиатурой, а единственная
+  /// свободная полоска — эта.
+  void _dragChat(double dy, double maxHeight) {
+    if (dy > 0 && MediaQuery.viewInsetsOf(context).bottom > 0) {
+      FocusScope.of(context).unfocus();
+      return;
+    }
+    if (maxHeight <= 0) return;
+    _chat.value = (_chat.value + dy / maxHeight).clamp(0.0, 1.0);
+  }
+
+  /// Палец отпущен. Решает БРОСОК, а не место, где отпустили: короткий
+  /// резкий свайп должен срабатывать, даже если шторка отъехала на
+  /// четверть. Броска не было — доводим до ближней стороны.
+  void _settleChat(double velocity) {
+    if (velocity > 200) {
+      _chat.animateTo(1, curve: Curves.easeOut);
+    } else if (velocity < -200) {
+      _collapseChat();
+    } else if (_chat.value > 0.5) {
+      _chat.animateTo(1, curve: Curves.easeOut);
+    } else {
+      _collapseChat();
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
+    // ЧАТ ОДИН НА ВСЕ ТРИ ВКЛАДКИ И ЖИВЁТ НАД НИМИ. Переписка принадлежит
+    // списку друзей не больше, чем рейтингу или поиску: из любого места
+    // раздела до неё должно быть одинаково недалеко.
+    //
+    // ШТОРКА НАКРЫВАЕТ СОДЕРЖИМОЕ, А НЕ РАЗДВИГАЕТ ЕГО — поэтому Stack, а
+    // не Column. В Column вкладки и списки уезжали бы вниз на каждый
+    // пиксель перетаскивания, и раздел ходил бы ходуном под пальцем.
     return Padding(
       padding: const EdgeInsets.all(16),
-      child: Column(
-        children: [
-          ChTabBar(
-            tabs: const ['Друзья', 'Рейтинг', 'Поиск'],
-            selected: _tab,
-            onChanged: (i) => setState(() => _tab = i),
-          ),
-          const SizedBox(height: 14),
-          Expanded(
-            child: IndexedStack(
-              index: _tab,
-              children: const [_FriendsListTab(), _LeaderboardTab(), _SearchTab()],
-            ),
-          ),
-        ],
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          final maxBody = (constraints.maxHeight - chatDrawerCollapsedHeight)
+              .clamp(0.0, double.infinity);
+          return Stack(
+            children: [
+              Column(
+                children: [
+                  // Единственное, что шторка занимает у раздела, — место под
+                  // свёрнутую полоску НАД вкладками.
+                  const SizedBox(height: chatDrawerCollapsedHeight + 10),
+                  ChTabBar(
+                    tabs: const ['Друзья', 'Рейтинг', 'Поиск'],
+                    selected: _tab,
+                    onChanged: (i) => setState(() => _tab = i),
+                  ),
+                  const SizedBox(height: 14),
+                  Expanded(
+                    child: IndexedStack(
+                      index: _tab,
+                      children: [
+                        _FriendsListTab(onWrite: _openChat),
+                        const _LeaderboardTab(),
+                        const _SearchTab(),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+              AnimatedBuilder(
+                animation: _chat,
+                builder: (context, _) => ChatDrawer(
+                  openness: _chat.value,
+                  maxBodyHeight: maxBody,
+                  onTap: _toggleChat,
+                  onDrag: (dy) => _dragChat(dy, maxBody),
+                  onSettle: _settleChat,
+                  child: FriendsChatPanel(
+                    selectedFriendId: _chatWith,
+                    onSelected: (id) => setState(() => _chatWith = id),
+                  ),
+                ),
+              ),
+            ],
+          );
+        },
       ),
     );
   }
@@ -106,27 +219,19 @@ class _FriendsScreenState extends State<FriendsScreen> {
 // =====================================================================
 
 class _FriendsListTab extends StatefulWidget {
-  const _FriendsListTab();
+  /// «Написать» в строке друга: раскрыть чат именно с ним.
+  ///
+  /// ШТОРКОЙ ВЛАДЕЕТ РАЗДЕЛ, а не вкладка: она одна на все три вкладки и
+  /// висит над ними. Вкладка только просит её открыть.
+  final void Function(String friendId) onWrite;
+
+  const _FriendsListTab({required this.onWrite});
 
   @override
   State<_FriendsListTab> createState() => _FriendsListTabState();
 }
 
-class _FriendsListTabState extends State<_FriendsListTab>
-    with SingleTickerProviderStateMixin {
-  /// Насколько раскрыт чат: 0 — закрыт, 1 — раскрыт до самого низа.
-  ///
-  /// ЭТО НЕ «ОТКРЫТ/ЗАКРЫТ», А ДОЛЯ. Полоску тянут пальцем, и панель обязана
-  /// идти за пальцем, а не прыгать между двумя состояниями: иначе жест
-  /// перестаёт быть перетаскиванием и становится длинным нажатием.
-  late final AnimationController _chat = AnimationController(
-    vsync: this,
-    duration: const Duration(milliseconds: 220),
-  );
-
-  /// С кем открыт чат. null — панель покажет первого в ленте.
-  String? _chatWith;
-
+class _FriendsListTabState extends State<_FriendsListTab> {
   List<PlayerRef> _friends = [];
   bool _loading = true;
   bool _busy = false;
@@ -157,7 +262,6 @@ class _FriendsListTabState extends State<_FriendsListTab>
   @override
   void dispose() {
     _inviteSub?.cancel();
-    _chat.dispose();
     super.dispose();
   }
 
@@ -221,46 +325,6 @@ class _FriendsListTabState extends State<_FriendsListTab>
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
   }
 
-  /// Раскрывает переписку. [friendId] пусто — останется выбранный ранее.
-  void _openChat([String? friendId]) {
-    setState(() {
-      if (friendId != null) _chatWith = friendId;
-    });
-    _chat.animateTo(1, curve: Curves.easeOut);
-  }
-
-  /// Нажатие на полоску: закрыт — раскрыть, раскрыт — свернуть.
-  void _toggleChat() {
-    if (_chat.value > 0.5) {
-      _chat.animateBack(0, curve: Curves.easeOut);
-    } else {
-      _chat.animateTo(1, curve: Curves.easeOut);
-    }
-  }
-
-  /// Палец ведёт панель за собой. Тянут ВНИЗ — раскрывается, ВВЕРХ —
-  /// сворачивается; доля считается от той высоты, до которой чат может
-  /// вырасти, поэтому панель идёт ровно за пальцем, а не быстрее его.
-  void _dragChat(double dy, double maxHeight) {
-    if (maxHeight <= 0) return;
-    _chat.value = (_chat.value + dy / maxHeight).clamp(0.0, 1.0);
-  }
-
-  /// Палец отпущен. Решает БРОСОК, а не место, где отпустили: короткий
-  /// резкий свайп должен срабатывать, даже если панель отъехала на
-  /// четверть. Броска не было — доводим до ближней стороны.
-  void _settleChat(double velocity) {
-    if (velocity > 200) {
-      _chat.animateTo(1, curve: Curves.easeOut);
-    } else if (velocity < -200) {
-      _chat.animateBack(0, curve: Curves.easeOut);
-    } else if (_chat.value > 0.5) {
-      _chat.animateTo(1, curve: Curves.easeOut);
-    } else {
-      _chat.animateBack(0, curve: Curves.easeOut);
-    }
-  }
-
   Future<void> _call(PlayerRef friend) async {
     setState(() => _busy = true);
     try {
@@ -317,48 +381,7 @@ class _FriendsListTabState extends State<_FriendsListTab>
   @override
   Widget build(BuildContext context) {
     if (_loading) return const Center(child: CircularProgressIndicator());
-
-    // ЧАТ ЖИВЁТ ВНУТРИ РАЗДЕЛА И РАСТЁТ ВНИЗ. Полоска — его нижний край:
-    // закрыт — она стоит сразу под вкладками, раскрыт — уезжает вниз, под
-    // строку ввода, и остаётся над нижней панелью приложения. Отдельным
-    // экраном это было бы уходом из раздела, а не раскрытием окна в нём.
-    //
-    // ПАНЕЛЬ ВСЕГДА В ДЕРЕВЕ, просто закрытая имеет нулевую высоту (Align с
-    // heightFactor). Поэтому переписка грузится вместе с разделом, и
-    // раскрытый чат не начинается со спиннера.
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        final maxChat = (constraints.maxHeight - pullHandleHeight).clamp(0.0, double.infinity);
-        return AnimatedBuilder(
-          animation: _chat,
-          builder: (context, _) => Column(
-            children: [
-              ClipRect(
-                child: Align(
-                  alignment: Alignment.topCenter,
-                  heightFactor: _chat.value,
-                  child: SizedBox(
-                    height: maxChat,
-                    child: FriendsChatPanel(
-                      selectedFriendId: _chatWith,
-                      onSelected: (id) => setState(() => _chatWith = id),
-                    ),
-                  ),
-                ),
-              ),
-              PullHandle(
-                onTap: _toggleChat,
-                onDrag: (dy) => _dragChat(dy, maxChat),
-                onSettle: _settleChat,
-              ),
-              // Список друзей отдаёт место чату: раскрытому остаётся ноль, и
-              // это не ошибка — раздел тот же, просто занят перепиской.
-              Expanded(child: ClipRect(child: _friendsList())),
-            ],
-          ),
-        );
-      },
-    );
+    return _friendsList();
   }
 
   Widget _friendsList() {
@@ -402,7 +425,7 @@ class _FriendsListTabState extends State<_FriendsListTab>
                     // где остальные действия над человеком.
                     onInvite: inParty || _busy ? null : () => _call(f),
                     trailing: TextButton(
-                      onPressed: () => _openChat(f.id),
+                      onPressed: () => widget.onWrite(f.id),
                       child: const Text('Написать',
                           style: TextStyle(color: AppColors.gold, fontSize: 11)),
                     ),
@@ -440,7 +463,7 @@ class _PartyPanel extends StatelessWidget {
                     child: Column(
                       children: [
                         ChAvatar(
-                            name: m.username, avatar: m.avatar, size: 40, ringColor: AppColors.gold),
+                            name: m.username, avatar: m.avatar, size: avatarSize, ringColor: AppColors.gold),
                         const SizedBox(height: 4),
                         SizedBox(
                           width: 54,
@@ -496,7 +519,7 @@ class _InviteCard extends StatelessWidget {
       child: Row(
         children: [
           ChAvatar(
-              name: name, avatar: inviter?.avatar ?? const {}, size: 34, ringColor: AppColors.gold),
+              name: name, avatar: inviter?.avatar ?? const {}, size: avatarSize, ringColor: AppColors.gold),
           const SizedBox(width: 10),
           Expanded(
             child: Column(
@@ -571,8 +594,12 @@ class PlayerRow extends StatelessWidget {
           ChAvatar(
               name: player.username,
               avatar: player.avatar,
-              size: 32,
-              ringColor: accent ?? AppColors.lineStrong),
+              size: avatarSize,
+              // Себя видно по золотому ободку в любом списке — хоть в
+              // рейтинге, где остальные раскрашены по лигам.
+              ringColor: player.id == currentUserId
+                  ? AppColors.gold
+                  : (accent ?? AppColors.lineStrong)),
           const SizedBox(width: 10),
           Expanded(
             child: Row(

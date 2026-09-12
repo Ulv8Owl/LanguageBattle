@@ -128,7 +128,7 @@ void main() {
       // Подробности раскладки и жеста — в friends_chat_panel_test.dart;
       // здесь закреплено само решение.
       final s = friends();
-      expect(s, contains('PullHandle('));
+      expect(s, contains('ChatDrawer('));
       expect(s, contains('child: FriendsChatPanel('));
       // Пятой кнопки внизу не появилось, и отдельного экрана тоже.
       expect(read('lib/features/arena/arena_shell.dart').contains('FriendsChat'), isFalse);
