@@ -7,9 +7,9 @@ import '../../core/all_languages.dart';
 import '../../core/supabase_client.dart';
 import '../../core/theme.dart';
 import '../../data/content_languages.dart';
-import '../../data/language_pairs.dart';
+import '../../data/my_languages.dart';
 import '../../widgets/language_picker.dart';
-import '../profile/language_pair_screen.dart';
+import '../../widgets/language_fields.dart';
 import '../../widgets/chrolingo_widgets.dart';
 
 /// Третий шаг регистрации: игрок называет свой уровень владения языком, а
@@ -48,13 +48,13 @@ class _LevelSelectScreenState extends State<LevelSelectScreen> {
   bool _busy = false;
   String? _error;
 
-  /// Пара, уровень которой подтверждаем.
+  /// Языки, уровень которых подтверждаем.
   ///
-  /// ЕЁ МОЖНО ПОМЕНЯТЬ ПРЯМО ЗДЕСЬ. Пара заводится на предыдущем шаге
-  /// регистрации, и ошибиться там легко — а исправить было негде: профиля
-  /// со списком пар ещё нет, а завести рядом вторую значило бы навсегда
-  /// остаться с ненужной первой. Плашка ниже открывает выбор обоих языков.
-  LanguagePair? _pair;
+  /// ИХ МОЖНО ПОМЕНЯТЬ ПРЯМО ЗДЕСЬ. Языки называются на предыдущем шаге
+  /// регистрации, и ошибиться там легко — а исправить было негде:
+  /// Настройки открываются только после регистрации. Плашка ниже
+  /// открывает выбор обоих.
+  MyLanguages? _languages;
   Set<String> _ready = {};
 
   /// Нужно ли подтверждать выбранный уровень. Не нужно только для самого
@@ -70,11 +70,11 @@ class _LevelSelectScreenState extends State<LevelSelectScreen> {
   Future<void> _loadPair() async {
     try {
       final ready = await ContentLanguages.ready();
-      final pair = await fetchActivePair();
+      final languages = await fetchMyLanguages();
       if (!mounted) return;
       setState(() {
         _ready = ready;
-        _pair = pair;
+        _languages = languages;
       });
     } catch (_) {
       // Молча: кнопка проверки останется недоступной, и это честнее, чем
@@ -82,17 +82,17 @@ class _LevelSelectScreenState extends State<LevelSelectScreen> {
     }
   }
 
-  /// Смена языков пары прямо на этом экране.
+  /// Смена языков прямо на этом экране.
   ///
-  /// Меняется существующая пара, а не заводится новая: у игрока она пока
-  /// одна, и вторая, ненужная, осталась бы с ним навсегда. Рейтинг и
-  /// подтверждённый уровень при смене изучаемого языка сбрасываются — они
-  /// относились к прежнему языку (см. retarget_language_pair).
+  /// СБРАСЫВАТЬ НИЧЕГО НЕ НУЖНО. Рейтинг и подтверждённый уровень
+  /// принадлежат изучаемому языку (миграция 0051): выбрав другой, игрок
+  /// получает его собственный чистый рейтинг, а прежний остаётся при
+  /// прежнем языке.
   Future<void> _editPair() async {
-    final pair = _pair;
-    if (pair == null || _busy) return;
-    var speaks = pair.speaks;
-    var learns = pair.learns;
+    final languages = _languages;
+    if (languages == null || _busy) return;
+    var speaks = languages.speaks;
+    var learns = languages.learns;
 
     final changed = await showModalBottomSheet<bool>(
       context: context,
@@ -110,18 +110,18 @@ class _LevelSelectScreenState extends State<LevelSelectScreen> {
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                Text('Языковая пара',
+                Text('Мои языки',
                     style: AppFonts.ui(fontSize: 16, weight: FontWeight.w800)),
                 const SizedBox(height: 14),
-                LanguagePairFields(
+                LanguageChoiceFields(
                   speaks: speaks,
                   learns: learns,
                   onPickSpeaks: () async {
                     final picked = await showLanguagePicker(ctx,
-                        title: 'С какого языка переводить',
+                        title: 'На каком языке говоришь',
                         ready: _ready,
                         taken: {learns},
-                        takenNote: 'это второй язык пары');
+                        takenNote: 'это изучаемый язык');
                     if (picked != null) setSheet(() => speaks = picked);
                   },
                   onPickLearns: () async {
@@ -129,7 +129,7 @@ class _LevelSelectScreenState extends State<LevelSelectScreen> {
                         title: 'Какой язык изучать',
                         ready: _ready,
                         taken: {speaks},
-                        takenNote: 'это второй язык пары');
+                        takenNote: 'на нём ты уже говоришь');
                     if (picked != null) setSheet(() => learns = picked);
                   },
                 ),
@@ -146,13 +146,13 @@ class _LevelSelectScreenState extends State<LevelSelectScreen> {
     );
 
     if (changed != true || !mounted) return;
-    if (speaks == pair.speaks && learns == pair.learns) return;
+    if (speaks == languages.speaks && learns == languages.learns) return;
     setState(() => _busy = true);
     try {
-      await retargetLanguagePair(pair: pair, speaks: speaks, learns: learns);
+      await setMyLanguages(speaks: speaks, learns: learns);
       await _loadPair();
     } catch (e) {
-      if (mounted) setState(() => _error = languagePairError(e));
+      if (mounted) setState(() => _error = myLanguagesError(e));
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -172,7 +172,7 @@ class _LevelSelectScreenState extends State<LevelSelectScreen> {
   /// Действие главной кнопки: для всех уровней, кроме A0, — прогнать
   /// проверку и разобрать её результат; для A0 — сразу поставить рейтинг.
   Future<void> _start() async {
-    final language = _pair?.learns;
+    final language = _languages?.learns;
     if (language == null) return;
 
     // A0 проверять нечем и незачем — сразу ставим рейтинг. Процент здесь
@@ -303,7 +303,7 @@ class _LevelSelectScreenState extends State<LevelSelectScreen> {
                     style: const TextStyle(color: AppColors.muted, fontSize: 13, height: 1.5),
                   ),
                   const SizedBox(height: 14),
-                  _PairBanner(pair: _pair, onTap: _busy ? null : _editPair),
+                  _PairBanner(pair: _languages, onTap: _busy ? null : _editPair),
                   const SizedBox(height: 18),
                   for (final level in cefrLevels) ...[
                     _LevelTile(
@@ -334,7 +334,7 @@ class _LevelSelectScreenState extends State<LevelSelectScreen> {
                 width: double.infinity,
                 child: ElevatedButton(
                   // Пока не знаем изучаемый язык — идти на проверку некуда.
-                  onPressed: (_busy || _pair == null) ? null : _start,
+                  onPressed: (_busy || _languages == null) ? null : _start,
                   child: _busy
                       ? const SizedBox(
                           height: 20,
@@ -414,14 +414,14 @@ class _LevelTile extends StatelessWidget {
   }
 }
 
-/// Плашка пары над выбором уровня: с какого языка и какой изучаем.
+/// Плашка языков над выбором уровня: на каком говорим и какой изучаем.
 ///
-/// Не украшение. Уровень подтверждается ДЛЯ КОНКРЕТНОЙ пары, и игрок,
+/// Не украшение. Уровень подтверждается ДЛЯ КОНКРЕТНОГО языка, и игрок,
 /// ошибшийся с языками шагом раньше, до сих пор проходил проверку не того
 /// языка, даже не понимая этого: на экране не было написано, о каком языке
 /// вообще речь.
 class _PairBanner extends StatelessWidget {
-  final LanguagePair? pair;
+  final MyLanguages? pair;
   final VoidCallback? onTap;
 
   const _PairBanner({required this.pair, required this.onTap});

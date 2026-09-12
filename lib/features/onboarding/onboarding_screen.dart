@@ -4,7 +4,7 @@ import 'package:go_router/go_router.dart';
 import '../../core/all_languages.dart';
 import '../../core/supabase_client.dart';
 import '../../data/content_languages.dart';
-import '../../data/signup_rows.dart';
+import '../../data/my_languages.dart';
 import '../../widgets/language_picker.dart';
 
 /// Онбординг (раздел 2.1): никнейм и выбор родного/изучаемого языка.
@@ -98,14 +98,15 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
       final userId = currentUserId;
       await supabase.from('users').update({
         'username': _usernameController.text.trim(),
-        'native_language': _nativeLanguage,
       }).eq('id', userId);
 
-      await supabase.from('user_languages').insert(signupLanguageRows(
-        userId: userId,
-        nativeLanguage: _nativeLanguage,
-        targetLanguage: _targetLanguage,
-      ));
+      // ЯЗЫКИ ЗАВОДИТ СЕРВЕР, а не групповая вставка с клиента. Вставка
+      // строила строки user_languages руками, и один пропущенный ключ в
+      // одной из них ронял регистрацию каждого нового игрока; заодно она
+      // писала строку role = 'native', которую потом не читал никто.
+      // set_my_languages (миграция 0051) делает ровно то же одним вызовом
+      // и сам держит users.native_language в согласии с native_for.
+      await setMyLanguages(speaks: _nativeLanguage, learns: _targetLanguage);
 
       if (!mounted) return;
       // Не на Арену: рейтинг ещё не назначен, его назначит проверка уровня.

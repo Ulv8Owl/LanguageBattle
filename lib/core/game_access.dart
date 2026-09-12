@@ -4,7 +4,15 @@ import 'supabase_client.dart';
 /// `sync_wallet`, который заодно досчитывает восстановленную энергию —
 /// клиент энергию не считает и не начисляет сам (раздел 2.6).
 class WalletState {
+  /// Монеты и опыт ИЗУЧАЕМОГО ЯЗЫКА, а не аккаунта: весь прогресс
+  /// принадлежит языку (миграция 0051). Сменив изучаемый язык, игрок
+  /// увидит другие числа — и это не потеря, а другой счёт.
   final int coins;
+  final int xp;
+
+  /// Язык, к которому относятся эти числа. null — язык ещё не выбран.
+  final String? learningLanguage;
+
   final int energyCurrent;
   final int energyMax;
 
@@ -19,6 +27,8 @@ class WalletState {
 
   const WalletState({
     required this.coins,
+    required this.xp,
+    required this.learningLanguage,
     required this.energyCurrent,
     required this.energyMax,
     required this.subscriptionStatus,
@@ -29,6 +39,8 @@ class WalletState {
 
   static const empty = WalletState(
     coins: 0,
+    xp: 0,
+    learningLanguage: null,
     energyCurrent: 0,
     // Совпадает с потолком в схеме (миграция 0032). Это заглушка «до
     // ответа сервера»: показать 0/10 там, где на деле 0/50, — значит
@@ -47,7 +59,10 @@ class WalletState {
     }
 
     return WalletState(
+      // Имя ключа прежнее: кошелёк переехал к языку, а читатели у него те же.
       coins: (json['soft_currency'] as num?)?.toInt() ?? 0,
+      xp: (json['xp'] as num?)?.toInt() ?? 0,
+      learningLanguage: json['learning_language'] as String?,
       energyCurrent: (json['energy_current'] as num?)?.toInt() ?? 0,
       energyMax: (json['energy_max'] as num?)?.toInt() ?? 50,
       subscriptionStatus: (json['subscription_status'] as String?) ?? 'expired',

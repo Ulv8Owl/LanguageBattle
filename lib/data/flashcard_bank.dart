@@ -25,8 +25,10 @@ class FlashcardEntry {
 /// Источник — RemoteContent: тот же JSON, что раньше лежал бандлом в
 /// assets/vocab, теперь тянется с гита в рантайме и кэшируется на диске.
 /// Формат каждого файла: плоский JSON-массив из 1000 объектов в
-/// фиксированном порядке (индекс в массиве = глобальный word_index,
-/// используемый в mark_word_learned/user_learned_words) — не изменился.
+/// фиксированном порядке — не изменился.
+///
+/// НАРЕЗКИ НА ПАКИ ЗДЕСЬ БОЛЬШЕ НЕТ. Наборы по 100 слов продавались в
+/// Магазине старой Тренировке; она ушла, и уровень читается целиком.
 class FlashcardBank {
   FlashcardBank._();
 
@@ -54,11 +56,5 @@ class FlashcardBank {
     final entries = _cache[levelIndex];
     if (entries == null || entries.isEmpty) return false;
     return entries.first.byLanguage.containsKey(languageCode);
-  }
-
-  /// 100 слов пака [packIndex] (0..9) из уже загруженного уровня.
-  static List<FlashcardEntry> packSlice(List<FlashcardEntry> levelWords, int packIndex) {
-    final start = packIndex * wordsPerPack;
-    return levelWords.sublist(start, start + wordsPerPack);
   }
 }

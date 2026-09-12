@@ -11,7 +11,10 @@
 /// видит вторая сторона.
 library;
 
+import 'dart:async';
+
 import '../core/supabase_client.dart';
+import 'achievements.dart';
 
 /// Сообщение мини-чата матча.
 class MatchChatMessage {
@@ -143,6 +146,11 @@ Future<void> sendDirectMessage(String friendId, String body) async {
     'recipient_id': friendId,
     'body': text.length > 1000 ? text.substring(0, 1000) : text,
   });
+  // «Социальный» считает, скольким игрокам изучаемого языка игрок написал
+  // первым. Считает по самой переписке (sync_social_achievement, миграция
+  // 0051), поэтому сюда достаточно ткнуть после отправки — а не вести
+  // отдельный счётчик, который пришлось бы чинить после каждого сбоя.
+  unawaited(syncSocialAchievement());
 }
 
 /// Закреплённые собеседники — у каждого свои.

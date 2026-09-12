@@ -37,6 +37,14 @@ class VoiceMessageBubble extends StatefulWidget {
   /// Тап по аватарке — карточка игрока. null — аватарка не нажимается.
   final VoidCallback? onAvatarTap;
 
+  /// Голосовое действительно начали слушать. Зовётся ОДИН РАЗ НА
+  /// ВОСПРОИЗВЕДЕНИЕ и только когда звук пошёл: нажатие на закрытый пузырь
+  /// или неудачная подпись ссылки прослушиванием не считаются.
+  ///
+  /// Нужен «Аудитору» — достижению за прослушанные записи носителей
+  /// (миграция 0051). Само решение, засчитывать ли, принимает сервер.
+  final VoidCallback? onPlayed;
+
   /// Балл за это голосовое, если он предусмотрен и уже выставлен.
   ///
   /// В бою балла здесь больше нет: он и разбор приходят отдельным
@@ -54,6 +62,7 @@ class VoiceMessageBubble extends StatefulWidget {
     this.score,
     this.lockedReason,
     this.onAvatarTap,
+    this.onPlayed,
   });
 
   @override
@@ -93,6 +102,7 @@ class _VoiceMessageBubbleState extends State<VoiceMessageBubble> {
         _isPlaying = true;
         _loadingUrl = false;
       });
+      widget.onPlayed?.call();
       _player.onPlayerComplete.first.then((_) {
         if (mounted) setState(() => _isPlaying = false);
       });

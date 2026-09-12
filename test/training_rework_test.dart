@@ -138,8 +138,42 @@ void main() {
       final s = solo();
       expect(s, contains('const int? _roundsPerSession = null;'));
       expect(s, contains("_totalRounds == null ? 'Раунд \$_roundNumber'"));
-      // Выйти надо чем-то: сессия больше не кончается сама.
-      expect(s, contains("child: const Text('Завершить')"));
+      // Выйти надо чем-то: сессия больше не кончается сама. Выход — на
+      // стрелке «назад», а «Следующий раунд» занимает всю полосу.
+      expect(s.contains("child: const Text('Завершить')"), isFalse);
+      expect(s, contains("Text(_atLastRound ? 'Итоги' : 'Следующий раунд')"));
+      expect(s, contains('Future<void> _handleBack() async {'));
+    });
+
+    test('стрелка «назад» спрашивает по-разному в трёх положениях', () {
+      final s = solo();
+      // Ничего не сыграно — выходим молча; идёт раунд — предупреждаем о
+      // потерянном раунде; между раундами — завершаем сессию с итогами.
+      expect(s, contains('Вы можете подождать ответ и тогда вами будет пройдено на '));
+      expect(s, contains("stay: 'Подождать'"));
+      expect(s, contains("go: 'Выйти'"));
+      expect(s, contains("text: 'Завершить игру?', stay: 'Нет', go: 'Да'"));
+      // Системный «назад» ведёт себя так же, как стрелка в шапке.
+      expect(s, contains('canPop: false'));
+    });
+
+    test('за раунд дают монеты И опыт', () {
+      final s = solo();
+      // Опыт рос невидимо: половина награды для игрока не существовала.
+      expect(s, contains("'+\${reward!.coins} монет · +\${reward!.xp} опыта · '"));
+      expect(s, contains('class _RoundReward'));
+    });
+
+    test('на итогах сессии — только награда', () {
+      final s = solo();
+      // Средний балл игрок уже видел на каждом раунде, а «рейтинг не
+      // меняется» — сообщение о том, чего НЕ произошло.
+      expect(s.contains('Средний балл:'), isFalse);
+      expect(s.contains('Рейтинг в этом режиме не меняется'), isFalse);
+      expect(s, contains("Text('НАГРАДА'"));
+      expect(s, contains("_RewardChip(icon: '🪙', value: _sessionCoins, label: 'монет')"));
+      expect(s, contains("_RewardChip(icon: '✦', value: _sessionXp, label: 'опыта')"));
+      expect(s, contains('_sessionAchievements'));
     });
 
     test('проверка уровня по-прежнему в один раунд', () {
@@ -185,14 +219,24 @@ void main() {
       expect(migration.contains('for insert'), isFalse);
       expect(migration, contains('security definer'));
       // Идемпотентно и добирает пропущенные ступени.
-      expect(migration, contains('on conflict (user_id, kind, tier) do nothing'));
-      expect(migration, contains('generate_series(v_step, p_rounds - (p_rounds % v_step), v_step)'));
-      expect(solo(), contains('if (!widget.isSingleRound) _awardStreak(_roundNumber);'));
+      // Идемпотентность и добор пропущенных ступеней переехали в общую
+      // выдачу (0051): «Неудержимый» перестал быть единственным видом.
+      final perLanguage = read('supabase/migrations/0051_progress_per_learned_language.sql');
+      expect(perLanguage, contains('on conflict (user_id, kind, language_code, tier) do nothing'));
+      // Серия засчитывается, КОГДА РАУНД ЗАКРЫТ, а не когда нажали
+      // «Следующий раунд»: иначе «Неудержимый» за пять раундов получал бы
+      // только тот, кто пошёл на шестой.
+      expect(solo(),
+          contains('if (!widget.isSingleRound && !widget.isPlacement) _awardStreak(_roundNumber);'));
     });
 
-    test('видов ровно один — больше пока не просили', () {
-      expect(AchievementKind.values.length, 1);
+    test('видов пять, и каждый описан своим условием', () {
+      expect(AchievementKind.values.length, 5);
       expect(AchievementKind.unstoppable.title, 'Неудержимый');
+      expect(AchievementKind.conqueror.title, 'Покоритель');
+      expect(AchievementKind.auditor.title, 'Аудитор');
+      expect(AchievementKind.scholar.title, 'Знаток');
+      expect(AchievementKind.social.title, 'Социальный');
     });
   });
 }

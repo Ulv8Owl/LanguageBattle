@@ -204,7 +204,18 @@ class _TrainingScreenState extends State<TrainingScreen> {
   /// Балл за раунд. Попытка одна, и он окончательный.
   int? _score;
 
-  int? _earnedCoins;
+  /// Награда за раунд: монеты и опыт. ОДИН БАЛЛ — ОДНА МОНЕТА И ОДИН
+  /// ОПЫТ (claim_training_reward, миграция 0051), поэтому показывать их
+  /// порознь от балла бессмысленно — они рядом, на той же карточке.
+  _RoundReward? _earned;
+
+  /// Что накопилось за сессию — это и есть весь экран «Сессия пройдена».
+  int _sessionCoins = 0;
+  int _sessionXp = 0;
+
+  /// Достижения, полученные ЗА ЭТУ СЕССИЮ. Игрок увидел их всплывающей
+  /// подсказкой в момент получения, но к итогам о них уже забыл бы.
+  final List<AchievementGain> _sessionAchievements = [];
 
   /// История пройденных раундов сессии — рисуется той же лентой.
   final List<_CompletedRound> _history = [];
@@ -391,7 +402,7 @@ class _TrainingScreenState extends State<TrainingScreen> {
       _attemptAudio = null;
       _takeNumber = 0;
       _score = null;
-      _earnedCoins = null;
+      _earned = null;
       _stage = _Stage.awaitingAnswer;
     });
     _scrollToBottomSoon();
@@ -609,7 +620,7 @@ class _TrainingScreenState extends State<TrainingScreen> {
         return;
       }
 
-      final coins = await _claimReward(roundId);
+      final earned = await _claimReward(roundId);
       // Удаление аудио отложено до конца сессии: пока игрок в ней, он
       // должен иметь возможность переслушать свои голосовые прямо в ленте.
       // "Про запас" оно по-прежнему не хранится (deferred_suggestions.md,
@@ -621,7 +632,11 @@ class _TrainingScreenState extends State<TrainingScreen> {
       setState(() {
         _score = score;
         _errors = List<Map<String, dynamic>>.from(errors);
-        _earnedCoins = coins;
+        _earned = earned;
+        if (earned != null) {
+          _sessionCoins += earned.coins;
+          _sessionXp += earned.xp;
+        }
         // Задача упала целиком — но всё, что сервер успел записать до
         // падения, остаётся самой ценной уликой. Раньше здесь стояла
         // пустая заглушка, и диагностика выбрасывалась ровно в том
@@ -631,6 +646,9 @@ class _TrainingScreenState extends State<TrainingScreen> {
             : outcome;
         _stage = _Stage.roundDone;
       });
+      // Раунд засчитан — самое время проверить серию. Здесь, а не в
+      // _next(): см. _awardStreak.
+      if (!widget.isSingleRound && !widget.isPlacement) _awardStreak(_roundNumber);
       _scrollToBottomSoon();
     });
   }
@@ -703,17 +721,23 @@ class _TrainingScreenState extends State<TrainingScreen> {
 
   /// Награда за раунд. Отдельной функцией, потому что просят её ровно один
   /// раз за раунд: два места вызова однажды начислили бы дважды.
-  Future<int?> _claimReward(String roundId) async {
+  ///
+  /// СЧИТАЕТ ЕЁ СЕРВЕР (claim_training_reward, миграция 0051): один балл —
+  /// одна монета и один опыт, подсказки срезают золото пропорционально, а
+  /// опыт — вдвое мягче. Клиент сообщает только долю подсказок: подсказка
+  /// это действие в интерфейсе, которого сервер не видит.
+  Future<_RoundReward?> _claimReward(String roundId) async {
     try {
       final reward = await supabase.rpc('claim_training_reward', params: {
         'p_training_round_id': roundId,
-        // Доля подсказок — множитель награды. Считает её клиент, потому
-        // что подсказка это действие в интерфейсе, которого сервер не
-        // видит; см. комментарий у training_rounds.hint_ratio.
+        // См. комментарий у training_rounds.hint_ratio.
         'p_hint_ratio': _hintRatio,
       });
       if (reward is Map && reward['coins'] != null) {
-        return (reward['coins'] as num).toInt();
+        return _RoundReward(
+          coins: (reward['coins'] as num).toInt(),
+          xp: (reward['xp'] as num?)?.toInt() ?? 0,
+        );
       }
     } catch (e) {
       debugPrint('claim_training_reward failed: $e');
@@ -759,18 +783,85 @@ class _TrainingScreenState extends State<TrainingScreen> {
   /// в пайплайне нет.
   /// Сообщает серверу серию и показывает новые ступени.
   ///
+  /// ЗОВЁТСЯ, КОГДА РАУНД ЗАКРЫТ, а не когда игрок нажал «Следующий
+  /// раунд». Раньше было наоборот — и «Неудержимый» за пять раундов
+  /// получал только тот, кто пошёл на шестой: пятый раунд закрывался,
+  /// достижение не выдавалось, а на итогах его уже неоткуда было взять.
+  ///
   /// Не ждём ответа: достижение — украшение поверх игры, и задерживать
-  /// из-за него переход к следующему раунду нечем оправдать.
+  /// из-за него ленту нечем оправдать.
   void _awardStreak(int rounds) {
-    awardUnstoppable(rounds).then((tiers) {
-      if (!mounted || tiers.isEmpty) return;
-      final kind = AchievementKind.unstoppable;
-      for (final tier in tiers) {
+    awardUnstoppable(rounds).then((gains) {
+      if (!mounted || gains.isEmpty) return;
+      setState(() => _sessionAchievements.addAll(gains));
+      for (final gain in gains) {
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-          content: Text('Новое достижение: ${kind.title} — ${kind.describe(tier).toLowerCase()}'),
+          content: Text('Новое достижение: ${gain.title} — ${gain.detail.toLowerCase()}'),
         ));
       }
     });
+  }
+
+  /// Сыграно ли в этой сессии хоть что-то. Ровно это отличает «случайно
+  /// зашёл» от «идёт игра»: у первого выход не должен ничего спрашивать.
+  bool get _sessionStarted => _history.isNotEmpty || _stage == _Stage.roundDone;
+
+  /// Стрелка «назад» = завершить сессию.
+  ///
+  /// ТРИ РАЗНЫХ ОТВЕТА НА ОДНО НАЖАТИЕ, и это не усложнение ради
+  /// усложнения:
+  ///  * ничего не сыграно — выходим молча, спрашивать не о чем;
+  ///  * идёт раунд — ответ уже отправлен и вот-вот придёт балл, и уйти
+  ///    сейчас значит потерять целый раунд, о чём честнее предупредить;
+  ///  * между раундами — сессия кончается, и игрок видит её итоги, а не
+  ///    вылетает мимо них.
+  Future<void> _handleBack() async {
+    if (widget.isPlacement || widget.isSingleRound || _stage == _Stage.sessionDone) {
+      _finishSession();
+      return;
+    }
+
+    if (_stage == _Stage.awaitingAnswer || _stage == _Stage.grading) {
+      if (!_sessionStarted && _attempt == null && _stage == _Stage.awaitingAnswer) {
+        _finishSession();
+        return;
+      }
+      final leave = await _ask(
+        text: 'Вы можете подождать ответ и тогда вами будет пройдено на '
+            'раунд больше.',
+        stay: 'Подождать',
+        go: 'Выйти',
+      );
+      if (leave == true && mounted) _finishSession();
+      return;
+    }
+
+    if (!_sessionStarted) {
+      _finishSession();
+      return;
+    }
+
+    final finish = await _ask(text: 'Завершить игру?', stay: 'Нет', go: 'Да');
+    if (finish == true && mounted) setState(() => _stage = _Stage.sessionDone);
+  }
+
+  /// Диалог из двух кнопок. Остаться — всегда слева и всегда безопаснее:
+  /// промах не должен уводить из игры.
+  Future<bool?> _ask({required String text, required String stay, required String go}) {
+    return showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: AppColors.navy2,
+        content: Text(text, style: const TextStyle(height: 1.4)),
+        actions: [
+          TextButton(onPressed: () => Navigator.of(ctx).pop(false), child: Text(stay)),
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(true),
+            child: Text(go, style: const TextStyle(color: AppColors.danger)),
+          ),
+        ],
+      ),
+    );
   }
 
   void _finishSession() {
@@ -790,12 +881,6 @@ class _TrainingScreenState extends State<TrainingScreen> {
   }
 
   Future<void> _next() async {
-    // ДОСТИЖЕНИЕ ЗА СЕРИЮ — здесь, а не в конце сессии: игрок должен
-    // узнать о нём в тот момент, когда его заработал, а не когда решил
-    // выйти. Раунды одной сессии идут подряд по определению, поэтому
-    // серия — это и есть номер раунда.
-    if (!widget.isSingleRound) _awardStreak(_roundNumber);
-
     _history.add(_CompletedRound(
       roundNumber: _roundNumber,
       phrase: _phrase,
@@ -804,6 +889,7 @@ class _TrainingScreenState extends State<TrainingScreen> {
       score: _score ?? 0,
       attempt: _attempt,
       audio: _attemptAudio,
+      reward: _earned,
     ));
     if (_atLastRound) {
       setState(() => _stage = _Stage.sessionDone);
@@ -824,8 +910,20 @@ class _TrainingScreenState extends State<TrainingScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
+    return PopScope(
+      // Системный «назад» (жест и кнопка телефона) обязан вести себя так
+      // же, как стрелка в шапке: иначе один и тот же выход спрашивал бы
+      // по-разному в зависимости от того, чем игрок его вызвал.
+      canPop: false,
+      onPopInvokedWithResult: (didPop, _) {
+        if (!didPop) _handleBack();
+      },
+      child: Scaffold(
       appBar: AppBar(
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back),
+          onPressed: _handleBack,
+        ),
         // Версия сборки живёт в Настройках, а не в шапке игрового экрана:
         // во время раунда она только мешает.
         title: Text(widget.title ??
@@ -846,6 +944,7 @@ class _TrainingScreenState extends State<TrainingScreen> {
         ],
       ),
       body: SafeArea(child: _buildBody()),
+      ),
     );
   }
 
@@ -943,28 +1042,17 @@ class _TrainingScreenState extends State<TrainingScreen> {
           else if (_stage == _Stage.roundDone)
             Padding(
               padding: const EdgeInsets.all(16),
-              child: Row(
-                children: [
-                  // ВЫЙТИ НАДО ЧЕМ-ТО. Раньше сессия кончалась сама на
-                  // пятом раунде; теперь предела нет, и «Завершить» —
-                  // единственный способ дойти до итогов по своей воле.
-                  if (!widget.isSingleRound && !_atLastRound) ...[
-                    Expanded(
-                      child: OutlinedButton(
-                        onPressed: () => setState(() => _stage = _Stage.sessionDone),
-                        child: const Text('Завершить'),
-                      ),
-                    ),
-                    const SizedBox(width: 10),
-                  ],
-                  Expanded(
-                    flex: 2,
-                    child: ElevatedButton(
-                      onPressed: _next,
-                      child: Text(_atLastRound ? 'Итоги' : 'Следующий раунд'),
-                    ),
-                  ),
-                ],
+              // ОДНА КНОПКА НА ВСЮ ШИРИНУ. Рядом стояла «Завершить», и
+              // она мешала дважды: занимала половину полосы у действия,
+              // которое нажимают в сотню раз чаще, и предлагала выйти там,
+              // где игрок хочет играть дальше. Выход теперь там, где его и
+              // ищут, — на стрелке «назад» (см. _handleBack).
+              child: SizedBox(
+                width: double.infinity,
+                child: ElevatedButton(
+                  onPressed: _next,
+                  child: Text(_atLastRound ? 'Итоги' : 'Следующий раунд'),
+                ),
               ),
             ),
         ],
@@ -1015,7 +1103,7 @@ class _TrainingScreenState extends State<TrainingScreen> {
           isExam: widget.isPlacement));
       items.add(_ScoreCard(
           score: done.score,
-          coins: null,
+          reward: done.reward,
           attempt: done.attempt,
           examPassed: widget.isPlacement ? done.score / 10 >= placementPassRatio : null));
       items.addAll(_debugPanels('Раунд ${done.roundNumber}', done.attempt));
@@ -1033,22 +1121,58 @@ class _TrainingScreenState extends State<TrainingScreen> {
         padding: const EdgeInsets.symmetric(vertical: 16),
         child: ChPanel(
           borderColor: widget.isPlacement ? examColor : AppColors.gold,
-          padding: const EdgeInsets.symmetric(vertical: 18),
+          padding: const EdgeInsets.symmetric(vertical: 18, horizontal: 16),
           child: Column(
             children: widget.isPlacement
                 ? [
                     Text(passed ? 'Экзамен сдан' : 'Экзамен не сдан',
                         style: AppFonts.ui(fontSize: 16, weight: FontWeight.w800, color: examColor)),
                   ]
+                // ТУТ ТОЛЬКО НАГРАДА. Стояли «средний балл» и «рейтинг в
+                // этом режиме не меняется»: первое — оценка, которую игрок
+                // уже видел на каждом раунде, второе — сообщение о том,
+                // чего НЕ произошло. Ни то, ни другое не отвечало на
+                // единственный вопрос этого экрана: что я получил.
                 : [
                     Text('Сессия пройдена',
                         style: AppFonts.ui(fontSize: 16, weight: FontWeight.w800, color: AppColors.gold)),
-                    const SizedBox(height: 6),
-                    Text('Средний балл: $avg из 10',
-                        style: AppFonts.mono(fontSize: 12, weight: FontWeight.w700, color: AppColors.cream)),
-                    const SizedBox(height: 4),
-                    const Text('Рейтинг в этом режиме не меняется',
-                        style: TextStyle(color: AppColors.muted, fontSize: 11)),
+                    const SizedBox(height: 14),
+                    Text('НАГРАДА',
+                        style: AppFonts.mono(
+                            fontSize: 9, weight: FontWeight.w700, color: AppColors.muted)),
+                    const SizedBox(height: 8),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        _RewardChip(icon: '🪙', value: _sessionCoins, label: 'монет'),
+                        const SizedBox(width: 10),
+                        _RewardChip(icon: '✦', value: _sessionXp, label: 'опыта'),
+                      ],
+                    ),
+                    if (_sessionAchievements.isNotEmpty) ...[
+                      const SizedBox(height: 14),
+                      Text('ДОСТИЖЕНИЯ',
+                          style: AppFonts.mono(
+                              fontSize: 9, weight: FontWeight.w700, color: AppColors.muted)),
+                      const SizedBox(height: 8),
+                      for (final gain in _sessionAchievements)
+                        Padding(
+                          padding: const EdgeInsets.only(bottom: 6),
+                          child: Column(
+                            children: [
+                              Text(gain.title,
+                                  style: AppFonts.ui(
+                                      fontSize: 13,
+                                      weight: FontWeight.w800,
+                                      color: AppColors.gold)),
+                              Text(gain.detail,
+                                  textAlign: TextAlign.center,
+                                  style: const TextStyle(
+                                      color: AppColors.muted, fontSize: 11, height: 1.3)),
+                            ],
+                          ),
+                        ),
+                    ],
                   ],
           ),
         ),
@@ -1109,7 +1233,7 @@ class _TrainingScreenState extends State<TrainingScreen> {
             isExam: widget.isPlacement));
         items.add(_ScoreCard(
             score: _score ?? 0,
-            coins: _earnedCoins,
+            reward: _earned,
             attempt: _attempt,
             examPassed: widget.isPlacement ? _examPassed : null));
         items.addAll(_debugPanels('Раунд $_roundNumber', _attempt));
@@ -1155,6 +1279,17 @@ class _RefreshableFeed extends StatelessWidget {
   }
 }
 
+/// Награда за один раунд Одиночной Игры.
+///
+/// ДВА ЧИСЛА, А НЕ ОДНО. Раньше показывались только монеты, и опыт рос
+/// невидимо — то есть половина награды для игрока не существовала.
+class _RoundReward {
+  final int coins;
+  final int xp;
+
+  const _RoundReward({required this.coins, required this.xp});
+}
+
 class _CompletedRound {
   final int roundNumber;
   final String phrase;
@@ -1171,6 +1306,10 @@ class _CompletedRound {
   /// живут до выхода с экрана (_deleteSessionRecordings).
   final String? audio;
 
+  /// Награда именно за этот раунд — чтобы в ленте она осталась при нём, а
+  /// не пропала, как только начался следующий.
+  final _RoundReward? reward;
+
   const _CompletedRound({
     required this.roundNumber,
     required this.phrase,
@@ -1179,6 +1318,7 @@ class _CompletedRound {
     required this.score,
     required this.attempt,
     required this.audio,
+    required this.reward,
   });
 }
 
@@ -1448,9 +1588,44 @@ class _ErrorReport extends StatelessWidget {
 }
 
 /// Балл за раунд. Попытка одна, и он окончательный.
+/// Одно число награды: сколько и чего. Два таких рядом — весь итог сессии.
+class _RewardChip extends StatelessWidget {
+  final String icon;
+  final int value;
+  final String label;
+
+  const _RewardChip({required this.icon, required this.value, required this.label});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+      decoration: BoxDecoration(
+        color: AppColors.navy3,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: AppColors.line),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(icon, style: const TextStyle(fontSize: 14)),
+          const SizedBox(width: 8),
+          Text('+$value',
+              style: AppFonts.mono(
+                  fontSize: 14, weight: FontWeight.w700, color: AppColors.gold)),
+          const SizedBox(width: 6),
+          Text(label, style: const TextStyle(color: AppColors.muted, fontSize: 11)),
+        ],
+      ),
+    );
+  }
+}
+
 class _ScoreCard extends StatelessWidget {
   final int score;
-  final int? coins;
+
+  /// Монеты и опыт за раунд. null — награды не было (экзамен, сбой).
+  final _RoundReward? reward;
 
   /// Итог распознавания ВТОРОЙ попытки — именно она идёт в зачёт. Нужен,
   /// чтобы объяснить балл, выставленный не за качество речи, а из-за тишины
@@ -1466,7 +1641,7 @@ class _ScoreCard extends StatelessWidget {
 
   const _ScoreCard({
     required this.score,
-    required this.coins,
+    required this.reward,
     this.attempt,
     this.examPassed,
   });
@@ -1503,7 +1678,10 @@ class _ScoreCard extends StatelessWidget {
                     Text('Балл за раунд', style: AppFonts.ui(fontSize: 13)),
                     const SizedBox(height: 2),
                     Text(
-                      coins == null ? 'Рейтинг не меняется' : '+$coins монет · рейтинг не меняется',
+                      reward == null
+                          ? 'Рейтинг не меняется'
+                          : '+${reward!.coins} монет · +${reward!.xp} опыта · '
+                              'рейтинг не меняется',
                       style: const TextStyle(color: AppColors.muted, fontSize: 11),
                     ),
                   ],

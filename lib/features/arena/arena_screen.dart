@@ -44,13 +44,13 @@ class _ArenaScreenState extends State<ArenaScreen> {
     // Смена языковой пары в Профиле должна сразу отразиться на Арене
     // (рейтинг, доступность режимов) — Арена не пересоздаётся при
     // переключении вкладок (IndexedStack), поэтому слушаем нотификатор.
-    languagePairVersion.addListener(_load);
+    myLanguagesVersion.addListener(_load);
   }
 
   @override
   void dispose() {
     profileRevision.removeListener(_load);
-    languagePairVersion.removeListener(_load);
+    myLanguagesVersion.removeListener(_load);
     super.dispose();
   }
 
@@ -298,7 +298,10 @@ class _ArenaScreenState extends State<ArenaScreen> {
     if (_loading) {
       return const Center(child: CircularProgressIndicator());
     }
-    final xp = (_profile?['xp'] as int?) ?? 0;
+    // Опыт — из кошелька, а не из профиля: он принадлежит ИЗУЧАЕМОМУ
+    // языку (миграция 0051), и колонки users.xp больше нет. Читать её
+    // здесь значило бы вечно показывать первый уровень.
+    final xp = _wallet.xp;
     final level = 1 + xp ~/ 100;
     final levelProgress = (xp % 100) / 100;
     final league = _rating.league;

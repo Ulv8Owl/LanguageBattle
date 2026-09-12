@@ -11,7 +11,6 @@ import '../features/matchmaking/matchmaking_screen.dart';
 import '../features/onboarding/level_select_screen.dart';
 import '../features/onboarding/onboarding_screen.dart';
 import '../features/profile/avatar_editor_screen.dart';
-import '../features/profile/language_pair_screen.dart';
 import '../features/profile/settings_screen.dart';
 import '../features/training/training_screen.dart';
 
@@ -49,10 +48,6 @@ final GoRouter appRouter = GoRouter(
     GoRoute(
       path: '/avatar',
       builder: (context, state) => const AvatarEditorScreen(),
-    ),
-    GoRoute(
-      path: '/language-pair',
-      builder: (context, state) => const LanguagePairScreen(),
     ),
     GoRoute(
       path: '/training',

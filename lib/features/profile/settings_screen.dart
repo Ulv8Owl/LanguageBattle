@@ -8,7 +8,13 @@ import '../../core/app_locale.dart';
 import '../../core/debug_flags.dart';
 import '../../core/leagues.dart';
 import '../../core/supabase_client.dart';
+import '../../core/all_languages.dart';
+import '../../core/nav_state.dart';
+import '../../data/content_languages.dart';
 import '../../data/judge_models.dart';
+import '../../data/my_languages.dart';
+import '../../widgets/language_fields.dart';
+import '../../widgets/language_picker.dart';
 import '../../data/player_rating.dart';
 import '../../core/theme.dart';
 import '../../widgets/chrolingo_widgets.dart';
@@ -32,12 +38,16 @@ class _SettingsScreenState extends State<SettingsScreen> {
   bool _notifications = true;
   bool _hideFromLeaderboard = false;
 
-  /// Родные языки игрока (до 6, миграция 0025). Ровно один помечен
-  /// primary — тот, что раньше был единственным «родным языком» — и он
-  /// всегда равен users.native_language: эту связь держит сервер (триггер
-  /// + RPC ниже), здесь список только показывается и правится через RPC.
+  /// Языки игрока: на каком говорит и какой учит. ВЫБИРАЮТСЯ ЗДЕСЬ, а не
+  /// в Профиле: языковых пар больше нет, выбор ровно один, и место ему —
+  /// среди настроек, а не среди достижений (миграция 0051).
+  MyLanguages? _languages;
 
-  /// Сколько карточек выдаётся за одну тренировку.
+  /// Языки, для которых у игры есть фразы. Остальные показывать выбором
+  /// нечестно: игрок выберет, а играть будет не во что.
+  Set<String> _ready = const {};
+  bool _savingLanguages = false;
+
 
   /// Рейтинг по изучаемому языку. Здесь его можно задать вручную — это
   /// отладочная возможность: дождаться перехода в следующую лигу честной
@@ -60,6 +70,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   void initState() {
     super.initState();
     _loadNativeLanguage();
+    _loadMyLanguages();
     _loadJudgeModels();
   }
 
@@ -79,6 +90,118 @@ class _SettingsScreenState extends State<SettingsScreen> {
       });
     } catch (_) {
       // Не удалось — покажем прочерк, менять язык это не мешает.
+    }
+  }
+
+  Future<void> _loadMyLanguages() async {
+    try {
+      final ready = await ContentLanguages.ready();
+      final languages = await fetchMyLanguages();
+      if (!mounted) return;
+      setState(() {
+        _ready = ready;
+        _languages = languages;
+      });
+    } catch (_) {
+      // Молча: плашка останется с прочерком, и это честнее, чем показать
+      // языки, которых мы не знаем.
+    }
+  }
+
+  /// Выбор обоих языков одним листом.
+  ///
+  /// ОБА СРАЗУ, А НЕ ПО ОДНОМУ. Языки связаны запретом «нельзя учить язык
+  /// у самого себя»: меняя их по одному, игрок неизбежно проходил бы через
+  /// запрещённое состояние и получал отказ на честном действии.
+  ///
+  /// СМЕНА ИЗУЧАЕМОГО НИЧЕГО НЕ СТИРАЕТ. Рейтинг, монеты, опыт и
+  /// достижения принадлежат языку (миграция 0051): вернувшись к прежнему,
+  /// игрок найдёт всё на месте.
+  Future<void> _editLanguages() async {
+    if (_savingLanguages) return;
+    var speaks = _languages?.speaks;
+    var learns = _languages?.learns;
+
+    final changed = await showModalBottomSheet<bool>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: AppColors.navy2,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setSheet) => SafeArea(
+          child: Padding(
+            padding: EdgeInsets.fromLTRB(
+                20, 18, 20, 18 + MediaQuery.of(ctx).viewInsets.bottom),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Text('Мои языки',
+                    style: AppFonts.ui(fontSize: 16, weight: FontWeight.w800)),
+                const SizedBox(height: 6),
+                Text(
+                  'Весь прогресс — рейтинг, золото, опыт и достижения — '
+                  'принадлежит изучаемому языку. Сменив его, ты ничего не '
+                  'потеряешь: вернёшься — всё будет на месте.',
+                  style: AppFonts.ui(fontSize: 11, color: AppColors.muted),
+                ),
+                const SizedBox(height: 14),
+                LanguageChoiceFields(
+                  speaks: speaks,
+                  learns: learns,
+                  onPickSpeaks: () async {
+                    final picked = await showLanguagePicker(ctx,
+                        title: 'На каком языке говоришь',
+                        ready: _ready,
+                        taken: {if (learns != null) learns!},
+                        takenNote: 'это изучаемый язык');
+                    if (picked != null) setSheet(() => speaks = picked);
+                  },
+                  onPickLearns: () async {
+                    final picked = await showLanguagePicker(ctx,
+                        title: 'Какой язык изучать',
+                        ready: _ready,
+                        taken: {if (speaks != null) speaks!},
+                        takenNote: 'на нём ты уже говоришь');
+                    if (picked != null) setSheet(() => learns = picked);
+                  },
+                ),
+                const SizedBox(height: 18),
+                ElevatedButton(
+                  onPressed: (speaks == null || learns == null || speaks == learns)
+                      ? null
+                      : () => Navigator.pop(ctx, true),
+                  child: const Text('Сохранить'),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+
+    if (changed != true || !mounted) return;
+    if (speaks == _languages?.speaks && learns == _languages?.learns) return;
+
+    setState(() => _savingLanguages = true);
+    try {
+      await setMyLanguages(speaks: speaks!, learns: learns!);
+      await _loadMyLanguages();
+      await _loadNativeLanguage();
+      // Рейтинг, монеты и режимы у нового языка свои — Арена и Профиль
+      // держат их в своём состоянии и сами не перечитывают.
+      notifyMyLanguagesChanged();
+      notifyProfileChanged();
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(myLanguagesError(e))),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _savingLanguages = false);
     }
   }
 
@@ -397,6 +520,45 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       style: AppFonts.mono(fontSize: 11, color: AppColors.muted),
                     ),
                     onTap: _pickInterfaceLanguage,
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 18),
+            Text('ЯЗЫКИ', style: AppFonts.mono(fontSize: 9, weight: FontWeight.w700, color: AppColors.gold)),
+            const SizedBox(height: 8),
+            ChPanel(
+              padding: EdgeInsets.zero,
+              child: Column(
+                children: [
+                  _Row(
+                    icon: Icons.translate,
+                    title: 'Говорю на',
+                    trailing: _savingLanguages
+                        ? const SizedBox(
+                            height: 14, width: 14, child: CircularProgressIndicator(strokeWidth: 2))
+                        : Text(
+                            _languages == null
+                                ? '—'
+                                : '${languageFlag(_languages!.speaks)} ${languageName(_languages!.speaks)}',
+                            style: AppFonts.mono(fontSize: 11, color: AppColors.muted),
+                          ),
+                    onTap: _savingLanguages ? null : _editLanguages,
+                  ),
+                  const Divider(height: 1, color: AppColors.line),
+                  _Row(
+                    icon: Icons.school_outlined,
+                    title: 'Учу',
+                    trailing: _savingLanguages
+                        ? const SizedBox(
+                            height: 14, width: 14, child: CircularProgressIndicator(strokeWidth: 2))
+                        : Text(
+                            _languages == null
+                                ? '—'
+                                : '${languageFlag(_languages!.learns)} ${languageName(_languages!.learns)}',
+                            style: AppFonts.mono(fontSize: 11, color: AppColors.muted),
+                          ),
+                    onTap: _savingLanguages ? null : _editLanguages,
                   ),
                 ],
               ),

@@ -9,6 +9,7 @@ import '../../core/supabase_client.dart';
 import '../../core/theme.dart';
 import '../../data/avatar_parts.dart';
 import '../../data/phrase_bank.dart';
+import '../../data/achievements.dart';
 import '../../data/player_rating.dart';
 import '../../data/voice_submission.dart';
 import '../../widgets/ai_avatar.dart';
@@ -417,8 +418,8 @@ class _BattleScreenState extends State<BattleScreen> {
     final m = _match!;
     try {
       // finalize_match — security definer RPC (победитель по выигранным
-      // раундам, пересчёт рейтинга, начисление валюты/опыта): клиент не может
-      // писать напрямую в currency_wallets и users.xp, и сам результат
+      // раундам, пересчёт рейтинга, начисление валюты/опыта): клиент не
+      // может писать в user_languages.coins/xp напрямую, и сам результат
       // матча пересчитывается на сервере из round_scores.
       final result = await supabase.rpc('finalize_match', params: {'p_match_id': m.id});
       final alreadyCompleted = result is Map && result['already_completed'] == true;
@@ -628,6 +629,16 @@ class _BattleScreenState extends State<BattleScreen> {
   /// Выход из боя = поражение. Спрашиваем прежде, чем это случится:
   /// стрелка «назад» раньше просто сворачивала бой, и нажать её случайно
   /// ничего не стоило.
+  /// Прослушанная запись соперника — «Аудитор».
+  ///
+  /// НИЧЕГО НЕ ЖДЁМ И НЕ ПОКАЗЫВАЕМ ПО ХОДУ БОЯ. Всплывающая подсказка
+  /// посреди раунда отвлекала бы ровно тогда, когда игрок слушает; новую
+  /// ступень он увидит в профиле. Повторы и чужие языки отсеивает сервер
+  /// (note_voice_listen, миграция 0051).
+  void _noteListened(String recordingId) {
+    unawaited(noteVoiceListen(recordingId));
+  }
+
   Future<void> _confirmLeave() async {
     final m = _match;
     // Бой уже завершён (доигран или соперник вышел) — уходить не с чего.
@@ -747,6 +758,11 @@ class _BattleScreenState extends State<BattleScreen> {
             name: isMine ? _myName : _opponentName,
             isMe: isMine,
           ),
+          // «Аудитор» считает ТОЛЬКО чужие записи: свою игрок слушает
+          // сколько угодно, и никакого языка это ему не прибавляет.
+          // Носитель ли соперник, решает сервер — здесь мы просто
+          // сообщаем, что запись прослушана.
+          onPlayed: isMine ? null : () => _noteListened(rec.id),
         ));
 
         // В Дуэли за переводом идёт та же фраза на родном языке. Пока она

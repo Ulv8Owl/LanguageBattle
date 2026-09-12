@@ -36,11 +36,12 @@ void openShopSubscription() {
   arenaTabRequest.value = ArenaTabs.shop;
 }
 
-/// Языковая пара меняется из Профиля, но её использует и Арена (рейтинг,
-/// доступные режимы) — простой счётчик-нотификатор проще, чем
-/// протаскивать колбэк через IndexedStack в ArenaShell.
-final ValueNotifier<int> languagePairVersion = ValueNotifier<int>(0);
+/// Языки меняются в Настройках, но их использует и Арена (рейтинг,
+/// доступные режимы), и Профиль, и Тренировка — простой
+/// счётчик-нотификатор проще, чем протаскивать колбэк через IndexedStack в
+/// ArenaShell.
+final ValueNotifier<int> myLanguagesVersion = ValueNotifier<int>(0);
 
-void notifyLanguagePairChanged() {
-  languagePairVersion.value++;
+void notifyMyLanguagesChanged() {
+  myLanguagesVersion.value++;
 }

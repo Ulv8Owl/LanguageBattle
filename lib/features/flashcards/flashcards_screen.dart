@@ -4,6 +4,7 @@ import 'package:go_router/go_router.dart';
 
 import '../../core/supabase_client.dart';
 import '../../core/theme.dart';
+import '../../data/achievements.dart';
 import '../../data/phrase_bank.dart';
 import '../../data/phrase_glossary.dart';
 import '../../data/player_rating.dart';
@@ -77,6 +78,11 @@ class _FlashcardsScreenState extends State<FlashcardsScreen> {
   /// Из какой фразы пришло последнее отмеченное слово — её игрок и скажет
   /// в конце (см. _startSpeaking).
   int _lastPickedPhrase = -1;
+
+  /// Новые ступени «Знатока», если колода их принесла. Показываются на
+  /// экране «Слова пройдены»: всплывающая подсказка исчезла бы раньше,
+  /// чем игрок дочитал.
+  List<AchievementGain> _gained = const [];
 
   /// Карточки: очередь и её правила — общие с прежней Тренировкой.
   TrainingSession? _session;
@@ -228,6 +234,22 @@ class _FlashcardsScreenState extends State<FlashcardsScreen> {
       _flipped = false;
       session.answer(outcome);
       if (session.isDone) _stage = _Stage.cardsDone;
+    });
+    if (session.isDone) _noteLearned();
+  }
+
+  /// Колода пройдена — все её слова выучены.
+  ///
+  /// СЧИТАЕМ ПО КОНЦУ КОЛОДЫ, А НЕ ПО НАЖАТИЮ «ЗНАЮ». TrainingSession
+  /// возвращает карточку в конец, пока игрок не ответил на неё уверенно:
+  /// колода кончается ровно тогда, когда пройдены ВСЕ слова, и это
+  /// единственное честное событие «выучил». Повторы (то же слово в другой
+  /// заход) отсеивает сервер: слово засчитывается раз в жизни.
+  void _noteLearned() {
+    final gains = noteLearnedWords([for (final w in _picked) w.word]);
+    gains.then((list) {
+      if (!mounted || list.isEmpty) return;
+      setState(() => _gained = list);
     });
   }
 
@@ -481,6 +503,16 @@ class _FlashcardsScreenState extends State<FlashcardsScreen> {
             textAlign: TextAlign.center,
             style: TextStyle(color: AppColors.muted, fontSize: 13, height: 1.4),
           ),
+          for (final gain in _gained) ...[
+            const SizedBox(height: 16),
+            Text('Новое достижение: ${gain.title}',
+                style: AppFonts.ui(
+                    fontSize: 13, weight: FontWeight.w800, color: AppColors.gold)),
+            const SizedBox(height: 2),
+            Text(gain.detail,
+                textAlign: TextAlign.center,
+                style: const TextStyle(color: AppColors.muted, fontSize: 11, height: 1.3)),
+          ],
           const SizedBox(height: 22),
           SizedBox(
             width: double.infinity,

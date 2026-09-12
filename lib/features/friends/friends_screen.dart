@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import '../../core/supabase_client.dart';
 import '../../core/all_languages.dart';
 import '../../core/theme.dart';
+import '../../data/my_languages.dart';
 import '../../data/player_rating.dart';
 import '../../data/avatar_parts.dart';
 import '../../widgets/chrolingo_widgets.dart';
@@ -651,11 +652,21 @@ class _LeaderboardTabState extends State<_LeaderboardTab> {
 
   Future<void> _load() async {
     try {
+      // ТАБЛИЦА — ПО СВОЕМУ ИЗУЧАЕМОМУ ЯЗЫКУ. Рейтинг принадлежит языку
+      // (миграция 0051), и общий список мешал в одну колонку тех, кто учит
+      // английский, с теми, кто учит испанский: числа сравнивались, а
+      // сравнивать было нечего.
+      final mine = await fetchMyLanguages();
+      if (mine == null) {
+        if (mounted) setState(() => _loading = false);
+        return;
+      }
       final rows = await supabase
           .from('user_languages')
           .select('${PlayerRating.columns}, users(id, username, native_language, equipped_avatar)')
           .eq('role', 'learning')
           .eq('is_active', true)
+          .eq('language_code', mine.learns)
           // Таблица лидеров идёт по league_rating (rating - 2*RD) — так
           // рекомендует сам Гликман: место в таблице должно отражать то,
           // что система про игрока уже знает, а не аванс новичку.
