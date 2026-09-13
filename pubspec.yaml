@@ -40,6 +40,10 @@ dependencies:
   flutter_dotenv: ^5.2.1
   record: ^7.1.1
   audioplayers: ^6.1.0
+  # Субтитры ролика по ссылке — и ТОЛЬКО они. Медиа не скачивается:
+  # звук у трека свой, лежит в assets/tracks. Нужен пословный тайминг,
+  # который автоматические субтитры YouTube отдают в ClosedCaption.parts.
+  youtube_explode_dart: ^3.1.0
   path_provider: ^2.1.5
   # Уже тянулся транзитивно через supabase_flutter (зафиксирован в
   # pubspec.lock на 1.6.0) — переводим в прямую зависимость, потому что

@@ -1,4 +1,5 @@
 import 'remote_content.dart';
+import 'track_captions.dart';
 
 /// Трек режима «Аудирование»: звук в самой игре плюс текст, у которого
 /// КАЖДОЕ СЛОВО знает своё время и свой перевод.
@@ -96,6 +97,18 @@ class AudioTrack {
   /// активное слово ищется по этому списку.
   List<TimedWord> get words => [for (final line in lines) ...line.words];
 
+  /// Тот же трек с другими словами — ими подставляется притянутая разметка.
+  AudioTrack withLines(List<TrackLine> lines) => AudioTrack(
+        id: id,
+        title: title,
+        author: author,
+        audioAsset: audioAsset,
+        language: language,
+        translationLanguage: translationLanguage,
+        durationMs: lines.isEmpty ? durationMs : lines.last.endMs,
+        lines: lines,
+      );
+
   factory AudioTrack.fromJson(Map<String, dynamic> json) {
     final lines = [
       for (final line in (json['lines'] as List? ?? const []))
@@ -146,8 +159,28 @@ class TrackCatalog {
     return tracks;
   }
 
+  /// Трек со словами — своими, если они есть, иначе притянутыми
+  /// инструментом на этом устройстве.
+  ///
+  /// СВОЯ РАЗМЕТКА ГЛАВНЕЕ ПРИТЯНУТОЙ. Её писал человек, который знает и
+  /// запись, и оба языка; автоматические субтитры в лучшем случае угадали
+  /// слова и точно не угадали переводы. Перетирать первое вторым нельзя.
   static Future<AudioTrack> load(String id) async {
     final raw = await RemoteContent.loadJson(trackPath(id));
-    return AudioTrack.fromJson(Map<String, dynamic>.from(raw as Map));
+    final track = AudioTrack.fromJson(Map<String, dynamic>.from(raw as Map));
+    if (track.lines.isNotEmpty) return track;
+
+    final imported = await TrackCaptions.load(id);
+    if (imported == null) return track;
+    return track.withLines(imported);
+  }
+
+  /// Есть ли у трека слова — от этого зависит, откроется ли инструмент.
+  static Future<bool> hasWords(String id) async {
+    try {
+      return (await load(id)).lines.isNotEmpty;
+    } catch (_) {
+      return false;
+    }
   }
 }

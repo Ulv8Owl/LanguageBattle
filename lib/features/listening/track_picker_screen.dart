@@ -4,9 +4,15 @@ import 'package:go_router/go_router.dart';
 import '../../core/theme.dart';
 import '../../data/audio_track.dart';
 import '../../data/my_languages.dart';
+import '../../data/track_captions.dart';
 import '../../widgets/chrolingo_widgets.dart';
 
 /// Выбор трека — первый экран режима.
+///
+/// ТРЕК БЕЗ СЛОВ ВЕДЁТ НЕ В РЕЖИМ, А В ИНСТРУМЕНТ. Звук без разметки играть
+/// можно, но смотреть в «Аудировании» будет не на что; поэтому первый выбор
+/// такого трека открывает загрузку субтитров — и будет открывать, пока они
+/// не появятся.
 ///
 /// ПОКАЗЫВАЮТСЯ ТОЛЬКО ТРЕКИ, КОТОРЫЕ ИГРОКУ ПОДХОДЯТ: на языке, который он
 /// учит, и размеченные на язык, на котором он говорит. Трек, размеченный на
@@ -92,12 +98,58 @@ class _TrackPickerScreenState extends State<TrackPickerScreen> {
         padding: const EdgeInsets.all(16),
         itemCount: tracks.length,
         separatorBuilder: (_, _) => const SizedBox(height: 10),
-        itemBuilder: (context, index) => _TrackRow(
+          itemBuilder: (context, index) => _TrackRow(
           track: tracks[index],
-          onTap: () => context.push('/listening/${tracks[index].id}'),
+          onTap: () => _open(tracks[index]),
+          onReplaceCaptions: () => _replaceCaptions(tracks[index]),
         ),
       ),
     );
+  }
+
+  /// Открыть трек. Со словами — сразу в режим, без слов — в инструмент, и
+  /// уже оттуда в режим, если субтитры притянулись.
+  Future<void> _open(AudioTrack track) async {
+    final ready = track.lines.isNotEmpty;
+    if (!ready) {
+      final attached = await context.push<bool>('/listening/${track.id}/captions');
+      if (attached != true) {
+        // Инструмент закрыли, ничего не притянув: играть по-прежнему нечего.
+        if (mounted) await _load();
+        return;
+      }
+      if (!mounted) return;
+      await _load();
+    }
+    if (!mounted) return;
+    await context.push('/listening/${track.id}');
+  }
+
+  /// Подставить другую ссылку: притянутые субтитры могут оказаться не от
+  /// той записи, и заменить их должно быть можно, не переустанавливая игру.
+  Future<void> _replaceCaptions(AudioTrack track) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: AppColors.navy2,
+        title: Text(track.title),
+        content: const Text(
+          'Забыть притянутые субтитры и подставить другую ссылку?',
+          style: TextStyle(height: 1.4),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Отмена')),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Заменить', style: TextStyle(color: AppColors.danger)),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+    await TrackCaptions.clear(track.id);
+    if (!mounted) return;
+    await _load();
   }
 
   Widget _note(String text) => Padding(
@@ -115,8 +167,15 @@ class _TrackPickerScreenState extends State<TrackPickerScreen> {
 class _TrackRow extends StatelessWidget {
   final AudioTrack track;
   final VoidCallback onTap;
+  final VoidCallback onReplaceCaptions;
 
-  const _TrackRow({required this.track, required this.onTap});
+  const _TrackRow({
+    required this.track,
+    required this.onTap,
+    required this.onReplaceCaptions,
+  });
+
+  bool get _ready => track.lines.isNotEmpty;
 
   String get _length {
     final seconds = track.durationMs ~/ 1000;
@@ -128,10 +187,14 @@ class _TrackRow extends StatelessWidget {
     return InkWell(
       borderRadius: BorderRadius.circular(14),
       onTap: onTap,
+      // Замена субтитров — редкое действие, и место ему за долгим нажатием,
+      // а не отдельной кнопкой в каждой строке списка.
+      onLongPress: _ready ? onReplaceCaptions : null,
       child: ChPanel(
         child: Row(
           children: [
-            const Icon(Icons.hearing, color: AppColors.gold),
+            Icon(_ready ? Icons.hearing : Icons.link_off,
+                color: _ready ? AppColors.gold : AppColors.muted),
             const SizedBox(width: 12),
             Expanded(
               child: Column(
@@ -143,7 +206,9 @@ class _TrackRow extends StatelessWidget {
                       style: AppFonts.ui(fontSize: 14, weight: FontWeight.w800)),
                   const SizedBox(height: 2),
                   Text(
-                    track.author.isEmpty ? _length : '${track.author} · $_length',
+                    _ready
+                        ? (track.author.isEmpty ? _length : '${track.author} · $_length')
+                        : 'нет субтитров — нажми, чтобы добавить',
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: AppFonts.mono(fontSize: 10, color: AppColors.muted),

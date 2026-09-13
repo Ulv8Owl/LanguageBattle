@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:language_battle/core/track_clock.dart';
 import 'package:language_battle/data/audio_track.dart';
+import 'package:language_battle/data/youtube_captions.dart';
 
 /// «Аудирование»: звук лежит в самой игре, а перевод — в разметке трека.
 void main() {
@@ -58,6 +59,60 @@ void main() {
       expect(activeWordIndex(starts, 700), 1);
       expect(activeWordIndex(starts, 899), 1);
       expect(activeWordIndex(starts, 900), 2);
+    });
+  });
+
+  group('ссылка на ролик', () {
+    test('разбирается в любой из привычных форм', () {
+      // Форм ссылки больше, чем кажется, и своя регулярка ошибалась бы на
+      // каждой третьей — поэтому разбор отдан библиотеке, а тест сторожит,
+      // что он вообще работает.
+      const id = 'dQw4w9WgXcQ';
+      for (final input in [
+        'https://www.youtube.com/watch?v=$id',
+        'https://youtu.be/$id',
+        'https://www.youtube.com/embed/$id',
+        '  https://m.youtube.com/watch?v=$id&t=42s  ',
+        id,
+      ]) {
+        expect(YoutubeCaptions.videoIdFrom(input), id, reason: input);
+      }
+    });
+
+    test('мусор не притворяется ссылкой', () {
+      expect(YoutubeCaptions.videoIdFrom(''), isNull);
+      expect(YoutubeCaptions.videoIdFrom('просто текст'), isNull);
+      expect(YoutubeCaptions.videoIdFrom('https://example.com/video'), isNull);
+    });
+  });
+
+  group('своя разметка главнее притянутой', () {
+    test('withLines подставляет слова и пересчитывает длину', () {
+      // Притянутое подставляется ТОЛЬКО когда своих слов нет: свою
+      // разметку писал человек, знающий и запись, и оба языка.
+      const empty = AudioTrack(
+        id: 'x',
+        title: 't',
+        author: '',
+        audioAsset: 'tracks/x.mp3',
+        language: 'en',
+        translationLanguage: 'ru',
+        durationMs: 0,
+        lines: [],
+      );
+      expect(empty.lines, isEmpty);
+
+      final filled = empty.withLines(const [
+        TrackLine([
+          TimedWord(text: 'one', translation: 'один', startMs: 0, endMs: 500),
+          TimedWord(text: 'two', translation: null, startMs: 500, endMs: 1200),
+        ]),
+      ]);
+      expect(filled.words.length, 2);
+      expect(filled.durationMs, 1200);
+      // Всё остальное — то же самое: подставляются слова, а не трек целиком.
+      expect(filled.audioAsset, 'tracks/x.mp3');
+      expect(filled.title, 't');
     });
   });
 

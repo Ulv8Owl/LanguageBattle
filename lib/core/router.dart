@@ -13,6 +13,7 @@ import '../features/onboarding/onboarding_screen.dart';
 import '../features/profile/avatar_editor_screen.dart';
 import '../features/profile/settings_screen.dart';
 import '../features/training/training_screen.dart';
+import '../features/listening/caption_import_screen.dart';
 import '../features/listening/listening_screen.dart';
 import '../features/listening/track_picker_screen.dart';
 
@@ -54,6 +55,11 @@ final GoRouter appRouter = GoRouter(
     GoRoute(
       path: '/listening',
       builder: (context, state) => const TrackPickerScreen(),
+    ),
+    GoRoute(
+      path: '/listening/:track/captions',
+      builder: (context, state) =>
+          CaptionImportScreen(trackId: state.pathParameters['track'] ?? ''),
     ),
     GoRoute(
       path: '/listening/:track',
