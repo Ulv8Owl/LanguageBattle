@@ -219,7 +219,7 @@ class _ListeningScreenState extends State<ListeningScreen> {
                   FittedBox(
                     fit: BoxFit.scaleDown,
                     child: Text(
-                      word?.text ?? '…',
+                      word?.displayText ?? '…',
                       textAlign: TextAlign.center,
                       style: AppFonts.ui(
                           fontSize: 40, weight: FontWeight.w800, color: AppColors.gold),
@@ -229,7 +229,7 @@ class _ListeningScreenState extends State<ListeningScreen> {
                   FittedBox(
                     fit: BoxFit.scaleDown,
                     child: Text(
-                      word?.translation ?? '',
+                      word?.displayTranslation ?? '',
                       textAlign: TextAlign.center,
                       style: AppFonts.ui(
                           fontSize: 40, weight: FontWeight.w800, color: AppColors.cream),

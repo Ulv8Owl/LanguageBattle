@@ -117,6 +117,42 @@ void main() {
     });
   });
 
+  group('слово наверху без украшений', () {
+    TimedWord word(String text, [String? translation]) =>
+        TimedWord(text: text, translation: translation, startMs: 0, endMs: 1);
+
+    test('скобки, ноты и знаки препинания срезаются', () {
+      // Внизу, в сплошном тексте, это читается нормально: видно строку
+      // целиком. Наверху слово стоит одно и во весь экран.
+      expect(word('(Hello').displayText, 'Hello');
+      expect(word('world,').displayText, 'world');
+      expect(word('♪').displayText, '');
+      expect(word('«Привет!»').displayText, 'Привет');
+      expect(word('[test]').displayText, 'test');
+    });
+
+    test('дефис и апостроф внутри слова остаются', () {
+      // Они часть слова, а не украшение.
+      expect(word("don't").displayText, "don't");
+      expect(word('п-п-покер').displayText, 'п-п-покер');
+      // А по краям — срезаются.
+      expect(word('-край-').displayText, 'край');
+    });
+
+    test('перевод чистится так же', () {
+      // Скобка под словом выглядит так же странно, как скобка в слове.
+      expect(word('x', '(перевод)').displayTranslation, 'перевод');
+      expect(word('x').displayTranslation, '');
+    });
+
+    test('сам текст не меняется — чистится только показ', () {
+      // Внизу строка должна остаться такой, какой её написали.
+      final w = word('(Hello,');
+      expect(w.text, '(Hello,');
+      expect(w.displayText, 'Hello');
+    });
+  });
+
   group('перевод — свойство игрока, а не записи', () {
     const track = AudioTrack(
       id: 'x',
