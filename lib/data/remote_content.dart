@@ -80,6 +80,19 @@ class RemoteContent {
     return decoded;
   }
 
+  /// То же самое, но текстом — для файлов, которые правит человек, а не
+  /// программа. JSON для ручного перевода неудобен: одна забытая запятая,
+  /// и файл перестаёт читаться целиком.
+  ///
+  /// null — файла нет ни в сети, ни в кэше, ни в бандле. Это не поломка:
+  /// у трека может не быть своего словаря.
+  static Future<String?> loadText(String repoPath) async {
+    String? raw = await _fetchAndCache(repoPath);
+    raw ??= await _readCache(repoPath);
+    raw ??= await _readBundled(repoPath);
+    return raw;
+  }
+
   /// Тот же путь есть хоть где-то — с гита, на диске или в бандле?
   ///
   /// НЕ ходит в сеть намеренно: используется там, где нужно быстро

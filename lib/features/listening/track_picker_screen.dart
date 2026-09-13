@@ -1,10 +1,15 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:path_provider/path_provider.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../core/theme.dart';
 import '../../data/audio_track.dart';
 import '../../data/my_languages.dart';
 import '../../data/track_captions.dart';
+import '../../data/track_glossary.dart';
 import '../../widgets/chrolingo_widgets.dart';
 
 /// Выбор трека — первый экран режима.
@@ -101,7 +106,7 @@ class _TrackPickerScreenState extends State<TrackPickerScreen> {
           itemBuilder: (context, index) => _TrackRow(
           track: tracks[index],
           onTap: () => _open(tracks[index]),
-          onReplaceCaptions: () => _replaceCaptions(tracks[index]),
+          onMenu: () => _menu(tracks[index]),
         ),
       ),
     );
@@ -123,6 +128,77 @@ class _TrackPickerScreenState extends State<TrackPickerScreen> {
     }
     if (!mounted) return;
     await context.push('/listening/${track.id}');
+  }
+
+  /// Что можно сделать с уже готовым треком. Оба действия редкие, поэтому
+  /// живут за долгим нажатием, а не кнопками в каждой строке списка.
+  Future<void> _menu(AudioTrack track) async {
+    final action = await showModalBottomSheet<String>(
+      context: context,
+      backgroundColor: AppColors.navy2,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const SizedBox(height: 12),
+            Text(track.title, style: AppFonts.ui(fontSize: 15, weight: FontWeight.w700)),
+            const SizedBox(height: 12),
+            ListTile(
+              leading: const Icon(Icons.translate, color: AppColors.gold),
+              title: const Text('Выгрузить слова для перевода'),
+              subtitle: const Text(
+                'Файл со всеми словами по порядку — останется вписать переводы',
+                style: TextStyle(color: AppColors.muted, fontSize: 11),
+              ),
+              isThreeLine: true,
+              onTap: () => Navigator.pop(ctx, 'glossary'),
+            ),
+            ListTile(
+              leading: const Icon(Icons.link_off, color: AppColors.danger),
+              title: const Text('Заменить субтитры'),
+              onTap: () => Navigator.pop(ctx, 'captions'),
+            ),
+            const SizedBox(height: 8),
+          ],
+        ),
+      ),
+    );
+    if (!mounted) return;
+    if (action == 'glossary') await _exportGlossary(track);
+    if (action == 'captions') await _replaceCaptions(track);
+  }
+
+  /// Заготовка словаря: слова по порядку, переводы пустые.
+  ///
+  /// ВЫГРУЖАЕТСЯ ИЗ ПРИЛОЖЕНИЯ, А НЕ ПИШЕТСЯ РУКАМИ. Слова берутся из тех
+  /// субтитров, которые к треку уже притянуты, — переписывать их заново
+  /// значило бы наверняка сбить порядок, а по порядку они и сопоставляются.
+  ///
+  /// Кладём и в файл, и в буфер обмена: достать файл из памяти приложения
+  /// на телефоне неудобно, а вставить текст — одно движение.
+  Future<void> _exportGlossary(AudioTrack track) async {
+    try {
+      final text = TrackGlossary.template(
+        track.id,
+        [for (final word in track.words) word.text],
+      );
+      final dir = await getApplicationDocumentsDirectory();
+      final file = File('${dir.path}/${track.id}.words.txt');
+      await file.writeAsString(text);
+      await Clipboard.setData(ClipboardData(text: text));
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text('${track.words.length} слов — в буфере и в ${file.path}'),
+      ));
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Не удалось выгрузить: $e')),
+      );
+    }
   }
 
   /// Подставить другую ссылку: притянутые субтитры могут оказаться не от
@@ -167,12 +243,12 @@ class _TrackPickerScreenState extends State<TrackPickerScreen> {
 class _TrackRow extends StatelessWidget {
   final AudioTrack track;
   final VoidCallback onTap;
-  final VoidCallback onReplaceCaptions;
+  final VoidCallback onMenu;
 
   const _TrackRow({
     required this.track,
     required this.onTap,
-    required this.onReplaceCaptions,
+    required this.onMenu,
   });
 
   bool get _ready => track.lines.isNotEmpty;
@@ -187,9 +263,9 @@ class _TrackRow extends StatelessWidget {
     return InkWell(
       borderRadius: BorderRadius.circular(14),
       onTap: onTap,
-      // Замена субтитров — редкое действие, и место ему за долгим нажатием,
-      // а не отдельной кнопкой в каждой строке списка.
-      onLongPress: _ready ? onReplaceCaptions : null,
+      // Выгрузка словаря и замена субтитров — редкие действия, и место им
+      // за долгим нажатием, а не кнопками в каждой строке списка.
+      onLongPress: _ready ? onMenu : null,
       child: ChPanel(
         child: Row(
           children: [

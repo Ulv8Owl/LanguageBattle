@@ -1,6 +1,7 @@
 import 'remote_content.dart';
 import 'word_dictionary.dart';
 import 'track_captions.dart';
+import 'track_glossary.dart';
 
 /// Трек режима «Аудирование»: звук в самой игре плюс текст, у которого
 /// КАЖДОЕ СЛОВО знает своё время и свой перевод.
@@ -155,6 +156,26 @@ class AudioTrack {
     ]);
   }
 
+  /// Тот же трек с переводами из словаря трека.
+  ///
+  /// СЛОВА СОПОСТАВЛЯЮТСЯ ПО ПОРЯДКУ. Одно и то же слово встречается в
+  /// записи десятки раз и в разных местах значит разное; по тексту их не
+  /// различить, а по месту — всегда.
+  ///
+  /// Пустая строка в словаре — это «перевода нет», и она НЕ затирает то,
+  /// что уже нашлось: недописанный словарь не должен отбирать переводы,
+  /// которые и так были.
+  AudioTrack glossed(TrackGlossary glossary) {
+    var cursor = 0;
+    return withLines([
+      for (final line in lines)
+        TrackLine([
+          for (final word in line.words)
+            word.translated(glossary.at(cursor++) ?? word.translation),
+        ]),
+    ]);
+  }
+
   /// Тот же трек с другими словами — ими подставляется притянутая разметка.
   AudioTrack withLines(List<TrackLine> lines) => AudioTrack(
         id: id,
@@ -232,10 +253,21 @@ class TrackCatalog {
     }
 
     if (translateTo == null || track.lines.isEmpty) return track;
-    if (track.translationLanguage == translateTo) return track;
-    final dictionary =
-        await WordDictionary.load(from: track.language, to: translateTo);
-    return track.localizedFor(translateTo, dictionary);
+
+    // ПОРЯДОК ИСТОЧНИКОВ ПЕРЕВОДА, от главного к запасному:
+    //   1) словарь трека — его писали руками под эту запись;
+    //   2) переводы в самой разметке, если она на нужном языке;
+    //   3) банк слов — он знает словарную форму и одно значение.
+    // Написанное человеком под конкретную строку всегда точнее общего
+    // словаря, поэтому оно и первое.
+    if (track.translationLanguage != translateTo) {
+      final dictionary =
+          await WordDictionary.load(from: track.language, to: translateTo);
+      track = track.localizedFor(translateTo, dictionary);
+    }
+
+    final glossary = await TrackGlossary.load(id);
+    return glossary == null ? track : track.glossed(glossary);
   }
 
   /// Есть ли у трека слова — от этого зависит, откроется ли инструмент.

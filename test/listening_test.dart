@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:language_battle/core/track_clock.dart';
 import 'package:language_battle/data/audio_track.dart';
+import 'package:language_battle/data/track_glossary.dart';
 import 'package:language_battle/data/word_dictionary.dart';
 import 'package:language_battle/data/youtube_captions.dart';
 
@@ -190,6 +191,98 @@ void main() {
       // Пустое место честнее выдуманного слова.
       final other = track.localizedFor('es', const _StubDictionary({}));
       expect(other.words.single.translation, isNull);
+    });
+  });
+
+  group('словарь трека', () {
+    test('разделителем годится равенство, табуляция и дефис с пробелами', () {
+      // Файл правят руками, и требовать ровно один символ — значит ловить
+      // опечатки вместо переводов.
+      final g = TrackGlossary.parse('''
+alpha = первый
+beta	второй
+gamma - третий
+delta — четвёртый
+''');
+      expect(g.byIndex, ['первый', 'второй', 'третий', 'четвёртый']);
+    });
+
+    test('дефис внутри слова не принимается за разделитель', () {
+      // Пробелы вокруг — единственное, чем настоящий разделитель отличается
+      // от дефиса в самом слове.
+      final g = TrackGlossary.parse('x-y-z = игрек');
+      expect(g.at(0), 'игрек');
+    });
+
+    test('пустые строки и комментарии не сдвигают нумерацию', () {
+      // Один случайный перенос строки развалил бы весь перевод, начиная с
+      // него.
+      final g = TrackGlossary.parse('''
+# заголовок
+
+alpha = первый
+
+# ещё комментарий
+beta = второй
+''');
+      expect(g.byIndex, ['первый', 'второй']);
+    });
+
+    test('пустой перевод — это «перевода нет»', () {
+      final g = TrackGlossary.parse('the =\nalpha = первый\nbeta');
+      expect(g.at(0), isNull);
+      expect(g.at(1), 'первый');
+      expect(g.at(2), isNull, reason: 'строка без разделителя — тоже пусто');
+      expect(g.at(99), isNull, reason: 'за пределами словаря');
+    });
+
+    test('заготовка перечисляет слова по порядку', () {
+      final text = TrackGlossary.template('t', ['alpha', 'beta']);
+      expect(text, contains('alpha = '));
+      expect(text, contains('beta = '));
+      // И читается обратно как пустой словарь той же длины.
+      expect(TrackGlossary.parse(text).byIndex, [null, null]);
+    });
+  });
+
+  group('словарь трека главнее банка', () {
+    const track = AudioTrack(
+      id: 'x',
+      title: 't',
+      author: '',
+      audioAsset: 'tracks/x.mp3',
+      language: 'en',
+      translationLanguage: 'ru',
+      durationMs: 0,
+      lines: [
+        TrackLine([
+          TimedWord(text: 'one', translation: 'из банка', startMs: 0, endMs: 1),
+          TimedWord(text: 'two', translation: 'из банка', startMs: 1, endMs: 2),
+        ]),
+        TrackLine([
+          TimedWord(text: 'one', translation: 'из банка', startMs: 2, endMs: 3),
+        ]),
+      ],
+    );
+
+    test('слова сопоставляются по порядку, а не по тексту', () {
+      // Одно и то же слово в разных местах значит разное; по тексту их не
+      // различить, а по месту — всегда.
+      final out = track.glossed(const TrackGlossary(['первое', null, 'третье']));
+      expect(out.words.map((w) => w.translation), ['первое', 'из банка', 'третье']);
+    });
+
+    test('недописанный словарь не отбирает найденное', () {
+      // Пустая строка означает «перевода нет», а не «сотри то, что было».
+      final out = track.glossed(const TrackGlossary(['первое']));
+      expect(out.words[1].translation, 'из банка');
+      expect(out.words[2].translation, 'из банка');
+    });
+
+    test('текст и тайминг словарь не трогает', () {
+      final out = track.glossed(const TrackGlossary(['первое', 'второе', 'третье']));
+      expect(out.words.map((w) => w.text), ['one', 'two', 'one']);
+      expect(out.words.map((w) => w.startMs), [0, 1, 2]);
     });
   });
 
