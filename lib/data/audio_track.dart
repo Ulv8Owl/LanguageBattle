@@ -1,4 +1,5 @@
 import 'remote_content.dart';
+import 'word_dictionary.dart';
 import 'track_captions.dart';
 
 /// Трек режима «Аудирование»: звук в самой игре плюс текст, у которого
@@ -41,6 +42,15 @@ class TimedWord {
         endMs: (json['end'] as num?)?.toInt() ?? 0,
       );
 
+  /// То же слово с другим переводом — им подставляется перевод на язык
+  /// конкретного игрока.
+  TimedWord translated(String? translation) => TimedWord(
+        text: text,
+        translation: translation,
+        startMs: startMs,
+        endMs: endMs,
+      );
+
   Map<String, dynamic> toJson() => {
         'w': text,
         't': translation,
@@ -75,8 +85,13 @@ class AudioTrack {
   /// Язык трека — тот, который игрок учит.
   final String language;
 
-  /// Язык переводов в разметке. Трек, размеченный на русский, испанцу
-  /// показывать нечего.
+  /// Язык, на котором написаны переводы В САМОЙ РАЗМЕТКЕ (если она есть).
+  ///
+  /// ЭТО НЕ ОГРАНИЧЕНИЕ НА ТО, КОМУ ТРЕК ГОДИТСЯ. Английская запись нужна
+  /// каждому, кто учит английский, независимо от того, на каком языке он
+  /// говорит сам; перевод — свойство ИГРОКА, а не трека. Если разметка
+  /// написана не на его языке, переводы берутся из банка слов на его язык
+  /// (см. [localizedFor]), а текст и тайминг остаются те же.
   final String translationLanguage;
 
   final int durationMs;
@@ -96,6 +111,24 @@ class AudioTrack {
   /// Все слова подряд, в порядке звучания. Текст рисуется строками, а
   /// активное слово ищется по этому списку.
   List<TimedWord> get words => [for (final line in lines) ...line.words];
+
+  /// Тот же трек с переводами на язык [speaks].
+  ///
+  /// Своя разметка выигрывает, только если она НА НУЖНОМ ЯЗЫКЕ: её писал
+  /// человек, знающий и запись, и оба языка, и банк слов её не переплюнет.
+  /// На чужом языке она бесполезна — там подставляется банк.
+  ///
+  /// Слова, которых в банке нет, остаются без перевода: пустое место
+  /// честнее выдуманного слова.
+  AudioTrack localizedFor(String speaks, WordDictionary dictionary) {
+    if (translationLanguage == speaks) return this;
+    return withLines([
+      for (final line in lines)
+        TrackLine([
+          for (final word in line.words) word.translated(dictionary.translate(word.text)),
+        ]),
+    ]);
+  }
 
   /// Тот же трек с другими словами — ими подставляется притянутая разметка.
   AudioTrack withLines(List<TrackLine> lines) => AudioTrack(
@@ -144,14 +177,14 @@ class TrackCatalog {
 
   /// Все треки. Битый или недоступный молча пропускается: один сломанный
   /// файл не должен закрывать режим целиком.
-  static Future<List<AudioTrack>> all() async {
+  static Future<List<AudioTrack>> all({String? translateTo}) async {
     final index = await RemoteContent.loadJson(indexPath);
     final tracks = <AudioTrack>[];
     for (final entry in (index as List)) {
       final id = entry is String ? entry : (entry as Map)['id'] as String?;
       if (id == null) continue;
       try {
-        tracks.add(await load(id));
+        tracks.add(await load(id, translateTo: translateTo));
       } catch (_) {
         continue;
       }
@@ -165,14 +198,19 @@ class TrackCatalog {
   /// СВОЯ РАЗМЕТКА ГЛАВНЕЕ ПРИТЯНУТОЙ. Её писал человек, который знает и
   /// запись, и оба языка; автоматические субтитры в лучшем случае угадали
   /// слова и точно не угадали переводы. Перетирать первое вторым нельзя.
-  static Future<AudioTrack> load(String id) async {
+  static Future<AudioTrack> load(String id, {String? translateTo}) async {
     final raw = await RemoteContent.loadJson(trackPath(id));
-    final track = AudioTrack.fromJson(Map<String, dynamic>.from(raw as Map));
-    if (track.lines.isNotEmpty) return track;
+    var track = AudioTrack.fromJson(Map<String, dynamic>.from(raw as Map));
+    if (track.lines.isEmpty) {
+      final imported = await TrackCaptions.load(id);
+      if (imported != null) track = track.withLines(imported);
+    }
 
-    final imported = await TrackCaptions.load(id);
-    if (imported == null) return track;
-    return track.withLines(imported);
+    if (translateTo == null || track.lines.isEmpty) return track;
+    if (track.translationLanguage == translateTo) return track;
+    final dictionary =
+        await WordDictionary.load(from: track.language, to: translateTo);
+    return track.localizedFor(translateTo, dictionary);
   }
 
   /// Есть ли у трека слова — от этого зависит, откроется ли инструмент.

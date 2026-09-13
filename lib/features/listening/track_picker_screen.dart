@@ -14,10 +14,12 @@ import '../../widgets/chrolingo_widgets.dart';
 /// такого трека открывает загрузку субтитров — и будет открывать, пока они
 /// не появятся.
 ///
-/// ПОКАЗЫВАЮТСЯ ТОЛЬКО ТРЕКИ, КОТОРЫЕ ИГРОКУ ПОДХОДЯТ: на языке, который он
-/// учит, и размеченные на язык, на котором он говорит. Трек, размеченный на
-/// испанский, русскоговорящему показывать нечего — верхняя половина экрана
-/// осталась бы для него набором незнакомых слов.
+/// ОТБОР ИДЁТ ПО ОДНОМУ ЯЗЫКУ — ИЗУЧАЕМОМУ. Английская запись нужна каждому,
+/// кто учит английский, независимо от того, на каком языке он говорит сам.
+/// Раньше трек требовал совпадения ещё и по языку переводов, то есть
+/// английская лекция пряталась от испанца просто потому, что разметку
+/// писали на русский, — а перевод это свойство ИГРОКА, а не записи: он
+/// подставляется на его родной язык (см. TrackCatalog.load).
 class TrackPickerScreen extends StatefulWidget {
   const TrackPickerScreen({super.key});
 
@@ -44,7 +46,7 @@ class _TrackPickerScreenState extends State<TrackPickerScreen> {
     });
     try {
       final languages = await fetchMyLanguages();
-      final tracks = await TrackCatalog.all();
+      final tracks = await TrackCatalog.all(translateTo: languages?.speaks);
       if (!mounted) return;
       setState(() {
         _languages = languages;
@@ -65,9 +67,7 @@ class _TrackPickerScreenState extends State<TrackPickerScreen> {
     if (languages == null) return const [];
     return [
       for (final track in _tracks)
-        if (track.language == languages.learns &&
-            track.translationLanguage == languages.speaks)
-          track,
+        if (track.language == languages.learns) track,
     ];
   }
 
@@ -87,9 +87,9 @@ class _TrackPickerScreenState extends State<TrackPickerScreen> {
     if (tracks.isEmpty) {
       return _note(_languages == null
           ? 'Сначала выбери языки в настройках.'
-          : 'Для пары ${_languages!.learns} → ${_languages!.speaks} треков пока '
-              'нет. Звук кладётся в assets/tracks/, разметка — рядом файлом '
-              '<id>.json, и id дописывается в assets/tracks/index.json.');
+          : 'Записей на языке «${_languages!.learns}» пока нет. Звук кладётся '
+              'в assets/tracks/, рядом файл <id>.json с языком записи, и id '
+              'дописывается в assets/tracks/index.json.');
     }
 
     return RefreshIndicator(

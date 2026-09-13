@@ -7,6 +7,7 @@ import 'package:go_router/go_router.dart';
 import '../../core/theme.dart';
 import '../../core/track_clock.dart';
 import '../../data/audio_track.dart';
+import '../../data/my_languages.dart';
 import '../../widgets/subtitle_view.dart';
 
 /// Режим «Аудирование» — слушать и видеть, что именно звучит.
@@ -74,7 +75,13 @@ class _ListeningScreenState extends State<ListeningScreen> {
       _error = null;
     });
     try {
-      final track = await TrackCatalog.load(widget.trackId);
+      // Перевод подставляется на язык, который у игрока указан родным:
+      // запись одна на всех, кто учит этот язык, а перевод — его личный.
+      final languages = await fetchMyLanguages();
+      final track = await TrackCatalog.load(
+        widget.trackId,
+        translateTo: languages?.speaks,
+      );
       if (track.lines.isEmpty) throw Exception('в разметке трека нет слов');
 
       if (!mounted) return;

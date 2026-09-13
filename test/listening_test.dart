@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:language_battle/core/track_clock.dart';
 import 'package:language_battle/data/audio_track.dart';
+import 'package:language_battle/data/word_dictionary.dart';
 import 'package:language_battle/data/youtube_captions.dart';
 
 /// «Аудирование»: звук лежит в самой игре, а перевод — в разметке трека.
@@ -116,6 +117,46 @@ void main() {
     });
   });
 
+  group('перевод — свойство игрока, а не записи', () {
+    const track = AudioTrack(
+      id: 'x',
+      title: 't',
+      author: '',
+      audioAsset: 'tracks/x.mp3',
+      language: 'en',
+      translationLanguage: 'ru',
+      durationMs: 0,
+      lines: [
+        TrackLine([
+          TimedWord(text: 'one', translation: 'один', startMs: 0, endMs: 500),
+        ]),
+      ],
+    );
+
+    test('своя разметка на нужном языке не трогается', () {
+      // Её писал человек, знающий и запись, и оба языка: банк слов её не
+      // переплюнет.
+      final same = track.localizedFor('ru', const _EmptyDictionary());
+      expect(identical(same, track), isTrue);
+      expect(same.words.single.translation, 'один');
+    });
+
+    test('на чужом языке разметка уступает банку', () {
+      // Английская запись нужна и испанцу; русские переводы ему бесполезны,
+      // а текст и тайминг — те же самые.
+      final other = track.localizedFor('es', const _StubDictionary({'one': 'uno'}));
+      expect(other.words.single.translation, 'uno');
+      expect(other.words.single.text, 'one', reason: 'текст не меняется');
+      expect(other.words.single.startMs, 0, reason: 'тайминг не меняется');
+    });
+
+    test('чего нет в банке — остаётся без перевода', () {
+      // Пустое место честнее выдуманного слова.
+      final other = track.localizedFor('es', const _StubDictionary({}));
+      expect(other.words.single.translation, isNull);
+    });
+  });
+
   group('скорость', () {
     test('смена скорости не сдвигает пройденное', () {
       final clock = TrackClock()..seekTo(10000);
@@ -133,4 +174,23 @@ void main() {
       clock.dispose();
     });
   });
+}
+
+
+/// Словарь-заглушка: настоящий читает банк слов с диска, а проверяем мы
+/// правило подстановки, а не банк.
+class _StubDictionary implements WordDictionary {
+  final Map<String, String> _words;
+
+  const _StubDictionary(this._words);
+
+  @override
+  String? translate(String word) => _words[word.toLowerCase()];
+
+  @override
+  noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
+}
+
+class _EmptyDictionary extends _StubDictionary {
+  const _EmptyDictionary() : super(const {});
 }
