@@ -40,6 +40,9 @@ dependencies:
   flutter_dotenv: ^5.2.1
   record: ^7.1.1
   audioplayers: ^6.1.0
+  # Выбор аудио из памяти телефона. Файл игрока в приложение НЕ
+  # копируется: запоминается путь, по нему и играем.
+  file_picker: ^8.1.0
   path_provider: ^2.1.5
   # Уже тянулся транзитивно через supabase_flutter (зафиксирован в
   # pubspec.lock на 1.6.0) — переводим в прямую зависимость, потому что
@@ -132,6 +135,9 @@ flutter:
     - assets/avatar/
     - assets/vocab/
     - assets/phrases/
+    # Записи, приходящие вместе с игрой. Записи игрока сюда НЕ
+    # копируются: у них запоминается путь в памяти телефона.
+    - assets/tracks/
 
   # An image asset can refer to one or more resolution-specific "variants", see
   # https://flutter.dev/to/resolution-aware-images

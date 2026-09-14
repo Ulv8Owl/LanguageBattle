@@ -24,7 +24,9 @@ class ArenaScreen extends StatefulWidget {
 /// какая строка сейчас подсвечена (задача итерации, п.6: по умолчанию
 /// ничего не подсвечено, подсветка появляется только пока открыта плашка
 /// этого режима).
-enum _ModeKey { training, solo, sparring, duel }
+enum _ModeKey { training, solo, sparring, duel,
+  listening,
+}
 
 class _ArenaScreenState extends State<ArenaScreen> {
   Map<String, dynamic>? _profile;
@@ -276,6 +278,23 @@ class _ArenaScreenState extends State<ArenaScreen> {
     );
   }
 
+  Widget _buildListeningSheet(BuildContext sheetContext) {
+    return _sheetChrome(
+      sheetContext: sheetContext,
+      title: 'Аудирование',
+      description: 'Фонотека: записи игры и твои собственные. Свою запись '
+          'разбирает модель — на слова со временем и переводом, — а дальше '
+          'экран поворачивается, и строка идёт крупно, слово за словом.',
+      stats: const [
+        _Stat(value: '1', label: 'энергии за полминуты', color: AppColors.cyan),
+        _Stat(value: '—', label: 'рейтинг', color: AppColors.cyan),
+      ],
+      primaryLabel: 'Открыть фонотеку',
+      onPrimary: () => context.push('/listening'),
+      accent: AppColors.cyan,
+    );
+  }
+
   /// Плашка вместо описания режима, когда пробный период кончился и
   /// подписки нет (задача итерации, п.7). Показывается для ВСЕХ трёх
   /// AI-режимов одинаково.
@@ -398,6 +417,13 @@ class _ArenaScreenState extends State<ArenaScreen> {
             title: 'Дуэль',
             flagship: _selectedMode == _ModeKey.duel,
             onTap: () => _onModeTap(_ModeKey.duel, aiGated: true, sheetBuilder: _buildDuelSheet),
+          ),
+          const SizedBox(height: 9),
+          ChMenuRow(
+            icon: const ChModeIcon(icon: Icons.headphones, gradient: [AppColors.gold, Color(0xFFFFE066)]),
+            title: 'Аудирование',
+            flagship: _selectedMode == _ModeKey.listening,
+            onTap: () => _onModeTap(_ModeKey.listening, aiGated: false, sheetBuilder: _buildListeningSheet),
           ),
           const SizedBox(height: 24),
           // Список «Активные бои» убран: незавершённых боёв больше не
