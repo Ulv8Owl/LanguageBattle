@@ -36,6 +36,12 @@ step "2/2 Деплою Edge Functions"
 npx supabase functions deploy evaluate-recording
 npx supabase functions deploy config-check
 npx supabase functions deploy synthesize-speech
+# transcribe-track — разбор записи игрока на слова со временем и переводом
+# («Аудирование»). Функции здесь перечислены ПОИМЁННО, и это ловушка: новая
+# функция молча остаётся незадеплоенной, а приложение получает 404 там, где
+# ждёт разбор. Добавили функцию — добавьте строку сюда; тест сторожит, что
+# ни одна папка из supabase/functions не забыта.
+npx supabase functions deploy transcribe-track
 # asr-audio отдаёт запись провайдеру распознавания по ссылке, кончающейся на
 # .wav. --no-verify-jwt здесь ОБЯЗАТЕЛЕН: запрос приходит от провайдера, у
 # которого токена Supabase нет и быть не может. Без проверки JWT — не значит
