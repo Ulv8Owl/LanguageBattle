@@ -87,6 +87,37 @@ void main() {
     });
   });
 
+  group('android-сборка', () {
+    test('file_picker не ниже 11 — иначе Gradle падает на compileSdk', () {
+      // Версии по 9.x включительно прибивали себе `compileSdk 34`, а их же
+      // зависимость flutter_plugin_android_lifecycle требует от
+      // потребителей 36. Сборка падает на checkReleaseAarMetadata и НИ
+      // СЛОВА не говорит про pubspec — найти причину можно только зная,
+      // что плагин держит свой compileSdk отдельно от приложения.
+      // 11.0.0 вдобавок умеет AGP 9, а он у нас в settings.gradle.kts.
+      final constraint = RegExp(r'file_picker:\s*\^(\d+)\.')
+          .firstMatch(read('pubspec.yaml'));
+      expect(constraint, isNotNull, reason: 'file_picker пропал из pubspec');
+      expect(int.parse(constraint!.group(1)!), greaterThanOrEqualTo(11));
+    });
+
+    test('file_picker умеет тот AGP, который стоит в проекте', () {
+      // Две настройки в разных файлах, которые обязаны сходиться: AGP 9
+      // поддерживается в file_picker только с 11.0.0. Разойдясь, они
+      // ломают не анализ и не тесты, а Gradle — на чужом компьютере,
+      // посреди деплоя.
+      final agp = RegExp(r'com\.android\.application"\) version "(\d+)\.')
+          .firstMatch(read('android/settings.gradle.kts'));
+      expect(agp, isNotNull, reason: 'не нашёл версию AGP');
+      final picker = int.parse(
+        RegExp(r'file_picker:\s*\^(\d+)\.').firstMatch(read('pubspec.yaml'))!.group(1)!,
+      );
+      if (int.parse(agp!.group(1)!) >= 9) {
+        expect(picker, greaterThanOrEqualTo(11), reason: 'AGP 9 требует file_picker 11+');
+      }
+    });
+  });
+
   group('ветки', () {
     test('какие ветки есть — спрашиваем GitHub, а не список в скрипте', () {
       // Список имён в скрипте устаревает МОЛЧА, и это уже стоило двух
