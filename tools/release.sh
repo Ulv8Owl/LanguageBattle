@@ -19,8 +19,10 @@ cd "$(dirname "$0")/.."
 # shellcheck source=tools/lib.sh
 source tools/lib.sh
 
-# Ветки проекта и чем они друг от друга отличаются. Список ровно для того,
-# чтобы не приходилось помнить, где какая архитектура.
+# Чем ветки отличаются друг от друга. ТОЛЬКО ПОЯСНЕНИЯ: какие ветки есть,
+# спрашиваем у самого GitHub (remote_branches в lib.sh). Список имён в скрипте
+# устаревает молча — он уже успел предложить Omni, которой нет, и промолчать
+# про Exp3, ради которой скрипт и запускали.
 branch_note() {
   case "$1" in
     features) echo "основная разработка" ;;
@@ -29,73 +31,59 @@ branch_note() {
     *)        echo "" ;;
   esac
 }
-# Список нужен ровно для того, чтобы не приходилось помнить имена наизусть, —
-# и ровно поэтому он обязан совпадать с тем, что есть на GitHub. Устаревший
-# список хуже отсутствующего: он предлагает собрать ветку, которой нет, и
-# молчит о той, ради которой скрипт и запускают. Здесь он и устарел: `Omni`
-# на GitHub уже нет, а `LLM` слит в `features` слово в слово и удаляется за
-# ненадобностью.
-KNOWN_BRANCHES=(features Exp3 main)
 
 # --- Выбор ветки ------------------------------------------------------------
 BRANCH="${1:-}"
 
+# Читаем циклом, а не mapfile: mapfile есть только с bash 4, и на чужом
+# компьютере это выясняется в самый неподходящий момент.
+BRANCHES=()
+while IFS= read -r line; do
+  [ -n "$line" ] && BRANCHES+=("$line")
+done < <(remote_branches)
+[ "${#BRANCHES[@]}" -gt 0 ] \
+  || fail "не получилось спросить у GitHub список веток. Проверь интернет и доступ к репозиторию."
+
 if [ -z "$BRANCH" ]; then
   if [ ! -t 0 ]; then
     fail "не указана ветка. Запусти так:  ./tools/release.sh Exp3
-Доступны: ${KNOWN_BRANCHES[*]}"
+Есть: ${BRANCHES[*]}"
   fi
   printf '\n\033[1;33mКакую ветку собрать?\033[0m\n\n'
-  for i in "${!KNOWN_BRANCHES[@]}"; do
-    printf '  %d) %-9s — %s\n' "$((i + 1))" "${KNOWN_BRANCHES[$i]}" "$(branch_note "${KNOWN_BRANCHES[$i]}")"
+  for i in "${!BRANCHES[@]}"; do
+    printf '  %d) %-9s %s\n' "$((i + 1))" "${BRANCHES[$i]}" "$(branch_note "${BRANCHES[$i]}")"
   done
   printf '\nНомер (или Enter, чтобы отменить): '
   read -r choice
   [ -n "$choice" ] || fail "ничего не выбрано — ничего и не делаю."
   case "$choice" in
     [1-9]*)
-      BRANCH="${KNOWN_BRANCHES[$((choice - 1))]:-}"
+      BRANCH="${BRANCHES[$((choice - 1))]:-}"
       [ -n "$BRANCH" ] || fail "нет варианта с номером $choice."
       ;;
     *) BRANCH="$choice" ;;
   esac
 fi
 
-# Имя ветки как на GitHub, и это важно: git различает Exp3 и exp3.
-KNOWN=0
-for b in "${KNOWN_BRANCHES[@]}"; do [ "$b" = "$BRANCH" ] && KNOWN=1; done
-if [ "$KNOWN" = "0" ]; then
+# Имя ветки как на GitHub, и это важно: git различает Exp3 и exp3. Сверяем с
+# тем, что реально есть на GitHub, — тогда подсказка не может устареть.
+EXISTS=0
+for b in "${BRANCHES[@]}"; do [ "$b" = "$BRANCH" ] && EXISTS=1; done
+if [ "$EXISTS" = "0" ]; then
   SUGGEST=""
-  for b in "${KNOWN_BRANCHES[@]}"; do
+  for b in "${BRANCHES[@]}"; do
     [ "$(printf '%s' "$b" | tr '[:upper:]' '[:lower:]')" = "$(printf '%s' "$BRANCH" | tr '[:upper:]' '[:lower:]')" ] && SUGGEST="$b"
   done
   [ -n "$SUGGEST" ] && fail "ветки «$BRANCH» нет, а «$SUGGEST» есть — git различает большие и маленькие буквы.
 Запусти:  ./tools/release.sh $SUGGEST"
-  note "Ветка «$BRANCH» не из списка проекта — продолжаю, но проверь имя."
+  fail "на GitHub нет ветки «$BRANCH». Есть: ${BRANCHES[*]}"
 fi
 
 step "1/4 Синхронизирую ветку $BRANCH"
-echo "$(branch_note "$BRANCH")"
+NOTE="$(branch_note "$BRANCH")"
+[ -n "$NOTE" ] && echo "$NOTE"
 require_clean_tree
-
-git fetch origin "$BRANCH" \
-  || fail "не получилось скачать ветку с GitHub. Проверь интернет и доступ к репозиторию."
-git rev-parse --verify --quiet "origin/$BRANCH" >/dev/null \
-  || fail "на GitHub нет ветки «$BRANCH». Есть: ${KNOWN_BRANCHES[*]}"
-
-if git show-ref --verify --quiet "refs/heads/$BRANCH"; then
-  git checkout "$BRANCH"
-else
-  # Первый переход на эту ветку с этого компьютера: локальной копии ещё нет.
-  note "Ветки $BRANCH здесь ещё не было — создаю из origin/$BRANCH"
-  git checkout -b "$BRANCH" "origin/$BRANCH"
-fi
-
-git merge --ff-only "origin/$BRANCH" \
-  || fail "локальная $BRANCH разошлась с origin/$BRANCH — на этом компьютере есть
-свои коммиты, которых нет на GitHub. Посмотри их:
-  git log --oneline origin/$BRANCH..HEAD
-Если они не нужны:  git reset --hard origin/$BRANCH"
+sync_to_origin "$BRANCH"
 note "На $(git rev-parse --short HEAD)  $(git log -1 --format=%s)"
 
 # Мы только что могли обновить сами себя. Bash читает файл скрипта по мере

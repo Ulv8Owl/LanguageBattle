@@ -7,8 +7,12 @@
 # раньше своей миграции, будет писать в столбец, которого ещё нет.
 
 set -euo pipefail
-BRANCH="${1:-features}"
 cd "$(dirname "$0")/.."
+# Без аргумента — ТЕКУЩАЯ ветка, а не features. Зашитое имя означало, что
+# запуск на любой другой ветке сверяется с чужим origin и отказывается
+# работать, ничего толком не объяснив: «дерево не совпадает с origin/features»
+# на ветке Exp3 — это загадка, а не сообщение.
+BRANCH="${1:-$(git rev-parse --abbrev-ref HEAD)}"
 # shellcheck source=tools/lib.sh
 source tools/lib.sh
 
