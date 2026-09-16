@@ -110,25 +110,49 @@ const List<String> listeningModels = [
 
 String get defaultListeningModel => listeningModels.first;
 
+/// Чем переводить расшифровку. Первая — по умолчанию.
+///
+/// ЗДЕСЬ ТОЛЬКО ПЕРЕВОДЧИКИ, и это важно. Обычную чат-модель приходится
+/// уговаривать ответить строго переводом и ничем больше; `qwen-mt-*` ничего
+/// другого и не умеют — им дают строку, они отдают строку. Перевод идёт
+/// ПОСТРОЧНО, каждая строка своим вызовом: так перевод не может поехать
+/// относительно оригинала, сколько бы строк ни было.
+///
+/// СПИСОК ОБЯЗАН СОВПАДАТЬ С СЕРВЕРНЫМ (transcribe-track, TRANSLATION_MODELS).
+/// Это сторожит тест.
+const List<String> translationModels = [
+  'qwen-mt-flash',
+  'qwen-mt-lite',
+  'qwen-mt-turbo',
+  'qwen-mt-plus',
+];
+
+String get defaultTranslationModel => translationModels.first;
+
 String get defaultAsrModel => asrModels.first;
 String get defaultLlmModel => llmModels.first;
 
 /// Что выбрано у игрока. Пусто или неизвестное значение — модель по
 /// умолчанию: список моделей меняется, а в профиле может лежать вчерашнее.
-Future<({String asr, String llm, String listening})> fetchJudgeModels() async {
+Future<({String asr, String llm, String listening, String translation})>
+    fetchJudgeModels() async {
   final row = await supabase
       .from('users')
-      .select('asr_model, llm_model, listening_model')
+      .select('asr_model, llm_model, listening_model, translation_model')
       .eq('id', currentUserId)
       .maybeSingle();
   final asr = (row?['asr_model'] as String?)?.trim() ?? '';
   final llm = (row?['llm_model'] as String?)?.trim() ?? '';
   final listening = (row?['listening_model'] as String?)?.trim() ?? '';
+  final translation = (row?['translation_model'] as String?)?.trim() ?? '';
   return (
     asr: asrModels.contains(asr) ? asr : defaultAsrModel,
     llm: llmModels.contains(llm) ? llm : defaultLlmModel,
     listening:
         listeningModels.contains(listening) ? listening : defaultListeningModel,
+    translation: translationModels.contains(translation)
+        ? translation
+        : defaultTranslationModel,
   );
 }
 
@@ -149,4 +173,10 @@ Future<void> saveLlmModel(String model) => supabase
 Future<void> saveListeningModel(String model) => supabase
     .from('users')
     .update({'listening_model': model})
+    .eq('id', currentUserId);
+
+/// Сохраняет выбор переводчика расшифровки.
+Future<void> saveTranslationModel(String model) => supabase
+    .from('users')
+    .update({'translation_model': model})
     .eq('id', currentUserId);

@@ -59,20 +59,46 @@ class SubtitleWord {
       {'w': text, 't': translation, 'start': startMs, 'end': endMs};
 }
 
-/// Строка — то, что показывается на экране разом.
+/// Строка: слова со временем и перевод строки ЦЕЛИКОМ.
+///
+/// ПЕРЕВОД СТРОКИ, А НЕ ТОЛЬКО СЛОВ. Экран показывает два связных текста
+/// рядом, и справа должен стоять читаемый перевод, а не столбик словарных
+/// значений. Пословный перевод при этом никуда не делся: он остаётся у слов
+/// и нужен подсветке — но читают человека переводом строки.
+///
+/// Пусто — значит переводчик строку не переводил (так отвечает
+/// мультимодальная модель, у неё перевод только пословный). Тогда строка
+/// склеивается из переводов слов: хуже читается, но лучше, чем пусто.
 class SubtitleLine {
   final List<SubtitleWord> words;
+  final String translation;
 
-  const SubtitleLine(this.words);
+  const SubtitleLine(this.words, {this.translation = ''});
+
+  /// Что произносят — одной строкой.
+  String get text => words.map((w) => w.text).join(' ');
+
+  /// Что показывать справа.
+  String get translationText {
+    if (translation.isNotEmpty) return translation;
+    return words
+        .map((w) => w.translation)
+        .where((t) => t.isNotEmpty)
+        .join(' ');
+  }
 
   int get startMs => words.isEmpty ? 0 : words.first.startMs;
 
   int get endMs => words.isEmpty ? 0 : words.last.endMs;
 
-  factory SubtitleLine.fromJson(List<dynamic> json) => SubtitleLine([
-        for (final word in json)
-          if (word is Map) SubtitleWord.fromJson(Map<String, dynamic>.from(word)),
-      ]);
+  factory SubtitleLine.fromJson(List<dynamic> json, {String translation = ''}) =>
+      SubtitleLine(
+        [
+          for (final word in json)
+            if (word is Map) SubtitleWord.fromJson(Map<String, dynamic>.from(word)),
+        ],
+        translation: translation,
+      );
 }
 
 /// Разбор записи целиком.
@@ -93,17 +119,6 @@ class TrackSubtitles {
 
   bool get isEmpty => lines.isEmpty;
 
-  /// Строки из того, что пришло, КАКОЙ БЫ ГЛУБИНЫ ОНО НИ БЫЛО.
-  ///
-  /// Формат ответа задан в запросе к модели, но задан — не значит соблюдён:
-  /// живой разбор вернул строки на уровень вложеннее, и приложение упало на
-  /// приведении типа («type 'List&lt;dynamic&gt;' is not a subtype of type
-  /// 'Map&lt;dynamic, dynamic&gt;'»), выбросив уже оплаченный разбор целиком.
-  ///
-  /// Приводит ответ к канону сервер, и здесь это НЕ ДУБЛИРОВАНИЕ: сервер в
-  /// проекте один на все ветки, и приложение вполне может разговаривать с
-  /// функцией, задеплоенной из другой. Падать на этом оно не должно ни в
-  /// каком случае.
   /// Слово ли это. Именно СЛОВО, а не любой объект: {"words": […]} тоже
   /// Map, и приняв его за слово, разбор теряет всё, что внутри.
   static bool _isWord(dynamic node) {
@@ -115,6 +130,16 @@ class TrackSubtitles {
     return false;
   }
 
+  /// Строки из того, что пришло, КАКОЙ БЫ ГЛУБИНЫ ОНО НИ БЫЛО.
+  ///
+  /// Формат ответа задан в запросе к модели, но задан — не значит соблюдён:
+  /// живой разбор вернул строки на уровень вложеннее, и приложение упало на
+  /// приведении типа, выбросив уже оплаченный разбор целиком.
+  ///
+  /// Приводит ответ к канону сервер, и здесь это НЕ ДУБЛИРОВАНИЕ: сервер в
+  /// проекте один на все ветки, и приложение вполне может разговаривать с
+  /// функцией, задеплоенной из другой. Падать на этом оно не должно ни в
+  /// каком случае.
   static List<SubtitleLine> _linesOf(dynamic node) {
     if (node is List) {
       if (node.isEmpty) return const [];
@@ -129,6 +154,17 @@ class TrackSubtitles {
     if (node is Map) {
       if (_isWord(node)) {
         return [SubtitleLine.fromJson([node])];
+      }
+      // Строка целиком: слова плюс её перевод. Разбирать её общим обходом
+      // нельзя — перевод строки при этом теряется.
+      final words = node['w'] ?? node['words'];
+      if (words is List) {
+        final translation = node['t'] ?? node['translation'];
+        final line = SubtitleLine.fromJson(
+          words,
+          translation: translation is String ? translation.trim() : '',
+        );
+        return line.words.isEmpty ? const [] : [line];
       }
       return [
         for (final value in node.values)
@@ -147,8 +183,15 @@ class TrackSubtitles {
   Map<String, dynamic> toJson() => {
         'language': language,
         'translation': translationLanguage,
+        // Строка — объект: слова плюс её перевод. Прежний формат (голый
+        // массив слов) по-прежнему читается — на телефоне могут лежать
+        // разборы, сделанные до перевода строк.
         'lines': [
-          for (final line in lines) [for (final word in line.words) word.toJson()],
+          for (final line in lines)
+            {
+              't': line.translation,
+              'w': [for (final word in line.words) word.toJson()],
+            },
         ],
       };
 
@@ -175,7 +218,9 @@ class TrackSubtitles {
         ));
         previousEnd = end;
       }
-      if (words.isNotEmpty) cleanLines.add(SubtitleLine(words));
+      if (words.isNotEmpty) {
+        cleanLines.add(SubtitleLine(words, translation: line.translation));
+      }
     }
     return TrackSubtitles(
       language: language,

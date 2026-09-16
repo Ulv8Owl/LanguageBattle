@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:audioplayers/audioplayers.dart';
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
+import 'package:scrollable_positioned_list/scrollable_positioned_list.dart';
 import 'package:wakelock_plus/wakelock_plus.dart';
 
 import '../../core/theme.dart';
@@ -11,27 +12,26 @@ import '../../data/library_track.dart';
 import '../../data/track_library.dart';
 import '../../data/track_subtitles.dart';
 
-/// Экран прослушивания: две строки во весь экран, поперёк.
+/// Экран чтения: два связных текста рядом, поперёк экрана.
 ///
-/// ПОЧЕМУ ПОПЕРЁК. Строка речи длиннее, чем помещается в ширину телефона
-/// стоймя, а резать её переносами нельзя: под каждым словом стоит его
-/// перевод, и перенос разорвал бы пару. В альбомной ориентации строка
-/// умещается целиком — потому экран её и просит.
+/// ЧТО ЗДЕСЬ БЫЛО РАНЬШЕ. На экране жила ОДНА строка за раз: отыграла —
+/// сменилась следующей. Смысл был в крупном слове, но цена оказалась выше:
+/// прочитанное исчезало, а непрочитанного ещё не было, и вернуться взглядом
+/// было некуда. Для чтения текста это ровно наоборот тому, что нужно.
 ///
-/// ПРОСИТ, А НЕ ЗАСТАВЛЯЕТ. Поворот экрана — настройка телефона, и
-/// выкручивать её за игрока мы не вправе: у кого-то он заблокирован
-/// намеренно. Плашка уходит сама, как только телефон повёрнут, — нажимать
-/// на неё не нужно и нечем.
+/// ЧТО СТАЛО. Текст виден весь и целиком, слева оригинал, справа перевод, и
+/// его можно листать в обе стороны. Строки идут ПАРАМИ в общем списке — так
+/// перевод не может уехать относительно оригинала ни на пиксель, даже когда
+/// одна сторона переносится на три строки, а другая на одну.
 ///
-/// И ЗВУК ЖДЁТ ПОВОРОТА. Запись начиналась сразу при входе, ещё под
-/// плашкой: пока игрок поворачивал телефон, первые секунды проходили мимо
-/// него — то есть ровно то, ради чего он сюда зашёл, он и пропускал.
-/// Теперь запись готовится, но не играет, пока экран стоит стоймя; повернул
-/// обратно посреди дороги — встаёт на паузу и ждёт, а не бубнит в пустоту.
+/// ПОЧЕМУ ПОПЕРЁК. Две колонки текста рядом в ширину телефона стоймя не
+/// помещаются: на каждую осталось бы по два-три слова, и обе стали бы
+/// лестницей из обрывков.
 ///
-/// НА ЭКРАНЕ ТОЛЬКО ОДНА СТРОКА ЗА РАЗ. Показать сразу всё — значит
-/// показать мелко; здесь весь смысл в том, что слово крупное и видно, какое
-/// звучит. Строка отыграла — её сменяет следующая.
+/// ПАЛОЧКА ПОСЕРЕДИНЕ — НЕ УКРАШЕНИЕ. Кому-то нужен оригинал с подсказкой
+/// сбоку, кому-то перевод с оригиналом для сверки; это разные занятия, и
+/// делить экран поровну для обоих неправильно. Двинув её до края, можно
+/// убрать любую из колонок совсем.
 class PlayerScreen extends StatefulWidget {
   final String trackId;
 
@@ -41,11 +41,16 @@ class PlayerScreen extends StatefulWidget {
   State<PlayerScreen> createState() => _PlayerScreenState();
 }
 
-enum _Stage { loading, failed, playing, done }
+enum _Stage { loading, failed, playing }
+
+/// Какие плашки перемотки открыты. Открытыми они и остаются — закрывает их
+/// игрок, ткнув мимо.
+enum _SeekMenu { none, back, forward }
 
 class _PlayerScreenState extends State<PlayerScreen> {
   final AudioPlayer _player = AudioPlayer();
   final TrackClock _clock = TrackClock();
+  final ItemScrollController _scroll = ItemScrollController();
   final List<StreamSubscription<dynamic>> _subscriptions = [];
 
   _Stage _stage = _Stage.loading;
@@ -62,20 +67,24 @@ class _PlayerScreenState extends State<PlayerScreen> {
   int _line = -1;
   int _word = -1;
 
-  /// Экран стоит стоймя. Читается в didChangeDependencies, а не в build:
-  /// от ориентации зависит, играет ли звук, а решать это в build значит
-  /// трогать плеер на каждой перерисовке.
+  /// Доля ширины под оригинал. 0 — только перевод, 1 — только оригинал.
+  double _split = 0.5;
+
+  /// Скорость воспроизведения. Часы о ней знают (TrackClock.rate) — иначе
+  /// подсветка отставала бы тем сильнее, чем дальше играет запись.
+  double _speed = 1.0;
+
+  _SeekMenu _menu = _SeekMenu.none;
+
+  /// Список сам идёт за активной строкой. Выключается, как только игрок
+  /// листает руками: увести текст у него из-под пальца — худшее, что может
+  /// сделать автопрокрутка.
+  bool _following = true;
+  Timer? _resumeFollow;
+
   bool _portrait = true;
-
-  /// Запись уже пошла хоть раз. Первый пуск — не то же, что снятие с паузы.
   bool _started = false;
-
-  /// На паузе из-за поворота, а не по воле игрока. Разница нужна: свою
-  /// паузу поворот обратно снимать не должен.
   bool _pausedByRotation = false;
-
-  /// Согласование с ориентацией уже идёт. Второй заход не нужен: тот, что
-  /// работает, досверит положение телефона в конце сам.
   bool _applying = false;
 
   @override
@@ -99,14 +108,17 @@ class _PlayerScreenState extends State<PlayerScreen> {
     for (final subscription in _subscriptions) {
       subscription.cancel();
     }
+    _resumeFollow?.cancel();
     _clock.removeListener(_onTick);
     _clock.dispose();
     _player.dispose();
-    // Экран гасить снова можно: держали мы его только ради строк, которые
-    // читают, ничего не нажимая.
     WakelockPlus.disable();
     super.dispose();
   }
+
+  // -------------------------------------------------------------------
+  // Загрузка
+  // -------------------------------------------------------------------
 
   Future<void> _load() async {
     setState(() {
@@ -149,29 +161,74 @@ class _PlayerScreenState extends State<PlayerScreen> {
     }
   }
 
+  // -------------------------------------------------------------------
+  // Ход записи
+  // -------------------------------------------------------------------
+
   void _onTick() {
     if (_stage != _Stage.playing) return;
     final position = _clock.positionMs;
     final line = activeIndex(_lineStarts, position);
     final word = line < 0 ? -1 : activeIndex(_wordStarts[line], position);
     if (line == _line && word == _word) return;
+    final moved = line != _line;
     setState(() {
       _line = line;
       _word = word;
     });
+    if (moved) _followLine(line);
   }
 
-  /// Приводит звук в согласие с тем, как повёрнут телефон.
-  ///
-  /// Одна точка на все три случая — первый пуск, уход в портрет, возврат в
-  /// альбом, — потому что порознь они разъезжаются: то запись играет под
-  /// плашкой, то после поворота обратно остаётся стоять.
-  ///
-  /// ПОВОРОТ ВО ВРЕМЯ ПУСКА — не выдумка. Плеер отвечает не мгновенно, и
-  /// между «решили играть» и «заиграло» телефон успевают повернуть обратно.
-  /// Без этого цикла запись зазвучала бы под плашкой — то есть ровно то, от
-  /// чего экран и защищается. Поэтому решение сверяется с положением
-  /// телефона ПОСЛЕ работы, а не только до неё.
+  /// Подводит список к активной строке. Не дальше от края, чем на треть:
+  /// читать удобнее, когда впереди видно, что будет дальше.
+  void _followLine(int line) {
+    if (!_following || line < 0 || !_scroll.isAttached) return;
+    _scroll.scrollTo(
+      index: line,
+      duration: const Duration(milliseconds: 280),
+      curve: Curves.easeOut,
+      alignment: 0.35,
+    );
+  }
+
+  /// Игрок листает сам — не мешаем. Через несколько секунд после того, как
+  /// он отпустил, список снова догоняет запись.
+  void _onUserScroll() {
+    _resumeFollow?.cancel();
+    if (_following) setState(() => _following = false);
+    _resumeFollow = Timer(const Duration(seconds: 6), () {
+      if (!mounted) return;
+      setState(() => _following = true);
+      _followLine(_line);
+    });
+  }
+
+  int get _durationMs {
+    final subtitles = _subtitles;
+    final byTrack = _track?.durationMs ?? 0;
+    final bySubtitles = subtitles?.durationMs ?? 0;
+    return byTrack > bySubtitles ? byTrack : bySubtitles;
+  }
+
+  Future<void> _seekBy(int seconds) async {
+    final target = (_clock.positionMs + seconds * 1000).clamp(0, _durationMs);
+    await _player.seek(Duration(milliseconds: target));
+    _clock.seekTo(target);
+    // Перемотка — это намеренный прыжок: возвращаем автопрокрутку, иначе
+    // игрок прыгнул, а текст остался там, где был.
+    _resumeFollow?.cancel();
+    _following = true;
+    _onTick();
+    _followLine(activeIndex(_lineStarts, target));
+    if (mounted) setState(() {});
+  }
+
+  Future<void> _setSpeed(double speed) async {
+    await _player.setPlaybackRate(speed);
+    _clock.rate = speed;
+    if (mounted) setState(() => _speed = speed);
+  }
+
   Future<void> _applyOrientation() async {
     if (_applying) return;
     _applying = true;
@@ -199,8 +256,6 @@ class _PlayerScreenState extends State<PlayerScreen> {
       _pausedByRotation = false;
       await _player.resume();
       _clock.start();
-      // Экран не должен гаснуть: строки читают, ничего не нажимая, и
-      // телефон честно считает это бездействием.
       await WakelockPlus.enable();
     } else if (_pausedByRotation) {
       _pausedByRotation = false;
@@ -216,21 +271,26 @@ class _PlayerScreenState extends State<PlayerScreen> {
       _clock.pause();
       await WakelockPlus.disable();
     } else {
+      // Запись кончилась — начинаем сначала, а не упираемся в конец.
+      final fromStart = _clock.completed || _clock.positionMs >= _durationMs;
+      if (fromStart) await _player.seek(Duration.zero);
       await _player.resume();
-      _clock.resume();
+      // start() против resume(): он же заводит счётчик кадров заново, а
+      // markCompleted его погасил. Иначе звук пошёл бы, а подсветка стояла.
+      fromStart ? _clock.start() : _clock.resume();
       await WakelockPlus.enable();
     }
-    // Пауза, поставленная руками, поворотом не снимается: игрок её ставил,
-    // игрок и снимет.
     _pausedByRotation = false;
     if (mounted) setState(() {});
   }
 
   void _finish() {
-    if (_stage == _Stage.done) return;
+    // Текст НЕ УБИРАЕМ. Запись кончилась — читать её ещё можно, и кнопка
+    // играет снова с начала.
+    _clock.pause();
     _clock.markCompleted();
     WakelockPlus.disable();
-    setState(() => _stage = _Stage.done);
+    if (mounted) setState(() {});
   }
 
   void _leave() {
@@ -240,38 +300,16 @@ class _PlayerScreenState extends State<PlayerScreen> {
     context.canPop() ? context.pop() : context.go('/arena');
   }
 
+  // -------------------------------------------------------------------
+  // Экран
+  // -------------------------------------------------------------------
+
   @override
   Widget build(BuildContext context) {
     final portrait = MediaQuery.orientationOf(context) == Orientation.portrait;
     return Scaffold(
       backgroundColor: AppColors.navy1,
-      body: SafeArea(
-        child: Stack(
-          children: [
-            Positioned.fill(child: _body(portrait)),
-            // Выход и пауза — поверх текста и мелкие: экран занят строками,
-            // и всё остальное на нём гость.
-            Positioned(
-              left: 4,
-              top: 4,
-              child: IconButton(
-                onPressed: _leave,
-                icon: const Icon(Icons.arrow_back, color: AppColors.muted),
-              ),
-            ),
-            if (_stage == _Stage.playing && !portrait)
-              Positioned(
-                right: 4,
-                top: 4,
-                child: IconButton(
-                  onPressed: _togglePlay,
-                  icon: Icon(_clock.running ? Icons.pause : Icons.play_arrow,
-                      color: AppColors.muted),
-                ),
-              ),
-          ],
-        ),
-      ),
+      body: SafeArea(child: _body(portrait)),
     );
   }
 
@@ -288,42 +326,320 @@ class _PlayerScreenState extends State<PlayerScreen> {
                 style: const TextStyle(color: AppColors.muted, fontSize: 13, height: 1.5)),
           ),
         );
-      case _Stage.done:
-        return Center(
-          child: Text('Запись закончилась',
-              style: AppFonts.ui(fontSize: 18, weight: FontWeight.w800, color: AppColors.muted)),
-        );
       case _Stage.playing:
         // Плашка уходит САМА при повороте: MediaQuery пересчитывается, и
         // экран перестраивается — нажимать нечего и не нужно.
-        return portrait ? const _RotateHint() : _lines();
+        return portrait ? const _RotateHint() : _reader();
     }
   }
 
-  Widget _lines() {
+  Widget _reader() {
     final subtitles = _subtitles!;
-    if (_line < 0 || _line >= subtitles.lines.length) {
-      return Center(
-        child: Text(_track?.title ?? '',
-            style: AppFonts.ui(fontSize: 20, weight: FontWeight.w700, color: AppColors.muted)),
-      );
-    }
+    return LayoutBuilder(
+      builder: (context, box) {
+        const handle = 20.0;
+        final usable = (box.maxWidth - handle).clamp(0.0, double.infinity);
+        final left = (usable * _split).clamp(0.0, usable);
+        final right = usable - left;
 
-    final line = subtitles.lines[_line];
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 12),
-        child: FittedBox(
-          // ВСЯ СТРОКА ЦЕЛИКОМ И БЕЗ ПЕРЕНОСОВ. Перенос разорвал бы пару
-          // «слово — перевод», а она здесь главное; лучше уменьшить кегль.
-          fit: BoxFit.scaleDown,
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
+        return Stack(
+          children: [
+            Positioned.fill(
+              child: Column(
+                children: [
+                  const SizedBox(height: 46),
+                  Expanded(
+                    child: NotificationListener<ScrollStartNotification>(
+                      // dragDetails есть только у прокрутки пальцем: наша
+                      // собственная прокрутка к строке его не ставит, иначе
+                      // список выключал бы автопрокрутку сам себе.
+                      onNotification: (n) {
+                        if (n.dragDetails != null) _onUserScroll();
+                        return false;
+                      },
+                      child: ScrollablePositionedList.builder(
+                        itemScrollController: _scroll,
+                        itemCount: subtitles.lines.length,
+                        padding: const EdgeInsets.only(bottom: 120),
+                        itemBuilder: (context, i) => _ReaderLine(
+                          line: subtitles.lines[i],
+                          leftWidth: left,
+                          rightWidth: right,
+                          gap: handle,
+                          active: i == _line,
+                          activeWord: i == _line ? _word : -1,
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+
+            // Палочка. Текст под неё не заходит: ширина колонок считается
+            // за вычетом её собственной.
+            Positioned(
+              left: left,
+              top: 46,
+              bottom: 0,
+              width: handle,
+              child: _Handle(
+                onDrag: (dx) => setState(() {
+                  _split = ((left + dx) / usable).clamp(0.0, 1.0);
+                }),
+              ),
+            ),
+
+            // Ткнул мимо плашек — плашки закрылись. Слой ниже панели, чтобы
+            // сами плашки оставались нажимаемыми.
+            if (_menu != _SeekMenu.none)
+              Positioned.fill(
+                child: GestureDetector(
+                  behavior: HitTestBehavior.translucent,
+                  onTap: () => setState(() => _menu = _SeekMenu.none),
+                ),
+              ),
+
+            Positioned(top: 0, left: 0, right: 0, child: _topBar()),
+          ],
+        );
+      },
+    );
+  }
+
+  Widget _topBar() {
+    return SizedBox(
+      height: 46,
+      child: LayoutBuilder(
+        builder: (context, box) {
+          const button = 38.0;
+          const step = 36.0;
+          const gap = 6.0;
+          const steps = [5, 10, 30, 50];
+          final middle = box.maxWidth / 2;
+          // Две кнопки стоят ровно по центру, а плашки лежат СЛОЕМ ПОВЕРХ и
+          // ширины не занимают. Держи мы их в общем ряду — на узком экране
+          // панель не поместилась бы, а кнопки прыгали бы вбок ровно в тот
+          // момент, когда по ним целятся.
+          final chipsWidth = steps.length * (step + gap);
+
+          return Stack(
             children: [
-              for (var i = 0; i < line.words.length; i++)
-                _WordPair(word: line.words[i], active: i == _word),
+              Align(
+                alignment: Alignment.centerLeft,
+                child: IconButton(
+                  onPressed: _leave,
+                  icon: const Icon(Icons.arrow_back, color: AppColors.muted),
+                ),
+              ),
+
+              Positioned(
+                left: middle - button - gap / 2,
+                top: 4,
+                child: _RoundButton(
+                  icon: Icons.replay,
+                  active: _menu == _SeekMenu.back,
+                  onTap: () => setState(() => _menu =
+                      _menu == _SeekMenu.back ? _SeekMenu.none : _SeekMenu.back),
+                ),
+              ),
+              Positioned(
+                left: middle + gap / 2,
+                top: 4,
+                child: _RoundButton(
+                  icon: Icons.replay,
+                  mirrored: true,
+                  active: _menu == _SeekMenu.forward,
+                  onTap: () => setState(() => _menu = _menu == _SeekMenu.forward
+                      ? _SeekMenu.none
+                      : _SeekMenu.forward),
+                ),
+              ),
+
+              // Назад — плашки слева от кнопки, вперёд — справа.
+              if (_menu == _SeekMenu.back)
+                Positioned(
+                  left: middle - button - gap / 2 - chipsWidth,
+                  top: 6,
+                  child: Row(
+                    children: [
+                      for (final value in steps.reversed)
+                        _StepChip(step: value, onTap: () => _seekBy(-value)),
+                    ],
+                  ),
+                ),
+              if (_menu == _SeekMenu.forward)
+                Positioned(
+                  left: middle + gap / 2 + button,
+                  top: 6,
+                  child: Row(
+                    children: [
+                      for (final value in steps)
+                        _StepChip(step: value, onTap: () => _seekBy(value)),
+                    ],
+                  ),
+                ),
+
+              Align(
+                alignment: Alignment.centerRight,
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    _SpeedButton(speed: _speed, onPick: _setSpeed),
+                    IconButton(
+                      onPressed: _togglePlay,
+                      icon: Icon(_clock.running ? Icons.pause : Icons.play_arrow,
+                          color: AppColors.gold),
+                    ),
+                    const SizedBox(width: 4),
+                  ],
+                ),
+              ),
             ],
+          );
+        },
+      ),
+    );
+  }
+}
+
+/// Пара строк: оригинал слева, перевод справа, ровно друг напротив друга.
+class _ReaderLine extends StatelessWidget {
+  final SubtitleLine line;
+  final double leftWidth;
+  final double rightWidth;
+  final double gap;
+  final bool active;
+  final int activeWord;
+
+  const _ReaderLine({
+    required this.line,
+    required this.leftWidth,
+    required this.rightWidth,
+    required this.gap,
+    required this.active,
+    required this.activeWord,
+  });
+
+  /// Какое слово перевода соответствует активному слову оригинала.
+  ///
+  /// ЭТО СООТВЕТСТВИЕ ПРИБЛИЖЁННОЕ, и честнее сказать это прямо. Переводчик
+  /// переводит СТРОКУ, а не слова по отдельности: в переводе может быть
+  /// другое число слов и другой их порядок. Поэтому подсвечивается слово на
+  /// том же месте по счёту — а вся строка перевода при этом светлеет
+  /// целиком, чтобы взгляд попадал туда, даже когда слово промахнулось.
+  int get _mirrorWord {
+    if (activeWord < 0 || line.words.isEmpty) return -1;
+    final tokens = line.translationText.split(RegExp(r'\s+'))
+      ..removeWhere((t) => t.isEmpty);
+    if (tokens.isEmpty) return -1;
+    final at = ((activeWord + 0.5) * tokens.length / line.words.length).floor();
+    return at.clamp(0, tokens.length - 1);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 7),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          SizedBox(
+            width: leftWidth,
+            child: leftWidth < 8
+                ? null
+                : Padding(
+                    padding: const EdgeInsets.only(left: 18, right: 6),
+                    child: _Words(
+                      words: [for (final w in line.words) w.text],
+                      active: activeWord,
+                      dim: !active,
+                      size: 19,
+                    ),
+                  ),
+          ),
+          SizedBox(width: gap),
+          SizedBox(
+            width: rightWidth,
+            child: rightWidth < 8
+                ? null
+                : Padding(
+                    padding: const EdgeInsets.only(left: 6, right: 18),
+                    child: _Words(
+                      words: line.translationText
+                          .split(RegExp(r'\s+'))
+                          .where((t) => t.isNotEmpty)
+                          .toList(),
+                      active: _mirrorWord,
+                      dim: !active,
+                      size: 17,
+                    ),
+                  ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Слова одной стороны с подсветкой активного.
+class _Words extends StatelessWidget {
+  final List<String> words;
+  final int active;
+  final bool dim;
+  final double size;
+
+  const _Words({
+    required this.words,
+    required this.active,
+    required this.dim,
+    required this.size,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    if (words.isEmpty) return const SizedBox.shrink();
+    final base = dim ? AppColors.muted : AppColors.cream;
+    return RichText(
+      text: TextSpan(
+        style: AppFonts.ui(fontSize: size, color: base).copyWith(height: 1.45),
+        children: [
+          for (var i = 0; i < words.length; i++)
+            TextSpan(
+              text: i == words.length - 1 ? words[i] : '${words[i]} ',
+              style: i == active
+                  ? TextStyle(
+                      color: AppColors.gold,
+                      fontWeight: FontWeight.w800,
+                    )
+                  : null,
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Палочка между колонками. Тянется пальцем, текст идёт за ней.
+class _Handle extends StatelessWidget {
+  final void Function(double dx) onDrag;
+
+  const _Handle({required this.onDrag});
+
+  @override
+  Widget build(BuildContext context) {
+    return MouseRegion(
+      cursor: SystemMouseCursors.resizeLeftRight,
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onHorizontalDragUpdate: (d) => onDrag(d.delta.dx),
+        child: Center(
+          child: Container(
+            width: 3,
+            decoration: BoxDecoration(
+              color: AppColors.lineStrong,
+              borderRadius: BorderRadius.circular(2),
+            ),
           ),
         ),
       ),
@@ -331,46 +647,104 @@ class _PlayerScreenState extends State<PlayerScreen> {
   }
 }
 
-/// Слово и его перевод одной колонкой.
-///
-/// ИМЕННО КОЛОНКОЙ, А НЕ ДВУМЯ ОТДЕЛЬНЫМИ СТРОКАМИ ТЕКСТА. Перевод обязан
-/// стоять ровно под своим словом; выкладывая строки порознь, пришлось бы
-/// вымерять ширины руками и всё равно разъехаться на первом же длинном
-/// слове. Колонка центрирует пару сама и не может её рассогласовать.
-class _WordPair extends StatelessWidget {
-  final SubtitleWord word;
+/// Круглая стрелка перемотки.
+class _RoundButton extends StatelessWidget {
+  final IconData icon;
   final bool active;
+  final bool mirrored;
+  final VoidCallback onTap;
 
-  const _WordPair({required this.word, required this.active});
+  const _RoundButton({
+    required this.icon,
+    required this.active,
+    required this.onTap,
+    this.mirrored = false,
+  });
 
   @override
   Widget build(BuildContext context) {
-    final color = active ? AppColors.gold : AppColors.cream;
+    return InkResponse(
+      onTap: onTap,
+      radius: 26,
+      child: Container(
+        height: 38,
+        width: 38,
+        decoration: BoxDecoration(
+          shape: BoxShape.circle,
+          color: active ? AppColors.goldSoft : Colors.transparent,
+          border: Border.all(color: active ? AppColors.gold : AppColors.line),
+        ),
+        child: Transform.scale(
+          scaleX: mirrored ? -1 : 1,
+          child: Icon(icon, size: 20, color: active ? AppColors.gold : AppColors.muted),
+        ),
+      ),
+    );
+  }
+}
+
+/// Квадратная плашка с шагом перемотки. Нажатие её НЕ закрывает: игрок сам
+/// решает, сколько раз подряд перемотать и когда закончить.
+class _StepChip extends StatelessWidget {
+  final int step;
+  final VoidCallback onTap;
+
+  const _StepChip({required this.step, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 9),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Text(
-            word.text,
-            style: AppFonts.ui(
-              fontSize: 44,
-              weight: active ? FontWeight.w800 : FontWeight.w600,
-              color: color,
-            ),
+      padding: const EdgeInsets.symmetric(horizontal: 3),
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(8),
+        child: Container(
+          height: 34,
+          width: 36,
+          alignment: Alignment.center,
+          decoration: BoxDecoration(
+            color: AppColors.navy2,
+            border: Border.all(color: AppColors.line),
+            borderRadius: BorderRadius.circular(8),
           ),
-          const SizedBox(height: 6),
-          Text(
-            word.translation,
-            style: AppFonts.ui(
-              fontSize: 28,
-              weight: active ? FontWeight.w700 : FontWeight.w500,
-              // Перевод тускнее оригинала: слушают запись, а перевод —
-              // подсказка к ней, и спорить за внимание он не должен.
-              color: active ? AppColors.gold : AppColors.muted,
-            ),
-          ),
-        ],
+          child: Text('$step',
+              style: AppFonts.mono(
+                  fontSize: 12, weight: FontWeight.w700, color: AppColors.cream)),
+        ),
+      ),
+    );
+  }
+}
+
+/// Скорость записи. Нажатие перебирает значения по кругу — одно касание, и
+/// текущее всегда написано на кнопке.
+class _SpeedButton extends StatelessWidget {
+  static const List<double> steps = [0.75, 1.0, 1.25, 1.5, 0.5];
+
+  final double speed;
+  final ValueChanged<double> onPick;
+
+  const _SpeedButton({required this.speed, required this.onPick});
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      onTap: () {
+        final at = steps.indexOf(speed);
+        onPick(steps[(at < 0 ? 1 : at + 1) % steps.length]);
+      },
+      borderRadius: BorderRadius.circular(8),
+      child: Container(
+        height: 32,
+        padding: const EdgeInsets.symmetric(horizontal: 10),
+        alignment: Alignment.center,
+        decoration: BoxDecoration(
+          border: Border.all(color: AppColors.line),
+          borderRadius: BorderRadius.circular(8),
+        ),
+        child: Text('${speed.toStringAsFixed(2)}×',
+            style: AppFonts.mono(
+                fontSize: 11, weight: FontWeight.w700, color: AppColors.cream)),
       ),
     );
   }
@@ -394,8 +768,8 @@ class _RotateHint extends StatelessWidget {
                 style: AppFonts.ui(fontSize: 20, weight: FontWeight.w800)),
             const SizedBox(height: 8),
             const Text(
-              'Строка с переводом под каждым словом не помещается в ширину '
-              'экрана стоймя.',
+              'Два текста рядом — оригинал и перевод — в ширину экрана '
+              'стоймя не помещаются.',
               textAlign: TextAlign.center,
               style: TextStyle(color: AppColors.muted, fontSize: 13, height: 1.5),
             ),

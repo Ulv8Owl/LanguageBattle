@@ -418,16 +418,35 @@ void main() {
       // Называть модель платного провайдера клиенту не дают — так же, как
       // это устроено у боевого воркера.
       final fn = File('supabase/functions/transcribe-track/index.ts').readAsStringSync();
-      expect(fn, contains('.select("listening_model")'));
+      expect(fn, contains('.select("listening_model, translation_model")'));
       expect(fn.contains('body.model'), isFalse);
     });
 
-    test('перевод берётся только при совпадении длин', () {
+    test('перевод идёт построчно — сопоставлять нечего', () {
       // Перевод, поехавший относительно оригинала, разъезжается молча и до
-      // конца записи. Субтитры без перевода — плохо; с чужим переводом под
-      // каждым словом — ложь.
+      // конца записи. Список пришлось бы просить у модели структурой, и
+      // тогда эта опасность возвращается. Одна строка на вызов — и
+      // сопоставлять нечего: что отдали, то и получили.
       final fn = File('supabase/functions/transcribe-track/index.ts').readAsStringSync();
-      expect(fn, contains('parsed.length !== slice.length'));
+      expect(fn, contains('async function translateLines('));
+      expect(fn, contains('text: `Translate into \${target}:'));
+      expect(fn.contains('JSON.stringify(slice)'), isFalse,
+          reason: 'перевод снова просят списком — он снова сможет поехать');
+    });
+
+    test('переводчики — отдельная настройка и отдельный список', () {
+      // Шага два, и мерить их надо порознь: плохая разметка и плохой
+      // перевод — разные беды с разными лекарствами.
+      final client = RegExp(r"const List<String> translationModels = \[(.*?)\];", dotAll: true)
+          .firstMatch(File('lib/data/judge_models.dart').readAsStringSync());
+      final server = RegExp(r"const TRANSLATION_MODELS = \[(.*?)\] as const;", dotAll: true)
+          .firstMatch(File('supabase/functions/transcribe-track/index.ts').readAsStringSync());
+      expect(client, isNotNull);
+      expect(server, isNotNull);
+      List<String> names(String body) =>
+          RegExp(r'''['"]([\w.\-]+)['"]''').allMatches(body).map((m) => m.group(1)!).toList();
+      expect(names(client!.group(1)!), names(server!.group(1)!));
+      expect(names(client.group(1)!), everyElement(startsWith('qwen-mt-')));
     });
 
     test('нет разметки — показываем ответ, а не гадаем', () {

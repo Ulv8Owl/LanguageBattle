@@ -61,6 +61,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   String _asrModel = defaultAsrModel;
   String _llmModel = defaultLlmModel;
   String _listeningModel = defaultListeningModel;
+  String _translationModel = defaultTranslationModel;
   bool _savingModels = false;
 
   /// Пока идёт удаление, кнопку нельзя нажать второй раз: повторный вызов
@@ -421,6 +422,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
         _asrModel = models.asr;
         _llmModel = models.llm;
         _listeningModel = models.listening;
+        _translationModel = models.translation;
       });
     } catch (_) {
       // Молча: не прочитался выбор — покажем модели по умолчанию, те же,
@@ -638,6 +640,28 @@ class _SettingsScreenState extends State<SettingsScreen> {
                               current: _listeningModel,
                               save: saveListeningModel,
                               apply: (m) => _listeningModel = m,
+                            ),
+                  ),
+                  const Divider(height: 1, color: AppColors.line),
+                  _Row(
+                    icon: Icons.translate_outlined,
+                    title: 'Перевод расшифровки',
+                    trailing: _savingModels
+                        ? const SizedBox(
+                            height: 14, width: 14, child: CircularProgressIndicator(strokeWidth: 2))
+                        : Text(_translationModel,
+                            style: AppFonts.mono(fontSize: 9, color: AppColors.muted)),
+                    onTap: _savingModels
+                        ? null
+                        : () => _pickModel(
+                              title: 'Перевод расшифровки',
+                              note: 'Второй шаг «Аудирования»: переводит то,\n'
+                                  'что услышал распознаватель. Построчно —\n'
+                                  'чтобы перевод не поехал относительно текста.',
+                              options: translationModels,
+                              current: _translationModel,
+                              save: saveTranslationModel,
+                              apply: (m) => _translationModel = m,
                             ),
                   ),
                   const Divider(height: 1, color: AppColors.line),

@@ -36,7 +36,6 @@ import { createClient } from "jsr:@supabase/supabase-js@2";
 import { audioUrlFor } from "../_shared/audioLink.ts";
 import { judgeKey, parseJson, requestQwen } from "../_shared/review.ts";
 import { asrFamily, nativeTranscribe } from "../_shared/asr.ts";
-import { llmModel } from "../_shared/textJudge.ts";
 
 /** Тот же приватный бакет, что и у боевых записей. */
 const BUCKET = "voice-recordings";
@@ -95,6 +94,29 @@ function listeningModel(chosen?: string | null): string {
   const fromEnv = Deno.env.get("OMNI_TRANSCRIBE_MODEL");
   if (fromEnv && (LISTENING_MODELS as readonly string[]).includes(fromEnv)) return fromEnv;
   return LISTENING_MODELS[0];
+}
+
+/**
+ * Переводчики расшифровки. Первый — по умолчанию.
+ *
+ * ЗДЕСЬ ТОЛЬКО `qwen-mt-*`, и это не случайность: обычную чат-модель надо
+ * уговаривать ответить строго переводом и ничем больше, а переводчик ничего
+ * другого и не умеет. Список тот же, что видит игрок в настройках
+ * (lib/data/judge_models.dart); это сторожит тест.
+ */
+const TRANSLATION_MODELS = [
+  "qwen-mt-flash",
+  "qwen-mt-lite",
+  "qwen-mt-turbo",
+  "qwen-mt-plus",
+] as const;
+
+function translationModel(chosen?: string | null): string {
+  const wanted = (chosen ?? "").trim();
+  if ((TRANSLATION_MODELS as readonly string[]).includes(wanted)) return wanted;
+  const fromEnv = Deno.env.get("TRANSCRIBE_TRANSLATE_MODEL");
+  if (fromEnv && (TRANSLATION_MODELS as readonly string[]).includes(fromEnv)) return fromEnv;
+  return TRANSLATION_MODELS[0];
 }
 
 /** Расширение файла: по нему провайдер определяет формат записи. */
@@ -349,62 +371,54 @@ function wordsOfPhrase(item: Timed): Timed[] {
 }
 
 /**
- * Переводит слова ПО НОМЕРАМ, а не по смыслу строки.
+ * Переводит СТРОКИ, каждую своим вызовом.
  *
- * Именно здесь живёт опасность, ради которой изначально выбрали один вызов
- * на всё: перевод, поехавший относительно оригинала, разъезжается молча и
- * до конца записи. Защита простая и проверяемая — просим ровно столько же
- * элементов, сколько отдали, и при несовпадении длин НЕ БЕРЁМ НИЧЕГО.
- * Субтитры без перевода — это плохо; субтитры с чужим переводом под каждым
- * словом — это ложь.
+ * ПОСТРОЧНО, А НЕ СПИСКОМ. Список пришлось бы просить у модели структурой, и
+ * тогда возвращается ровно та опасность, ради которой всё начиналось с
+ * одного вызова: перевод, поехавший относительно оригинала, разъезжается
+ * молча и до конца записи. Одна строка на вызов — и сопоставлять нечего:
+ * что отдали, то и получили.
+ *
+ * ПЕРЕВОДЧИКАМ НЕ ДАЮТ ИНСТРУКЦИЙ. `qwen-mt-*` — не собеседники: им дают
+ * текст, они отдают текст. Поэтому системной части нет вовсе, а в
+ * пользовательской — только сама строка и язык.
+ *
+ * ВОСЕМЬ ВЫЗОВОВ РАЗОМ. Строк в песне под сотню, и последовательно это
+ * минуты — больше, чем нам вообще отпущено. Больше восьми одновременно не
+ * пускаем: провайдер за это отвечает отказами по частоте запросов.
  */
-async function translateWords(
-  words: string[],
+async function translateLines(
+  lines: string[],
   translateTo: string,
+  model: string,
   budgetMs: number,
 ): Promise<string[]> {
   const target = languageName(translateTo);
-  const model = llmModel(Deno.env.get("TRANSCRIBE_TRANSLATE_MODEL"));
-  const out = new Array<string>(words.length).fill("");
-  const CHUNK = 200;
+  const out = new Array<string>(lines.length).fill("");
   const started = Date.now();
+  const left = () => budgetMs - (Date.now() - started);
+  const LANES = 8;
 
-  for (let from = 0; from < words.length; from += CHUNK) {
-    const left = budgetMs - (Date.now() - started);
-    if (left < 8_000) break; // не успеем — остаток останется без перевода
-    const slice = words.slice(from, from + CHUNK);
-    const answer = await requestQwen(
-      `You translate word lists into ${target}.`,
-      [{
-        type: "text",
-        text: [
-          `Translate each word into ${target}, keeping the order.`,
-          `Answer with a JSON array of exactly ${slice.length} strings and nothing else.`,
-          "A word with no separate translation (an article, an auxiliary) becomes an empty string.",
-          "",
-          JSON.stringify(slice),
-        ].join("\n"),
-      }],
-      left,
-      model,
-      { temperature: 0, timeoutMs: left },
-    );
-    if ("error" in answer) break;
+  let next = 0;
+  const lane = async () => {
+    for (;;) {
+      const i = next++;
+      if (i >= lines.length) return;
+      const budget = left();
+      if (budget < 6_000) return; // не успеем — остаток останется без перевода
+      const answer = await requestQwen(
+        "",
+        [{ type: "text", text: `Translate into ${target}:\n${lines[i]}` }],
+        budget,
+        model,
+        { temperature: 0, timeoutMs: budget },
+      );
+      if ("error" in answer) continue;
+      out[i] = answer.raw.trim();
+    }
+  };
 
-    const raw = answer.raw.trim();
-    const braced = raw.match(/\[[\s\S]*\]/);
-    let parsed: unknown = null;
-    try {
-      parsed = JSON.parse(braced ? braced[0] : raw);
-    } catch {
-      parsed = null;
-    }
-    if (!Array.isArray(parsed) || parsed.length !== slice.length) continue;
-    for (let i = 0; i < slice.length; i++) {
-      const value = parsed[i];
-      if (typeof value === "string") out[from + i] = value.trim();
-    }
-  }
+  await Promise.all(Array.from({ length: Math.min(LANES, lines.length) }, lane));
   return out;
 }
 
@@ -529,10 +543,11 @@ Deno.serve(async (req) => {
   // называть модель в запросе к платному провайдеру ему не дают.
   const { data: profile } = await admin
     .from("users")
-    .select("listening_model")
+    .select("listening_model, translation_model")
     .eq("id", userId)
     .maybeSingle();
   const model = listeningModel((profile?.listening_model as string | null) ?? null);
+  const translator = translationModel((profile?.translation_model as string | null) ?? null);
 
   const resultPath = resultPathFor(storagePath);
 
@@ -558,6 +573,7 @@ Deno.serve(async (req) => {
     cost,
     left,
     model,
+    translator,
     format: extensionOf(storagePath),
   });
   if (typeof EdgeRuntime !== "undefined") {
@@ -569,7 +585,7 @@ Deno.serve(async (req) => {
   }
 
   return json(
-    { accepted: true, result_path: resultPath, model, energy_spent: cost, energy_left: left },
+    { accepted: true, result_path: resultPath, model, translator, energy_spent: cost, energy_left: left },
     202,
   );
 });
@@ -588,6 +604,7 @@ async function transcribe(job: {
   cost: number;
   left: unknown;
   model: string;
+  translator: string;
   format: string;
 }): Promise<void> {
   const put = job.save;
@@ -653,6 +670,7 @@ async function transcribeByAsr(
     cost: number;
     left: unknown;
     model: string;
+    translator: string;
     format: string;
   },
   put: (body: unknown) => Promise<void>,
@@ -683,25 +701,30 @@ async function transcribeByAsr(
     return;
   }
 
-  const words = items.flatMap(wordsOfPhrase);
-  const translations = await translateWords(
-    words.map((w) => w.text),
-    job.translateTo,
-    budget - (Date.now() - started),
-  );
-
-  const line = words.map((w, i) => ({
+  const words = items.flatMap(wordsOfPhrase).map((w) => ({
     w: w.text,
-    t: translations[i] ?? "",
+    t: "",
     start: w.start,
     end: w.end,
   }));
+  const lines = splitLong(fillEnds(words));
+
+  // ПЕРЕВОДИМ УЖЕ РАЗБИТОЕ НА СТРОКИ. Строка — это то, что игрок читает
+  // справа целиком; переводить её кусками значило бы показать ему склейку
+  // из обрывков.
+  const translations = await translateLines(
+    lines.map((line) => line.map((w) => w.w).join(" ")),
+    job.translateTo,
+    job.translator,
+    budget - (Date.now() - started),
+  );
 
   await put({
     language: "",
     translation: job.translateTo,
-    lines: splitLong(fillEnds(line)),
+    lines: lines.map((line, i) => ({ t: translations[i] ?? "", w: line })),
     model: job.model,
+    translator: job.translator,
     energy_spent: job.cost,
     energy_left: job.left,
   });

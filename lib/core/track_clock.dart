@@ -25,8 +25,33 @@ class TrackClock extends ChangeNotifier {
   final Stopwatch _since = Stopwatch();
   int _anchorMs = 0;
   bool _completed = false;
+  double _rate = 1.0;
 
-  int get positionMs => _anchorMs + _since.elapsedMilliseconds;
+  /// Во сколько раз запись идёт быстрее обычного.
+  ///
+  /// ЧАСАМ ЭТО ЗНАТЬ ОБЯЗАТЕЛЬНО. Они считают время сами, по системным
+  /// часам, а на скорости 1.5× запись за ту же секунду уходит на полторы.
+  /// Не умножив, подсветка отставала бы тем сильнее, чем дальше играет, —
+  /// и выглядело бы это как плохие субтитры, а не как забытый множитель.
+  double get rate => _rate;
+
+  set rate(double value) {
+    final next = value <= 0 ? 1.0 : value;
+    if (next == _rate) return;
+    // Прошедшее считаем по СТАРОЙ скорости, дальше — по новой.
+    _anchorMs = positionMs;
+    if (_since.isRunning) {
+      _since
+        ..reset()
+        ..start();
+    } else {
+      _since.reset();
+    }
+    _rate = next;
+    notifyListeners();
+  }
+
+  int get positionMs => _anchorMs + (_since.elapsedMilliseconds * _rate).round();
 
   bool get completed => _completed;
 
@@ -38,6 +63,14 @@ class TrackClock extends ChangeNotifier {
     _since
       ..reset()
       ..start();
+    _startTicker();
+  }
+
+  /// Заводит счётчик кадров. Зовётся отовсюду, откуда время может пойти
+  /// снова: markCompleted его гасит, и без этого запись, доигранная до
+  /// конца, воспроизводилась бы дальше С НЕПОДВИЖНОЙ ПОДСВЕТКОЙ — звук идёт,
+  /// а текст стоит. Снаружи это выглядит как сломанные субтитры.
+  void _startTicker() {
     _ticker?.cancel();
     // 16 мс — кадр при 60 Гц. Чаще считать незачем: чаще экран всё равно не
     // перерисуется.
@@ -56,9 +89,11 @@ class TrackClock extends ChangeNotifier {
   }
 
   void resume() {
+    _completed = false;
     _since
       ..reset()
       ..start();
+    _startTicker();
     notifyListeners();
   }
 
@@ -66,6 +101,7 @@ class TrackClock extends ChangeNotifier {
     _anchorMs = ms < 0 ? 0 : ms;
     _since.reset();
     _completed = false;
+    if (_since.isRunning) _startTicker();
     notifyListeners();
   }
 
