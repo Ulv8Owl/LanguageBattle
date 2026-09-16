@@ -263,6 +263,59 @@ void main() {
     });
   });
 
+  group('путь записи в хранилище', () {
+    // ПРО ЭТОТ ПУТЬ ЗНАЮТ ТРИ МЕСТА, И СОГЛАСОВАННОСТЬ ДВУХ ИЗ НИХ
+    // ВЫГЛЯДИТ КАК РАБОТАЮЩАЯ ФУНКЦИЯ. Клиент собирает путь, функция
+    // разбора по нему же проверяет, что запись не чужая, а ПРАВО писать по
+    // этому пути живёт в политиках хранилища. Первые два совпадали, третьего
+    // не было вовсе — и живой разбор отказывал на первом же шаге:
+    // «new row violates row-level security policy», 403.
+    const prefix = 'tracks/';
+
+    test('клиент и функция разбора говорят об одном пути', () {
+      expect(
+        File('lib/data/track_transcriber.dart').readAsStringSync(),
+        contains("'$prefix\$currentUserId/"),
+      );
+      expect(
+        File('supabase/functions/transcribe-track/index.ts').readAsStringSync(),
+        contains('`$prefix\${userId}/`'),
+      );
+    });
+
+    test('хранилище разрешает по этому пути всё, что делает клиент', () {
+      // Клиент кладёт (с upsert) и удаляет. Не хватит любой из политик —
+      // и отказ придёт либо на загрузке, либо на уборке за собой; вторая
+      // молча оставила бы чужую запись у нас на сервере навсегда.
+      final sql = File('supabase/migrations/0052_listening_track_uploads.sql')
+          .readAsStringSync();
+      expect(sql, contains("(storage.foldername(name))[1] = 'tracks'"));
+      expect(sql, contains('(storage.foldername(name))[2] = auth.uid()::text'));
+      for (final action in ['select', 'insert', 'update', 'delete']) {
+        expect(sql, contains('on storage.objects for $action'), reason: action);
+      }
+      // upsert: true — это обновление существующего объекта, и без with
+      // check на update оно отказывает (ровно та же ловушка, что в 0045).
+      expect(sql, contains('with check (bucket_id'));
+    });
+
+    test('условие пути записано один раз, а не в каждой политике', () {
+      // Четыре копии одного условия разъезжаются молча, и разъехавшись
+      // дают право писать туда, откуда нельзя удалить.
+      final sql = File('supabase/migrations/0052_listening_track_uploads.sql')
+          .readAsStringSync();
+      expect(sql, contains('function public.own_listening_track(name text)'));
+      // Пять, а не четыре: у политики на обновление условие стоит дважды —
+      // в using (что можно трогать) и в with check (чем можно заменить).
+      expect('public.own_listening_track(name)'.allMatches(sql).length, 5);
+      // auth.uid() внутри — значит STABLE, а не IMMUTABLE: обещав
+      // планировщику неизменность, мы разрешили бы применить результат
+      // одного игрока к запросу другого.
+      expect(sql.contains('immutable'), isFalse);
+      expect(sql, contains('stable'));
+    });
+  });
+
   group('энергия за разбор', () {
     String fn() =>
         File('supabase/functions/transcribe-track/index.ts').readAsStringSync();
