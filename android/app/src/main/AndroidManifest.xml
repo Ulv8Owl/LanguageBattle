@@ -2,6 +2,12 @@
     <uses-permission android:name="android.permission.INTERNET"/>
     <uses-permission android:name="android.permission.RECORD_AUDIO"/>
     <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS"/>
+    <!-- Напоминания переживают перезагрузку телефона. Без этого права
+         система не скажет приложению о загрузке, и все назначенные
+         уведомления после перезагрузки просто не придут — молча, без
+         единой ошибки. POST_NOTIFICATIONS и VIBRATE объявляет сам
+         flutter_local_notifications. -->
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED"/>
     <application
         android:label="Chrolingo"
         android:name="${applicationName}"
@@ -28,6 +34,21 @@
                 <category android:name="android.intent.category.LAUNCHER"/>
             </intent-filter>
         </activity>
+        <!-- КТО ПОКАЗЫВАЕТ НАЗНАЧЕННОЕ УВЕДОМЛЕНИЕ. Оба receiver'а лежат
+             внутри flutter_local_notifications, но объявить их обязано
+             приложение. Не объявишь — сборка пройдёт, плагин отработает,
+             а уведомление не придёт: система не знает, кого будить. -->
+        <receiver android:exported="false"
+            android:name="com.dexterous.flutterlocalnotifications.ScheduledNotificationReceiver" />
+        <receiver android:exported="false"
+            android:name="com.dexterous.flutterlocalnotifications.ScheduledNotificationBootReceiver">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED"/>
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED"/>
+                <action android:name="android.intent.action.QUICKBOOT_POWERON" />
+                <action android:name="com.htc.intent.action.QUICKBOOT_POWERON"/>
+            </intent-filter>
+        </receiver>
         <!-- Don't delete the meta-data below.
              This is used by the Flutter tool to generate GeneratedPluginRegistrant.java -->
         <meta-data

@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -5,6 +7,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'app.dart';
 import 'core/app_locale.dart';
 import 'core/client_secrets_guard.dart';
+import 'core/reminders.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -26,4 +29,12 @@ Future<void> main() async {
   await AppLocale.load();
 
   runApp(const LanguageBattleApp());
+
+  // Напоминания поднимаются ПОСЛЕ первого кадра и без await: канал,
+  // база часовых поясов и переназначение недели вперёд — работа на
+  // десятки миллисекунд, но запуск приложения она задерживать не должна.
+  //
+  // Переназначаем на КАЖДОМ запуске намеренно: расписание, составленное
+  // в прошлый раз, ничего не знает о том, что игрок с тех пор занимался.
+  unawaited(Reminders.init().then((_) => Reminders.refresh()));
 }

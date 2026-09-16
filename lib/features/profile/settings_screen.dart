@@ -7,6 +7,7 @@ import '../../core/app_events.dart';
 import '../../core/app_locale.dart';
 import '../../core/debug_flags.dart';
 import '../../core/leagues.dart';
+import '../../core/reminders.dart';
 import '../../core/supabase_client.dart';
 import '../../core/all_languages.dart';
 import '../../core/nav_state.dart';
@@ -35,7 +36,13 @@ class SettingsScreen extends StatefulWidget {
 }
 
 class _SettingsScreenState extends State<SettingsScreen> {
-  bool _notifications = true;
+  /// Напоминания зайти позаниматься. Значение — НЕ «как хотелось бы», а
+  /// как есть на телефоне: разрешение могли и не дать, и переключатель,
+  /// который врёт про это, хуже отсутствующего.
+  bool _reminders = false;
+  int _reminderHour = kReminderDefaultHour;
+  bool _savingReminders = false;
+
   bool _hideFromLeaderboard = false;
 
   /// Языки игрока: на каком говорит и какой учит. ВЫБИРАЮТСЯ ЗДЕСЬ, а не
@@ -74,6 +81,86 @@ class _SettingsScreenState extends State<SettingsScreen> {
     _loadNativeLanguage();
     _loadMyLanguages();
     _loadJudgeModels();
+    _loadReminders();
+  }
+
+  Future<void> _loadReminders() async {
+    final enabled = await Reminders.isEnabled();
+    final at = await Reminders.hour();
+    if (!mounted) return;
+    setState(() {
+      _reminders = enabled;
+      _reminderHour = at;
+    });
+  }
+
+  /// Включить или выключить напоминания.
+  ///
+  /// ПЕРЕКЛЮЧАТЕЛЬ ВСТАЁТ ПО ФАКТУ, А НЕ ПО НАЖАТИЮ. Разрешение на
+  /// уведомления спрашивает система, и отказать она может; оставить
+  /// переключатель включённым после отказа значит пообещать то, чего не
+  /// будет, — а игрок потом ждёт напоминаний и не получает их.
+  Future<void> _toggleReminders(bool on) async {
+    setState(() => _savingReminders = true);
+    try {
+      final result = on ? await Reminders.enable(atHour: _reminderHour) : false;
+      if (!on) await Reminders.disable();
+      if (!mounted) return;
+      setState(() {
+        _reminders = result;
+        _savingReminders = false;
+      });
+      if (on && !result && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Уведомления запрещены в настройках телефона'),
+          ),
+        );
+      }
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _savingReminders = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Не удалось: $e')),
+      );
+    }
+  }
+
+  /// Час напоминания. Ночь не предлагаем вовсе: разбуженный игрок
+  /// выключает уведомления навсегда, а не занимается.
+  Future<void> _pickReminderHour() async {
+    final picked = await showModalBottomSheet<int>(
+      context: context,
+      backgroundColor: AppColors.navy2,
+      builder: (ctx) => SafeArea(
+        child: ListView(
+          shrinkWrap: true,
+          children: [
+            for (var h = 7; h <= 22; h++)
+              ListTile(
+                title: Text('${h.toString().padLeft(2, '0')}:00',
+                    style: AppFonts.mono(fontSize: 13)),
+                trailing: h == _reminderHour
+                    ? const Icon(Icons.check, color: AppColors.gold, size: 18)
+                    : null,
+                onTap: () => Navigator.of(ctx).pop(h),
+              ),
+          ],
+        ),
+      ),
+    );
+    if (picked == null || !mounted) return;
+    setState(() {
+      _reminderHour = picked;
+      _savingReminders = true;
+    });
+    if (_reminders) {
+      await Reminders.enable(atHour: picked);
+    } else {
+      await Reminders.setHour(picked);
+    }
+    if (!mounted) return;
+    setState(() => _savingReminders = false);
   }
 
   Future<void> _loadNativeLanguage() async {
@@ -687,17 +774,36 @@ class _SettingsScreenState extends State<SettingsScreen> {
             const SizedBox(height: 8),
             ChPanel(
               padding: EdgeInsets.zero,
-              child: _Row(
-                icon: Icons.notifications_none,
-                title: t.matchNotifications,
-                trailing: Switch(
-                  value: _notifications,
-                  activeThumbColor: AppColors.gold,
-                  onChanged: (v) {
-                    setState(() => _notifications = v);
-                    _notReadyYet('Push-уведомления');
-                  },
-                ),
+              child: Column(
+                children: [
+                  _Row(
+                    icon: Icons.notifications_none,
+                    title: 'Напоминать позаниматься',
+                    trailing: Switch(
+                      value: _reminders,
+                      activeThumbColor: AppColors.gold,
+                      onChanged: _savingReminders ? null : _toggleReminders,
+                    ),
+                  ),
+                  const Divider(height: 1, color: AppColors.line),
+                  _Row(
+                    icon: Icons.schedule,
+                    title: 'Время',
+                    trailing: Text(
+                      '${_reminderHour.toString().padLeft(2, '0')}:00',
+                      style: AppFonts.mono(fontSize: 11, color: AppColors.muted),
+                    ),
+                    onTap: _savingReminders ? null : _pickReminderHour,
+                  ),
+                  const Divider(height: 1, color: AppColors.line),
+                  _Row(
+                    icon: Icons.notifications_active_outlined,
+                    title: 'Показать прямо сейчас',
+                    trailing: const Icon(Icons.play_arrow,
+                        color: AppColors.muted, size: 20),
+                    onTap: Reminders.preview,
+                  ),
+                ],
               ),
             ),
             const SizedBox(height: 18),

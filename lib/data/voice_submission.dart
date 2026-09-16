@@ -1,10 +1,13 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:supabase_flutter/supabase_flutter.dart' show FileOptions;
 
 import '../core/audio_format.dart';
+import '../core/reminders.dart';
 import '../core/supabase_client.dart';
 import '../widgets/correction_text.dart';
+import 'practice_diary.dart';
 
 /// Итог распознавания речи по одной записи. Значения совпадают со
 /// столбцом voice_recordings.transcript_status (миграция 0013) — клиент
@@ -206,6 +209,12 @@ Future<String> submitVoiceRecording({
     'voice_recording_id': recordingId,
     'status': 'pending',
   });
+
+  // ЗДЕСЬ И ТОЛЬКО ЗДЕСЬ ИГРОК «ЗАНИМАЛСЯ»: и бой, и одиночная игра
+  // приходят сюда, и ровно за это списывается энергия. Отметка местная,
+  // ничего не начисляет и ничего не ждёт — уронить отправку записи из-за
+  // дневника напоминаний было бы обменом ценного на ничто.
+  unawaited(PracticeDiary.markPractised().then((_) => Reminders.refresh()));
   return recordingId;
 }
 
