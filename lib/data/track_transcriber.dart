@@ -78,7 +78,16 @@ class TrackTranscriber {
       }).normalized();
 
       if (subtitles.isEmpty) {
-        throw const TranscribeFailed('в записи не нашлось слов');
+        // ПОКАЗЫВАЕМ, ЧТО ПРИШЛО. Разбор к этому месту уже оплачен, и
+        // «не нашлось слов» без единой подробности означает ещё одну
+        // попытку вслепую — за ту же цену. Кусок ответа отвечает на
+        // единственный вопрос, который тут возникает: модель промолчала
+        // или ответила не тем.
+        final sample = '${map['lines'] ?? map}';
+        throw TranscribeFailed(
+          'разбор не прочитался. Ответ модели начинается так: '
+          '${sample.substring(0, sample.length < 160 ? sample.length : 160)}',
+        );
       }
 
       await SubtitleStore.save(track.id, subtitles);

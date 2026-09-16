@@ -263,6 +263,97 @@ void main() {
     });
   });
 
+  group('ответ модели разбирается, каким бы он ни пришёл', () {
+    // ФОРМАТ ЗАДАН В ЗАПРОСЕ, НО ЗАДАН — НЕ ЗНАЧИТ СОБЛЮДЁН. Живой разбор
+    // вернул строки на уровень вложеннее просимого, приложение упало на
+    // приведении типа, и уже оплаченный разбор пропал целиком. К моменту
+    // разбора ответа энергия списана, поэтому отвергать ответ из-за лишней
+    // пары скобок — значит брать деньги и выбрасывать товар.
+    List<List<Map<String, dynamic>>> shape(TrackSubtitles subs) => [
+          for (final line in subs.lines)
+            [for (final w in line.words) w.toJson()],
+        ];
+
+    TrackSubtitles parse(dynamic lines) =>
+        TrackSubtitles.fromJson({'language': 'en', 'translation': 'ru', 'lines': lines});
+
+    const word = {'w': 'one', 't': 'раз', 'start': 0, 'end': 100};
+    const other = {'w': 'two', 't': 'два', 'start': 200, 'end': 300};
+
+    test('канон — как просили', () {
+      final out = parse([
+        [word, other],
+      ]);
+      expect(shape(out).length, 1);
+      expect(out.words.length, 2);
+    });
+
+    test('лишний уровень вложенности — тот самый живой случай', () {
+      // lines: [[[…], […]]] вместо lines: [[…], […]]
+      final out = parse([
+        [
+          [word],
+          [other],
+        ],
+      ]);
+      expect(out.lines.length, 2, reason: 'две строки, а не падение');
+      expect(out.words.map((w) => w.text), ['one', 'two']);
+    });
+
+    test('слова без строк вовсе', () {
+      final out = parse([word, other]);
+      expect(out.words.length, 2);
+    });
+
+    test('строка объектом со списком внутри', () {
+      final out = parse([
+        {
+          'words': [word, other],
+        },
+      ]);
+      expect(out.words.length, 2);
+    });
+
+    test('мусор не роняет разбор, а выбрасывается', () {
+      final out = parse([
+        'строка вместо слова',
+        [word],
+        null,
+        42,
+      ]);
+      expect(out.words.map((w) => w.text), ['one']);
+    });
+
+    test('другие имена полей и время строкой', () {
+      final out = parse([
+        [
+          {'word': 'three', 'translation': 'три', 'begin': '400', 'to': '500'},
+        ],
+      ]);
+      final w = out.words.single;
+      expect(w.text, 'three');
+      expect(w.translation, 'три');
+      expect(w.startMs, 400);
+      expect(w.endMs, 500);
+    });
+
+    test('сервер приводит ответ к канону сам', () {
+      // Клиент терпелив, но канон делает сервер: разбирать один и тот же
+      // ответ по-разному в двух местах — значит однажды разойтись.
+      final fn = File('supabase/functions/transcribe-track/index.ts')
+          .readAsStringSync();
+      expect(fn, contains('function linesOf('));
+      expect(fn, contains('function asWord('));
+      // Массив, все элементы которого слова, — это строка; любой другой —
+      // список строк, и в него надо спуститься.
+      expect(fn, contains('words.every((w) => w !== null)'));
+      expect(fn, contains('node.flatMap(linesOf)'));
+      // Строка во всю запись — сломанный экран: он показывает одну строку
+      // за раз и ужимает её по ширине.
+      expect(fn, contains('splitLong'));
+    });
+  });
+
   group('путь записи в хранилище', () {
     // ПРО ЭТОТ ПУТЬ ЗНАЮТ ТРИ МЕСТА, И СОГЛАСОВАННОСТЬ ДВУХ ИЗ НИХ
     // ВЫГЛЯДИТ КАК РАБОТАЮЩАЯ ФУНКЦИЯ. Клиент собирает путь, функция

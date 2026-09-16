@@ -23,12 +23,37 @@ class SubtitleWord {
     required this.endMs,
   });
 
-  factory SubtitleWord.fromJson(Map<String, dynamic> json) => SubtitleWord(
-        text: ((json['w'] as String?) ?? '').trim(),
-        translation: ((json['t'] as String?) ?? '').trim(),
-        startMs: (json['start'] as num?)?.toInt() ?? 0,
-        endMs: (json['end'] as num?)?.toInt() ?? 0,
-      );
+  /// Имена полей берём шире, чем просили, и ни одного поля не приводим
+  /// жёстко: модель путает `w`/`word`/`text` и изредка присылает время
+  /// строкой. Падать на этом нельзя — разбор к тому моменту уже оплачен.
+  factory SubtitleWord.fromJson(Map<String, dynamic> json) {
+    String text(List<String> keys) {
+      for (final key in keys) {
+        final value = json[key];
+        if (value is String && value.trim().isNotEmpty) return value.trim();
+      }
+      return '';
+    }
+
+    int ms(List<String> keys) {
+      for (final key in keys) {
+        final value = json[key];
+        if (value is num) return value.toInt();
+        if (value is String) {
+          final parsed = num.tryParse(value);
+          if (parsed != null) return parsed.toInt();
+        }
+      }
+      return 0;
+    }
+
+    return SubtitleWord(
+      text: text(const ['w', 'word', 'text']),
+      translation: text(const ['t', 'translation', 'tr']),
+      startMs: ms(const ['start', 'begin', 'from']),
+      endMs: ms(const ['end', 'stop', 'to']),
+    );
+  }
 
   Map<String, dynamic> toJson() =>
       {'w': text, 't': translation, 'start': startMs, 'end': endMs};
@@ -46,7 +71,7 @@ class SubtitleLine {
 
   factory SubtitleLine.fromJson(List<dynamic> json) => SubtitleLine([
         for (final word in json)
-          SubtitleWord.fromJson(Map<String, dynamic>.from(word as Map)),
+          if (word is Map) SubtitleWord.fromJson(Map<String, dynamic>.from(word)),
       ]);
 }
 
@@ -68,13 +93,55 @@ class TrackSubtitles {
 
   bool get isEmpty => lines.isEmpty;
 
+  /// Строки из того, что пришло, КАКОЙ БЫ ГЛУБИНЫ ОНО НИ БЫЛО.
+  ///
+  /// Формат ответа задан в запросе к модели, но задан — не значит соблюдён:
+  /// живой разбор вернул строки на уровень вложеннее, и приложение упало на
+  /// приведении типа («type 'List&lt;dynamic&gt;' is not a subtype of type
+  /// 'Map&lt;dynamic, dynamic&gt;'»), выбросив уже оплаченный разбор целиком.
+  ///
+  /// Приводит ответ к канону сервер, и здесь это НЕ ДУБЛИРОВАНИЕ: сервер в
+  /// проекте один на все ветки, и приложение вполне может разговаривать с
+  /// функцией, задеплоенной из другой. Падать на этом оно не должно ни в
+  /// каком случае.
+  /// Слово ли это. Именно СЛОВО, а не любой объект: {"words": […]} тоже
+  /// Map, и приняв его за слово, разбор теряет всё, что внутри.
+  static bool _isWord(dynamic node) {
+    if (node is! Map) return false;
+    for (final key in const ['w', 'word', 'text']) {
+      final value = node[key];
+      if (value is String && value.trim().isNotEmpty) return true;
+    }
+    return false;
+  }
+
+  static List<SubtitleLine> _linesOf(dynamic node) {
+    if (node is List) {
+      if (node.isEmpty) return const [];
+      // Массив, все элементы которого — слова, это строка; любой другой —
+      // список строк, и в него надо спуститься.
+      if (node.every(_isWord)) {
+        final line = SubtitleLine.fromJson(node);
+        return line.words.isEmpty ? const [] : [line];
+      }
+      return [for (final item in node) ..._linesOf(item)];
+    }
+    if (node is Map) {
+      if (_isWord(node)) {
+        return [SubtitleLine.fromJson([node])];
+      }
+      return [
+        for (final value in node.values)
+          if (value is List) ..._linesOf(value),
+      ];
+    }
+    return const [];
+  }
+
   factory TrackSubtitles.fromJson(Map<String, dynamic> json) => TrackSubtitles(
         language: (json['language'] as String?) ?? '',
         translationLanguage: (json['translation'] as String?) ?? '',
-        lines: [
-          for (final line in (json['lines'] as List? ?? const []))
-            SubtitleLine.fromJson(line as List),
-        ],
+        lines: _linesOf(json['lines']),
       );
 
   Map<String, dynamic> toJson() => {

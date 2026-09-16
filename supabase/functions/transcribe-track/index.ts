@@ -111,6 +111,84 @@ function prompt(translateTo: string): string {
   ].join("\n");
 }
 
+/** Слово ли это. Имена полей берём шире, чем просили: модель их путает. */
+function asWord(node: unknown): Record<string, unknown> | null {
+  if (!node || typeof node !== "object" || Array.isArray(node)) return null;
+  const o = node as Record<string, unknown>;
+  const text = o.w ?? o.word ?? o.text;
+  if (typeof text !== "string" || text.trim().length === 0) return null;
+  const translation = o.t ?? o.translation ?? o.tr;
+  return {
+    w: text.trim(),
+    t: typeof translation === "string" ? translation.trim() : "",
+    start: Number(o.start ?? o.begin ?? o.from ?? 0) || 0,
+    end: Number(o.end ?? o.stop ?? o.to ?? 0) || 0,
+  };
+}
+
+/**
+ * Раскладывает ЧТО УГОДНО в строки из слов.
+ *
+ * ЗАЧЕМ. Формат ответа задан в запросе, но задан — не значит соблюдён.
+ * Живой разбор вернул строки на уровень вложеннее просимого, и приложение
+ * упало на приведении типа: «type 'List<dynamic>' is not a subtype of type
+ * 'Map<dynamic, dynamic>'». Модель к тому моменту отработала, запись была
+ * разобрана, энергия списана — и всё это выброшено из-за лишней пары
+ * скобок. Такой ответ надо разбирать, а не отвергать.
+ *
+ * Правило простое: массив, все элементы которого — слова, это СТРОКА;
+ * любой другой массив — СПИСОК строк, и в него надо спуститься. Объект,
+ * который сам не слово, отдаёт свои массивы (так ловится {"words": […]}).
+ */
+function linesOf(node: unknown): Record<string, unknown>[][] {
+  if (Array.isArray(node)) {
+    if (node.length === 0) return [];
+    const words = node.map(asWord);
+    if (words.every((w) => w !== null)) {
+      return [words as Record<string, unknown>[]];
+    }
+    return node.flatMap(linesOf);
+  }
+  const single = asWord(node);
+  if (single) return [[single]];
+  if (node && typeof node === "object") {
+    return Object.values(node as Record<string, unknown>)
+      .filter(Array.isArray)
+      .flatMap(linesOf);
+  }
+  return [];
+}
+
+/**
+ * Строка длиной во всю запись — это сломанный экран.
+ *
+ * Экран показывает ОДНУ строку за раз и ужимает её по ширине; строка из
+ * двухсот слов превратится в нечитаемую полоску. Так выглядит ответ, в
+ * котором модель не разбила запись на строки вовсе, — режем сами, по самым
+ * длинным паузам, а если пауз нет, то поровну.
+ */
+const MAX_WORDS_PER_LINE = 12;
+
+function splitLong(line: Record<string, unknown>[]): Record<string, unknown>[][] {
+  if (line.length <= MAX_WORDS_PER_LINE) return [line];
+  const out: Record<string, unknown>[][] = [];
+  let current: Record<string, unknown>[] = [];
+  for (let i = 0; i < line.length; i++) {
+    current.push(line[i]);
+    const gap = i + 1 < line.length
+      ? Number(line[i + 1].start) - Number(line[i].end)
+      : 0;
+    const enough = current.length >= MAX_WORDS_PER_LINE ||
+      (current.length >= 4 && gap >= 600);
+    if (enough) {
+      out.push(current);
+      current = [];
+    }
+  }
+  if (current.length > 0) out.push(current);
+  return out;
+}
+
 function json(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
     status,
@@ -232,8 +310,11 @@ Deno.serve(async (req) => {
   }
 
   const parsed = parseJson(answer.raw);
-  const lines = parsed?.lines;
-  if (!parsed || !Array.isArray(lines) || lines.length === 0) {
+  // Разбираем ответ КАК ПОЛУЧИЛОСЬ, а не как просили: к этому месту модель
+  // уже отработала и энергия уже списана, так что отвергать разбор из-за
+  // лишней пары скобок — значит брать деньги и выбрасывать товар.
+  const lines = linesOf(parsed?.lines ?? parsed).flatMap(splitLong);
+  if (lines.length === 0) {
     return json(
       { error: "модель вернула не разбор", sample: answer.raw.slice(0, 300), energy_left: left },
       502,
@@ -241,7 +322,7 @@ Deno.serve(async (req) => {
   }
 
   return json({
-    language: typeof parsed.language === "string" ? parsed.language : "",
+    language: typeof parsed?.language === "string" ? parsed.language : "",
     translation: translateTo,
     lines,
     energy_spent: cost,
