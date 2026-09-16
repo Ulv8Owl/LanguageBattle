@@ -19,7 +19,14 @@ require_clean_tree() {
 # функции, и найти это можно было только по датам коммитов.
 require_synced() {
   local branch="$1"
-  git fetch --quiet origin "$branch"
+  # Если ветки на GitHub нет, `git fetch` роняет скрипт голым «fatal:
+  # couldn't find remote ref» — без единого слова о том, что делать. А
+  # попасть сюда легко: достаточно запустить шаг, стоя на своей местной
+  # ветке, которую ещё не отправляли.
+  git fetch --quiet origin "$branch" 2>/dev/null || fail "на GitHub нет ветки «$branch».
+Есть: $(remote_branches | tr '\n' ' ')
+Если это твоя местная ветка — сначала отправь её:  git push -u origin $branch"
+
   local head remote here
   head="$(git rev-parse HEAD)"
   remote="$(git rev-parse "origin/$branch")"
