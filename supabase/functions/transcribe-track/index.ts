@@ -36,6 +36,9 @@ import { createClient } from "jsr:@supabase/supabase-js@2";
 import { audioUrlFor } from "../_shared/audioLink.ts";
 import { judgeKey, parseJson, requestQwen } from "../_shared/review.ts";
 
+/** Тот же приватный бакет, что и у боевых записей. */
+const BUCKET = "voice-recordings";
+
 /** Модель. Та же, что уже разбирает записи в бою. */
 const MODEL = Deno.env.get("OMNI_TRANSCRIBE_MODEL") ?? "qwen3-omni-flash";
 
@@ -51,13 +54,34 @@ const MODEL = Deno.env.get("OMNI_TRANSCRIBE_MODEL") ?? "qwen3-omni-flash";
 const MAX_DURATION_MS = Number(Deno.env.get("TRANSCRIBE_MAX_MINUTES") ?? "12") * 60 * 1000;
 
 /**
- * Свой бюджет вызова, а не общий OMNI_TIMEOUT_MS.
+ * Сколько отпущено модели. МЕНЬШЕ ПЛАТФОРМЕННОГО СРОКА, И ЭТО ГЛАВНОЕ.
  *
- * Судья разбирает одну фразу и укладывается в полторы минуты; здесь модель
- * слушает запись целиком. Связав их одним секретом, мы получили бы ручку,
- * которая чинит одно и ломает другое молча.
+ * Здесь стояло 240 000 — больше, чем Edge Function вообще живёт. Такой срок
+ * не наступает никогда: запрос убивает шлюз, минуя любые catch и finally, и
+ * приложение получает голый «сервер ответил 504» — без причины, без
+ * подробностей и с уже списанной энергией.
+ *
+ * Ровно этот урок записан в evaluate-recording: «бюджет теперь наш, он
+ * меньше платформенного, и до его конца мы обязаны успеть записать хоть
+ * какой-то результат». Там он 125 с; здесь меньше, потому что после модели
+ * надо ещё успеть положить разбор в хранилище.
  */
-const TIMEOUT_MS = Number(Deno.env.get("TRANSCRIBE_TIMEOUT_MS") ?? "240000");
+const TIMEOUT_MS = Number(Deno.env.get("TRANSCRIBE_TIMEOUT_MS") ?? "105000");
+
+/** Запас на запись результата. Тратить его на модель нельзя. */
+const WRITE_RESERVE_MS = 15_000;
+
+/**
+ * Продлевает жизнь воркера после отправки ответа. Есть в рантайме Supabase
+ * Edge Functions; объявлено здесь, потому что в типах Deno этого нет.
+ */
+declare const EdgeRuntime: { waitUntil(promise: Promise<unknown>): void } | undefined;
+
+/** Куда ляжет разбор. Рядом с записью — по тому же праву, что и она. */
+function resultPathFor(storagePath: string): string {
+  const dot = storagePath.lastIndexOf(".");
+  return `${dot > 0 ? storagePath.slice(0, dot) : storagePath}.result.json`;
+}
 
 /**
  * Цена разбора: одна единица за каждые начатые полминуты.
@@ -94,15 +118,15 @@ function prompt(translateTo: string): string {
     "Transcribe this audio and translate it, WORD BY WORD.",
     "",
     "Answer with JSON only — no prose, no markdown fence:",
-    '{"language":"<ISO code of the audio>","lines":[[{"w":"","t":"","start":0,"end":0}]]}',
+    '{"language":"<ISO code of the audio>","lines":[[{"w":"","t":"","start":0}]]}',
     "",
     "Rules:",
     `1. "w" is ONE word exactly as sung or spoken, in the original language.`,
     `2. "t" is that single word translated into ${target}. Translate the word`,
     "   as it is used in this line, not its dictionary entry. If the word has",
     "   no separate translation (an article, an auxiliary), use an empty string.",
-    '3. "start" and "end" are milliseconds from the beginning of the audio.',
-    "   They must increase and must not overlap between words.",
+    '3. "start" is milliseconds from the beginning of the audio, increasing.',
+    "   Do not add any other field: every extra character is time we do not have.",
     "4. Split into lines the way they are actually sung or said — a line is",
     "   one breath or one phrase, not a fixed number of words.",
     "5. Never merge two words into one object and never split one word in two:",
@@ -168,6 +192,24 @@ function linesOf(node: unknown): Record<string, unknown>[][] {
  * длинным паузам, а если пауз нет, то поровну.
  */
 const MAX_WORDS_PER_LINE = 12;
+
+/**
+ * Достраивает конец каждого слова по началу следующего.
+ *
+ * Поле `end` у модели больше НЕ ПРОСИМ: на запись в три с половиной минуты
+ * это тысячи лишних символов, а генерация — единственное, что здесьдолго.
+ * Конец слова всё равно известен точно: это начало следующего. Последнему
+ * даём полсекунды — дальше него подсвечивать нечего.
+ */
+function fillEnds(line: Record<string, unknown>[]): Record<string, unknown>[] {
+  for (let i = 0; i < line.length; i++) {
+    const start = Number(line[i].start) || 0;
+    const known = Number(line[i].end) || 0;
+    const next = i + 1 < line.length ? Number(line[i + 1].start) || 0 : 0;
+    line[i].end = known > start ? known : (next > start ? next : start + 500);
+  }
+  return line;
+}
 
 function splitLong(line: Record<string, unknown>[]): Record<string, unknown>[][] {
   if (line.length <= MAX_WORDS_PER_LINE) return [line];
@@ -294,38 +336,100 @@ Deno.serve(async (req) => {
   });
   if (spendError) return json({ error: `не удалось списать энергию: ${spendError.message}` }, 500);
 
-  const answer = await requestQwen(
-    "",
-    [
-      { type: "input_audio", input_audio: { data: audioUrl } },
-      { type: "text", text: prompt(translateTo) },
-    ],
-    TIMEOUT_MS,
-    MODEL,
-    { audio: true, temperature: 0, timeoutMs: TIMEOUT_MS },
-  );
+  // ═══ ОТВЕЧАЕМ СРАЗУ, РАЗБИРАЕМ В ФОНЕ ═══
+  //
+  // Держать запрос открытым всё время разбора нельзя: Edge Function живёт
+  // ограниченное время, и когда оно наступает, шлюз обрывает запрос сам —
+  // приложение получает «сервер ответил 504» без причины и с уже списанной
+  // энергией. Разбор записи в минуты в такой срок не помещается в принципе.
+  //
+  // Поэтому ответ здесь — подтверждение приёма, а не результат. Результат
+  // ложится в хранилище рядом с записью, и приложение забирает его оттуда:
+  // права на эту папку у него уже есть (миграция 0052), и ждать ему больше
+  // нечего — файл появится или не появится.
+  const resultPath = resultPathFor(storagePath);
 
-  if ("error" in answer) {
-    return json({ error: answer.error, energy_left: left }, 502);
+  // Фоновой задаче база не нужна — ей нужен ровно один способ сохранить
+  // результат. Замыкание здесь и потому, что тип клиента Supabase выводится
+  // только на месте создания.
+  const save = async (body: unknown) => {
+    try {
+      await admin.storage.from(BUCKET).upload(
+        resultPath,
+        new Blob([JSON.stringify(body)], { type: "application/json" }),
+        { contentType: "application/json", upsert: true },
+      );
+    } catch (e) {
+      console.error("transcribe-track: результат не записался", e);
+    }
+  };
+
+  const work = transcribe({ save, audioUrl, translateTo, cost, left });
+  if (typeof EdgeRuntime !== "undefined") {
+    EdgeRuntime.waitUntil(work);
+  } else {
+    // Локальный запуск без рантайма Supabase — иначе задача оборвётся
+    // вместе с ответом.
+    await work;
   }
 
-  const parsed = parseJson(answer.raw);
-  // Разбираем ответ КАК ПОЛУЧИЛОСЬ, а не как просили: к этому месту модель
-  // уже отработала и энергия уже списана, так что отвергать разбор из-за
-  // лишней пары скобок — значит брать деньги и выбрасывать товар.
-  const lines = linesOf(parsed?.lines ?? parsed).flatMap(splitLong);
-  if (lines.length === 0) {
-    return json(
-      { error: "модель вернула не разбор", sample: answer.raw.slice(0, 300), energy_left: left },
-      502,
-    );
-  }
-
-  return json({
-    language: typeof parsed?.language === "string" ? parsed.language : "",
-    translation: translateTo,
-    lines,
-    energy_spent: cost,
-    energy_left: left,
-  });
+  return json({ accepted: true, result_path: resultPath, energy_spent: cost, energy_left: left }, 202);
 });
+
+/**
+ * Разбор и запись результата. НИКОГДА НЕ БРОСАЕТ и всегда что-то пишет.
+ *
+ * Молчание здесь неотличимо от «ещё думаю»: приложение будет ждать файл,
+ * которого не будет, до собственного срока. Поэтому отказ — тоже результат,
+ * и он ложится туда же.
+ */
+async function transcribe(job: {
+  save: (body: unknown) => Promise<void>;
+  audioUrl: string;
+  translateTo: string;
+  cost: number;
+  left: unknown;
+}): Promise<void> {
+  const put = job.save;
+  try {
+    const answer = await requestQwen(
+      "",
+      [
+        { type: "input_audio", input_audio: { data: job.audioUrl } },
+        { type: "text", text: prompt(job.translateTo) },
+      ],
+      TIMEOUT_MS - WRITE_RESERVE_MS,
+      MODEL,
+      { audio: true, temperature: 0, timeoutMs: TIMEOUT_MS - WRITE_RESERVE_MS },
+    );
+
+    if ("error" in answer) {
+      await put({ error: answer.error, energy_left: job.left });
+      return;
+    }
+
+    const parsed = parseJson(answer.raw);
+    // Разбираем ответ КАК ПОЛУЧИЛОСЬ, а не как просили: к этому месту модель
+    // уже отработала и энергия уже списана, так что отвергать разбор из-за
+    // лишней пары скобок — значит брать деньги и выбрасывать товар.
+    const lines = linesOf(parsed?.lines ?? parsed).map(fillEnds).flatMap(splitLong);
+    if (lines.length === 0) {
+      await put({
+        error: "модель вернула не разбор",
+        sample: answer.raw.slice(0, 300),
+        energy_left: job.left,
+      });
+      return;
+    }
+
+    await put({
+      language: typeof parsed?.language === "string" ? parsed.language : "",
+      translation: job.translateTo,
+      lines,
+      energy_spent: job.cost,
+      energy_left: job.left,
+    });
+  } catch (e) {
+    await put({ error: `сбой разбора: ${e}`, energy_left: job.left });
+  }
+}

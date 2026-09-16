@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -32,6 +33,12 @@ class TrackTranscriber {
   static const String _bucket = 'voice-recordings';
   static const String _function = 'transcribe-track';
 
+  /// Сколько ждём разбор. Заметно больше срока, отпущенного самой функции
+  /// (TRANSCRIBE_TIMEOUT_MS ≈ 105 с): за него она успевает либо положить
+  /// разбор, либо положить причину отказа. Больше ждать нечего — если не
+  /// появилось ничего, значит воркера убили, и ждать его бессмысленно.
+  static const Duration _resultTimeout = Duration(minutes: 3);
+
   /// Разбирает [track] и сохраняет субтитры. Возвращает обновлённую запись.
   static Future<LibraryTrack> run({
     required LibraryTrack track,
@@ -55,6 +62,19 @@ class TrackTranscriber {
       throw TranscribeFailed('не удалось отправить запись: $e');
     }
 
+    String resultPath = _resultPathFor(storagePath);
+
+    // РЕЗУЛЬТАТ ПРОШЛОЙ ПОПЫТКИ УБИРАЕМ ДО НАЧАЛА. Обычно его удаляет
+    // finally, но приложение могли закрыть на середине разбора — и тогда
+    // рядом с записью лежит готовый ответ от прошлого раза. Не убрав его,
+    // мы прочитали бы его мгновенно и показали позапрошлую ошибку как
+    // сегодняшнюю, а оплаченный разбор выбросили бы.
+    try {
+      await supabase.storage.from(_bucket).remove([resultPath]);
+    } catch (_) {
+      // Нечего удалять — обычное дело.
+    }
+
     try {
       final response = await supabase.functions.invoke(
         _function,
@@ -67,7 +87,14 @@ class TrackTranscriber {
 
       final data = response.data;
       if (data is! Map) throw const TranscribeFailed('пустой ответ разбора');
-      final map = Map<String, dynamic>.from(data);
+      final accepted = Map<String, dynamic>.from(data);
+      // Отказ приходит сразу: не хватило энергии, запись слишком длинная.
+      final refusal = accepted['error'];
+      if (refusal is String && refusal.isNotEmpty) throw TranscribeFailed(refusal);
+      final named = accepted['result_path'];
+      if (named is String && named.isNotEmpty) resultPath = named;
+
+      final map = await _awaitResult(resultPath);
       final error = map['error'];
       if (error is String && error.isNotEmpty) throw TranscribeFailed(error);
 
@@ -114,11 +141,54 @@ class TrackTranscriber {
       // удачи, ни после отказа. Оставленная «на потом», она превратилась бы
       // в чужую фонотеку у нас на сервере.
       try {
-        await supabase.storage.from(_bucket).remove([storagePath]);
+        await supabase.storage.from(_bucket).remove([storagePath, resultPath]);
       } catch (_) {
         // Не удалилась — не повод ронять уже готовый разбор.
       }
     }
+  }
+
+  /// Куда сервер кладёт разбор. ТА ЖЕ ФОРМУЛА, ЧТО В transcribe-track
+  /// (resultPathFor): путь записи без расширения плюс `.result.json`.
+  /// Обычно имя приезжает в ответе, и оно главнее; эта копия — на случай,
+  /// когда сервер задеплоен из другой ветки и имени не прислал.
+  static String _resultPathFor(String storagePath) {
+    final dot = storagePath.lastIndexOf('.');
+    return '${dot > 0 ? storagePath.substring(0, dot) : storagePath}.result.json';
+  }
+
+  /// Ждёт, пока сервер положит разбор рядом с записью.
+  ///
+  /// ПОЧЕМУ ЖДЁМ ФАЙЛ, А НЕ ОТВЕТ. Разбор записи идёт минуты, а Edge
+  /// Function живёт ограниченное время: когда оно наступает, запрос
+  /// обрывает шлюз, и приложение получает голый «сервер ответил 504» — без
+  /// причины и с уже списанной энергией. Поэтому функция отвечает сразу, а
+  /// результат кладёт в хранилище; здесь мы его и забираем.
+  ///
+  /// Отказ сервер пишет туда же, поэтому ожидание всегда чем-то кончается:
+  /// либо разбором, либо причиной, либо нашим сроком.
+  static Future<Map<String, dynamic>> _awaitResult(String resultPath) async {
+    final deadline = DateTime.now().add(_resultTimeout);
+    var delay = const Duration(seconds: 2);
+    while (DateTime.now().isBefore(deadline)) {
+      await Future<void>.delayed(delay);
+      // Спрашиваем всё реже: первые секунды разбор точно не готов, а
+      // частый опрос всю дорогу — это трафик на телефоне игрока ни за чем.
+      if (delay < const Duration(seconds: 6)) {
+        delay += const Duration(seconds: 1);
+      }
+      try {
+        final bytes = await supabase.storage.from(_bucket).download(resultPath);
+        final raw = jsonDecode(utf8.decode(bytes));
+        if (raw is Map) return Map<String, dynamic>.from(raw);
+        return {'error': 'разбор пришёл не в том виде'};
+      } catch (_) {
+        // Файла ещё нет — это и есть «модель ещё думает».
+      }
+    }
+    throw const TranscribeFailed(
+      'разбор не успел. Запись длинная — попробуй кусок покороче',
+    );
   }
 
   /// Фраза сервера из тела отказа. Не нашлась — отвечаем хотя бы кодом.

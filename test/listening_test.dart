@@ -242,8 +242,8 @@ void main() {
       expect(s.contains('await fetch('), isFalse);
       expect(s.contains('"X-DashScope-SSE": "disable"'), isFalse);
       // Аудио едет ссылкой: вложение на запись в минуты не влезет.
-      expect(s, contains('input_audio: { data: audioUrl }'));
-      expect(s, contains('{ audio: true, temperature: 0, timeoutMs: TIMEOUT_MS }'));
+      expect(s, contains('input_audio: { data: job.audioUrl }'));
+      expect(s, contains('audio: true, temperature: 0, timeoutMs:'));
       // А поток включает общий транспорт — он же один на весь проект.
       expect(
         File('supabase/functions/_shared/review.ts').readAsStringSync(),
@@ -335,6 +335,38 @@ void main() {
       expect(w.translation, 'три');
       expect(w.startMs, 400);
       expect(w.endMs, 500);
+    });
+
+    test('разбор идёт в фоне, а не в открытом запросе', () {
+      // Edge Function живёт ограниченное время, и когда оно наступает,
+      // запрос обрывает ШЛЮЗ — минуя любые catch и finally. Приложение
+      // получало голый «сервер ответил 504»: без причины, без подробностей
+      // и с уже списанной энергией. Разбор записи в минуты в такой срок не
+      // помещается в принципе, поэтому ответ — подтверждение приёма, а
+      // результат забирается из хранилища.
+      final fn = File('supabase/functions/transcribe-track/index.ts')
+          .readAsStringSync();
+      expect(fn, contains('EdgeRuntime.waitUntil(work)'));
+      expect(fn, contains('accepted: true'));
+      expect(fn, contains('}, 202)'));
+      // Наш срок обязан быть МЕНЬШЕ платформенного — иначе он не наступает
+      // никогда. У боевого воркера тот же урок и бюджет 125 с.
+      final ours = RegExp(r'TRANSCRIBE_TIMEOUT_MS"\) \?\? "(\d+)"').firstMatch(fn);
+      expect(ours, isNotNull);
+      expect(int.parse(ours!.group(1)!), lessThan(125000));
+
+      // Отказ пишется туда же, куда разбор: молчание неотличимо от «ещё
+      // думаю», и приложение ждало бы файл, которого не будет.
+      expect(fn, contains('await put({ error:'));
+
+      final client = File('lib/data/track_transcriber.dart').readAsStringSync();
+      expect(client, contains('_awaitResult(resultPath)'));
+      // Старый результат убираем ДО начала: иначе позапрошлая ошибка
+      // прочитается мгновенно и выдаст себя за сегодняшнюю.
+      expect(
+        client.indexOf('remove([resultPath])'),
+        lessThan(client.indexOf('functions.invoke')),
+      );
     });
 
     test('сервер приводит ответ к канону сам', () {
