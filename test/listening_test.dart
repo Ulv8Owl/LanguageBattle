@@ -84,19 +84,18 @@ void main() {
   });
 
   group('запись игрока', () {
-    test('в приложение не копируется — хранится путь', () {
+    test('читается из списка со всем, что о ней известно', () {
       final track = LibraryTrack.fromJson({
         'id': 'x',
         'title': 'Моя запись',
         'source': 'uploaded',
-        'path': '/storage/emulated/0/Music/x.mp3',
+        'path': '/data/user/0/app/files/tracks/x.mp3',
         'duration': 61000,
         'language': 'en',
         'translation': 'ru',
         'subtitles': false,
       });
       expect(track.isUploaded, isTrue);
-      expect(track.path, startsWith('/storage/'));
       expect(track.lengthLabel, '1:01');
       expect(track.hasSubtitles, isFalse);
     });
@@ -112,6 +111,194 @@ void main() {
       expect(done.hasSubtitles, isTrue);
       expect(done.language, 'pl');
       expect(done.path, '/a/b.mp3');
+    });
+
+    test('файл перекладывается к себе, а не остаётся в кеше плагина', () {
+      // Выбор файла на Android отдаёт не исходник, а СВОЮ копию в кеше
+      // приложения (FileUtils.openFileStream в file_picker). Кеш система
+      // чистит когда захочет — и запись, разобранная за энергию игрока,
+      // однажды отвечала бы «файла больше нет», хотя он её не трогал.
+      final source = File('lib/data/track_library.dart').readAsStringSync();
+      expect(source, contains('static Future<String> adopt('));
+      expect(source, contains('getApplicationSupportDirectory()'));
+      expect(source, contains('.copy(target.path)'));
+
+      // И экран обязан звать это, а не класть в список путь от плагина.
+      final screen =
+          File('lib/features/listening/library_screen.dart').readAsStringSync();
+      expect(screen, contains('TrackLibrary.adopt(path, id)'));
+    });
+
+    test('убирая запись, удаляем только СВОЮ копию', () {
+      // Путь мог остаться от прежних версий и вести куда угодно в телефоне.
+      // Удалить по нему — значит стереть у игрока его собственный файл.
+      final source = File('lib/data/track_library.dart').readAsStringSync();
+      expect(source, contains('final ours = (await _audioDir()).path;'));
+      expect(source, contains('copy.parent.path == ours'));
+    });
+
+    test('повторить разбор можно, не добавляя запись заново', () {
+      // Иначе запись, на которой разбор сорвался, остаётся в фонотеке
+      // навсегда: по нажатию «ещё не разобрана», и всё.
+      final screen =
+          File('lib/features/listening/library_screen.dart').readAsStringSync();
+      expect(screen, contains('Future<void> _retry(LibraryTrack track)'));
+      expect(screen, contains('await _retry(track)'));
+      // И плата берётся снова — плашка про это говорит прямо.
+      final retry = screen.substring(screen.indexOf('Future<void> _retry('));
+      expect(retry, contains('_confirmCost(track)'));
+    });
+
+    test('длина спрашивается дважды: сразу и по событию', () {
+      // Сразу после setSource часть форматов длину ещё не отдаёт, и один
+      // вопрос отправлял исправную запись в «формат не поддерживается».
+      final screen =
+          File('lib/features/listening/library_screen.dart').readAsStringSync();
+      expect(screen, contains('player.onDurationChanged'));
+      expect(screen, contains('onTimeout: () => Duration.zero'));
+    });
+
+    test('_load не трогает экран, которого уже нет', () {
+      // Разбор идёт минуты, и _load зовётся из его finally. Незащищённый
+      // setState падал исключением поверх уже готового разбора.
+      final screen =
+          File('lib/features/listening/library_screen.dart').readAsStringSync();
+      final load = screen.substring(screen.indexOf('Future<void> _load() async {'));
+      expect(
+        load.indexOf('if (!mounted) return;'),
+        lessThan(load.indexOf('setState(() => _loading = true)')),
+      );
+    });
+  });
+
+  group('запись из библиотеки', () {
+    test('путь ассета срезается для плеера', () {
+      // Плеер подставляет папку assets сам, и AssetSource('assets/…') ищет
+      // assets/assets/… . В индексе путь пишется как везде в проекте — от
+      // корня репозитория, — а срезается в одном месте.
+      final track = LibraryTrack.fromJson({
+        'id': 'p',
+        'source': 'library',
+        'path': 'assets/tracks/song.mp3',
+      });
+      expect(track.assetPath, 'tracks/song.mp3');
+      expect(
+        File('lib/features/listening/player_screen.dart').readAsStringSync(),
+        contains('AssetSource(track.assetPath)'),
+      );
+    });
+  });
+
+  group('экран прослушивания', () {
+    String player() =>
+        File('lib/features/listening/player_screen.dart').readAsStringSync();
+
+    test('звук ждёт поворота, а не играет под плашкой', () {
+      // Запись начиналась сразу при входе: пока игрок поворачивал телефон,
+      // первые секунды проходили мимо него.
+      final s = player();
+      expect(s, contains('await _player.setSource('));
+      expect(s.contains('_player.play('), isFalse,
+          reason: 'пуск — дело _applyOrientation, а не загрузки');
+      expect(s, contains('Future<void> _applyOrientation() async'));
+    });
+
+    test('поворот обратно ставит на паузу, а своя пауза так и остаётся', () {
+      final s = player();
+      expect(s, contains('_pausedByRotation'));
+      // Пауза, поставленная руками, поворотом не снимается.
+      final toggle = s.substring(s.indexOf('Future<void> _togglePlay() async'));
+      expect(toggle, contains('_pausedByRotation = false'));
+    });
+
+    test('экран не гаснет, пока идут строки', () {
+      // Читают их, ничего не нажимая, и телефон считает это бездействием.
+      final s = player();
+      expect(s, contains('WakelockPlus.enable()'));
+      expect(s, contains('WakelockPlus.disable()'));
+      expect(
+        File('pubspec.yaml').readAsStringSync(),
+        contains('wakelock_plus:'),
+      );
+    });
+  });
+
+  group('вызов модели', () {
+    String fn() =>
+        File('supabase/functions/transcribe-track/index.ts').readAsStringSync();
+
+    test('форма вызова — общая с судьёй, а не своя', () {
+      // Здесь стоял вызов по СВОЕЙ схеме DashScope с X-DashScope-SSE:
+      // disable. Это форма другого семейства моделей (qwen-audio-3.0-*), а
+      // qwen3-omni-flash живёт в совместимом режиме, где поток обязателен.
+      // Ровно от этой путаницы _shared/asr.ts и защищается.
+      final s = fn();
+      expect(s, contains('requestQwen('));
+      // Своего похода к провайдеру здесь больше нет вовсе — и это главное:
+      // вторая копия вызова означала бы, что следующую особенность
+      // провайдера чинят в двух местах, а замечают в одном. (Старую форму
+      // проверяем по коду, а не по тексту: в шапке файла она описана
+      // словами, и запрет на упоминание запретил бы объяснение.)
+      expect(s.contains('await fetch('), isFalse);
+      expect(s.contains('"X-DashScope-SSE": "disable"'), isFalse);
+      // Аудио едет ссылкой: вложение на запись в минуты не влезет.
+      expect(s, contains('input_audio: { data: audioUrl }'));
+      expect(s, contains('{ audio: true, temperature: 0, timeoutMs: TIMEOUT_MS }'));
+      // А поток включает общий транспорт — он же один на весь проект.
+      expect(
+        File('supabase/functions/_shared/review.ts').readAsStringSync(),
+        contains('opts.timeoutMs ?? TIMEOUT_MS'),
+      );
+    });
+
+    test('у разбора свой бюджет, не судейский', () {
+      // Судья разбирает одну фразу, здесь модель слушает запись целиком.
+      // Один секрет на двоих — это ручка, которая чинит одно и ломает
+      // другое молча.
+      final s = fn();
+      expect(s, contains('TRANSCRIBE_TIMEOUT_MS'));
+      expect(s.contains('Deno.env.get("OMNI_TIMEOUT_MS")'), isFalse);
+      // И потолок длины тоже свой, потому что провайдерский мы не мерили.
+      expect(s, contains('TRANSCRIBE_MAX_MINUTES'));
+    });
+  });
+
+  group('энергия за разбор', () {
+    String fn() =>
+        File('supabase/functions/transcribe-track/index.ts').readAsStringSync();
+
+    test('нехватку ловит сервер, а не плашка на клиенте', () {
+      // spend_energy при нехватке НЕ падает: списывает сколько есть и
+      // возвращает остаток. Без проверки единственным заслоном оставалась
+      // бы плашка по кошельку, который мог устареть, — то есть разбор за
+      // полцены и никакого отказа.
+      final s = fn();
+      expect(s, contains('asUser.rpc("sync_wallet")'));
+      expect(s, contains('if (energyLeft < cost)'));
+      expect(s, contains('402'));
+    });
+
+    test('причина отказа доезжает до игрока словами', () {
+      // На любой ответ кроме 2xx клиент бросает FunctionException, и
+      // '$e' показал бы «FunctionsHttpException(status: 402, details: …)»
+      // вместо «нужно 6 энергии, а есть 2».
+      final client = File('lib/data/track_transcriber.dart').readAsStringSync();
+      expect(client, contains('on FunctionException catch (e)'));
+      expect(client, contains("details['error']"));
+    });
+
+    test('сначала ссылка, потом списание, потом модель', () {
+      // Не собралась ссылка — модель мы даже не звали, и брать за это
+      // плату не за что.
+      final s = fn();
+      expect(
+        s.indexOf('audioUrlFor(storagePath'),
+        lessThan(s.indexOf('rpc("spend_energy"')),
+      );
+      expect(
+        s.indexOf('rpc("spend_energy"'),
+        lessThan(s.indexOf('await requestQwen(')),
+      );
     });
   });
 }

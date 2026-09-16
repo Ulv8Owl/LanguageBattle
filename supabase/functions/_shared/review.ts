@@ -595,19 +595,24 @@ export function supportsThinking(model: string): boolean {
  * `modalities` уходит только тогда, когда в запросе есть аудио: текстовые
  * модели на незнакомое поле отвечают HTTP 400, и добавлять его «на всякий
  * случай» значит ломать половину списка моделей.
+ *
+ * `opts.timeoutMs` — свой потолок вместо общего OMNI_TIMEOUT_MS. Нужен там,
+ * где вызов заведомо длиннее судейского: разбор записи на слова идёт минуты,
+ * и подводить его под тот же секрет значит связать две ручки в одну — покрутив
+ * её под судью, молча обрезаешь разбор на середине.
  */
 export async function requestQwen(
   system: string,
   userParts: unknown[],
   budgetMs: number,
   model: string,
-  opts: { audio?: boolean; temperature?: number } = {},
+  opts: { audio?: boolean; temperature?: number; timeoutMs?: number } = {},
 ): Promise<{ raw: string } | { error: string }> {
   const key = judgeKey();
   if (!key) {
     return { error: "нет ключа модели: npx supabase secrets set OMNI_API_KEY=<ключ qwencloud>" };
   }
-  const timeoutMs = Math.min(TIMEOUT_MS, budgetMs);
+  const timeoutMs = Math.min(opts.timeoutMs ?? TIMEOUT_MS, budgetMs);
   if (timeoutMs < MIN_SLICE_MS) {
     return { error: `на вызов осталось ${Math.round(budgetMs / 1000)}с — меньше минимума` };
   }

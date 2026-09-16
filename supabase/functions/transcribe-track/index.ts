@@ -14,21 +14,50 @@
  * конца записи, причём молча. Одна модель выдаёт пару в одном объекте, и
  * разъехаться там нечему.
  *
+ * ═══ ФОРМА ВЫЗОВА — ТА ЖЕ, ЧТО У СУДЬИ, И ЭТО НЕ ЛЕНЬ ═══
+ *
+ * Здесь стоял свой вызов по СВОЕЙ схеме DashScope: эндпоинт
+ * `/api/v1/services/aigc/multimodal-generation/generation` и заголовок
+ * `X-DashScope-SSE: disable`. Это форма ДРУГОГО семейства моделей
+ * (`qwen-audio-3.0-*`), а `qwen3-omni-flash` живёт в совместимом режиме, и
+ * поток для него обязателен — без `stream: true` сервис отвечает ошибкой.
+ * Как раз от этой путаницы семейств `_shared/asr.ts` и защищается, заплатив
+ * за науку пятью кругами отказов «format is empty».
+ *
+ * Поэтому транспорт здесь общий — `requestQwen`. Своя копия вызова с
+ * собственным разбором ответа означала бы, что следующую особенность
+ * провайдера чинят в двух местах, а замечают в одном.
+ *
  * ЭНЕРГИЯ СПИСЫВАЕТСЯ ЗДЕСЬ, А НЕ НА КЛИЕНТЕ: списание клиентом — это
  * предложение не списывать.
  */
 
 import { createClient } from "jsr:@supabase/supabase-js@2";
 import { audioUrlFor } from "../_shared/audioLink.ts";
-import { judgeBaseUrl, judgeKey } from "../_shared/review.ts";
+import { judgeKey, parseJson, requestQwen } from "../_shared/review.ts";
 
 /** Модель. Та же, что уже разбирает записи в бою. */
 const MODEL = Deno.env.get("OMNI_TRANSCRIBE_MODEL") ?? "qwen3-omni-flash";
 
-/** Длиннее этого не беремся: ответ не успеет вернуться. */
-const MAX_DURATION_MS = 12 * 60 * 1000;
+/**
+ * Длиннее этого не беремся.
+ *
+ * Потолок наш, а не провайдерский: сколько аудио за раз принимает сама
+ * модель, мы на живых записях не мерили. Поэтому он вынесен в секрет —
+ * упрётся живой разбор в чужой лимит раньше нашего, его можно подвинуть, не
+ * трогая код. Отказ провайдера при этом доезжает до игрока дословно, так
+ * что причина будет видна, а не спрятана за нашим числом.
+ */
+const MAX_DURATION_MS = Number(Deno.env.get("TRANSCRIBE_MAX_MINUTES") ?? "12") * 60 * 1000;
 
-const TIMEOUT_MS = Number(Deno.env.get("OMNI_TIMEOUT_MS") ?? "180000");
+/**
+ * Свой бюджет вызова, а не общий OMNI_TIMEOUT_MS.
+ *
+ * Судья разбирает одну фразу и укладывается в полторы минуты; здесь модель
+ * слушает запись целиком. Связав их одним секретом, мы получили бы ручку,
+ * которая чинит одно и ломает другое молча.
+ */
+const TIMEOUT_MS = Number(Deno.env.get("TRANSCRIBE_TIMEOUT_MS") ?? "240000");
 
 /**
  * Цена разбора: одна единица за каждые начатые полминуты.
@@ -82,42 +111,6 @@ function prompt(translateTo: string): string {
   ].join("\n");
 }
 
-/** Достаёт JSON из ответа, даже если модель обернула его в ```json. */
-function extractJson(raw: string): unknown | null {
-  const fenced = raw.match(/```(?:json)?\s*([\s\S]*?)```/);
-  const text = (fenced ? fenced[1] : raw).trim();
-  const start = text.indexOf("{");
-  const end = text.lastIndexOf("}");
-  if (start < 0 || end <= start) return null;
-  try {
-    return JSON.parse(text.slice(start, end + 1));
-  } catch {
-    return null;
-  }
-}
-
-/** Текст ответа native-режима DashScope. */
-function nativeText(body: string): string | null {
-  try {
-    const parsed = JSON.parse(body);
-    const output = parsed?.output;
-    const direct = output?.text;
-    if (typeof direct === "string" && direct.length > 0) return direct;
-    const choice = output?.choices?.[0]?.message?.content;
-    if (typeof choice === "string" && choice.length > 0) return choice;
-    if (Array.isArray(choice)) {
-      const joined = choice
-        .map((part: Record<string, unknown>) => part?.text ?? "")
-        .filter((t: unknown) => typeof t === "string" && t.length > 0)
-        .join("");
-      if (joined.length > 0) return joined;
-    }
-  } catch {
-    return null;
-  }
-  return null;
-}
-
 function json(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
     status,
@@ -163,7 +156,8 @@ Deno.serve(async (req) => {
   }
   if (translateTo.length === 0) return json({ error: "не указан язык перевода" }, 400);
   if (durationMs > MAX_DURATION_MS) {
-    return json({ error: "запись длиннее 12 минут — разбор не успеет" }, 400);
+    const minutes = Math.round(MAX_DURATION_MS / 60_000);
+    return json({ error: `запись длиннее ${minutes} минут — разбор не успеет` }, 400);
   }
 
   const key = judgeKey();
@@ -174,10 +168,47 @@ Deno.serve(async (req) => {
     );
   }
 
+  const cost = energyCost(durationMs);
+
+  // ХВАТАЕТ ЛИ ЭНЕРГИИ — СПРАШИВАЕМ ЗДЕСЬ, А НЕ ВЕРИМ ПЛАШКЕ НА КЛИЕНТЕ.
+  //
+  // spend_energy при нехватке НЕ ПАДАЕТ: она списывает сколько есть и
+  // возвращает остаток — так задумано для боевого воркера, который берёт
+  // деньги уже после ответа провайдера. Здесь же плата идёт вперёд, и без
+  // этой проверки единственным заслоном оставалась бы плашка, нарисованная
+  // по кошельку, который мог устареть, пока игрок выбирал файл. То есть
+  // разбор за полцены — и никакого отказа.
+  //
+  // sync_wallet зовём ОТ ИМЕНИ ИГРОКА: она сама досчитывает восстановленную
+  // энергию, и прочитать колонку напрямую значило бы отказать тому, у кого
+  // запас уже натикал.
+  const { data: wallet, error: walletError } = await asUser.rpc("sync_wallet");
+  if (walletError) {
+    return json({ error: `не удалось прочитать энергию: ${walletError.message}` }, 500);
+  }
+  const energyLeft = Number((wallet as Record<string, unknown> | null)?.energy_current ?? 0);
+  if (energyLeft < cost) {
+    return json(
+      { error: `нужно ${cost} энергии, а есть ${energyLeft}`, energy_left: energyLeft },
+      402,
+    );
+  }
+
+  // Ссылка кончается расширением файла — иначе провайдер не определит
+  // формат (см. _shared/audioLink.ts и функцию asr-audio).
+  //
+  // СОБИРАЕТСЯ ДО СПИСАНИЯ. Не собралась — значит модель мы даже не звали, и
+  // брать за это плату не за что: провайдеру мы ничего не должны.
+  let audioUrl: string;
+  try {
+    audioUrl = await audioUrlFor(storagePath, url, serviceKey);
+  } catch (e) {
+    return json({ error: `не собралась ссылка на запись: ${e}` }, 500);
+  }
+
   // ЭНЕРГИЯ СПИСЫВАЕТСЯ ДО ВЫЗОВА. Модель берёт деньги за попытку, а не за
   // удачу: списав после, мы дарили бы каждый неудачный разбор.
   const admin = createClient(url, serviceKey, { auth: { persistSession: false } });
-  const cost = energyCost(durationMs);
   const { data: left, error: spendError } = await admin.rpc("spend_energy", {
     p_user_id: userId,
     p_amount: cost,
@@ -185,77 +216,35 @@ Deno.serve(async (req) => {
   });
   if (spendError) return json({ error: `не удалось списать энергию: ${spendError.message}` }, 500);
 
-  // Ссылка кончается расширением файла — иначе провайдер не определит
-  // формат (см. _shared/audioLink.ts и функцию asr-audio).
-  let audioUrl: string;
-  try {
-    audioUrl = await audioUrlFor(storagePath, url, serviceKey);
-  } catch (e) {
-    return json({ error: `не собралась ссылка на запись: ${e}`, energy_left: left }, 500);
+  const answer = await requestQwen(
+    "",
+    [
+      { type: "input_audio", input_audio: { data: audioUrl } },
+      { type: "text", text: prompt(translateTo) },
+    ],
+    TIMEOUT_MS,
+    MODEL,
+    { audio: true, temperature: 0, timeoutMs: TIMEOUT_MS },
+  );
+
+  if ("error" in answer) {
+    return json({ error: answer.error, energy_left: left }, 502);
   }
 
-  const host = judgeBaseUrl().replace(/\/compatible-mode\/v1\/?$/, "");
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
-  try {
-    const res = await fetch(
-      `${host}/api/v1/services/aigc/multimodal-generation/generation`,
-      {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${key}`,
-          "X-DashScope-SSE": "disable",
-        },
-        body: JSON.stringify({
-          model: MODEL,
-          input: {
-            messages: [
-              {
-                role: "user",
-                content: [
-                  { type: "input_audio", input_audio: { data: audioUrl } },
-                  { type: "text", text: prompt(translateTo) },
-                ],
-              },
-            ],
-          },
-        }),
-        signal: controller.signal,
-      },
+  const parsed = parseJson(answer.raw);
+  const lines = parsed?.lines;
+  if (!parsed || !Array.isArray(lines) || lines.length === 0) {
+    return json(
+      { error: "модель вернула не разбор", sample: answer.raw.slice(0, 300), energy_left: left },
+      502,
     );
-    const raw = await res.text();
-    if (!res.ok) {
-      return json({ error: `модель ответила ${res.status}: ${raw.slice(0, 300)}`, energy_left: left }, 502);
-    }
-
-    const text = nativeText(raw);
-    if (text === null) {
-      return json({ error: "ответ без текста", energy_left: left }, 502);
-    }
-    const parsed = extractJson(text) as
-      | { language?: string; lines?: unknown[] }
-      | null;
-    if (!parsed || !Array.isArray(parsed.lines) || parsed.lines.length === 0) {
-      return json(
-        { error: "модель вернула не разбор", sample: text.slice(0, 300), energy_left: left },
-        502,
-      );
-    }
-
-    return json({
-      language: typeof parsed.language === "string" ? parsed.language : "",
-      translation: translateTo,
-      lines: parsed.lines,
-      energy_spent: cost,
-      energy_left: left,
-    });
-  } catch (e) {
-    const reason = e instanceof Error && e.name === "AbortError"
-      ? "разбор не уложился в срок"
-      : `сбой вызова: ${e}`;
-    return json({ error: reason, energy_left: left }, 504);
-  } finally {
-    clearTimeout(timer);
   }
+
+  return json({
+    language: typeof parsed.language === "string" ? parsed.language : "",
+    translation: translateTo,
+    lines,
+    energy_spent: cost,
+    energy_left: left,
+  });
 });

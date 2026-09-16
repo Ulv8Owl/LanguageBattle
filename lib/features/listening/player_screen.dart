@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:audioplayers/audioplayers.dart';
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
+import 'package:wakelock_plus/wakelock_plus.dart';
 
 import '../../core/theme.dart';
 import '../../core/track_clock.dart';
@@ -21,6 +22,12 @@ import '../../data/track_subtitles.dart';
 /// выкручивать её за игрока мы не вправе: у кого-то он заблокирован
 /// намеренно. Плашка уходит сама, как только телефон повёрнут, — нажимать
 /// на неё не нужно и нечем.
+///
+/// И ЗВУК ЖДЁТ ПОВОРОТА. Запись начиналась сразу при входе, ещё под
+/// плашкой: пока игрок поворачивал телефон, первые секунды проходили мимо
+/// него — то есть ровно то, ради чего он сюда зашёл, он и пропускал.
+/// Теперь запись готовится, но не играет, пока экран стоит стоймя; повернул
+/// обратно посреди дороги — встаёт на паузу и ждёт, а не бубнит в пустоту.
 ///
 /// НА ЭКРАНЕ ТОЛЬКО ОДНА СТРОКА ЗА РАЗ. Показать сразу всё — значит
 /// показать мелко; здесь весь смысл в том, что слово крупное и видно, какое
@@ -55,11 +62,36 @@ class _PlayerScreenState extends State<PlayerScreen> {
   int _line = -1;
   int _word = -1;
 
+  /// Экран стоит стоймя. Читается в didChangeDependencies, а не в build:
+  /// от ориентации зависит, играет ли звук, а решать это в build значит
+  /// трогать плеер на каждой перерисовке.
+  bool _portrait = true;
+
+  /// Запись уже пошла хоть раз. Первый пуск — не то же, что снятие с паузы.
+  bool _started = false;
+
+  /// На паузе из-за поворота, а не по воле игрока. Разница нужна: свою
+  /// паузу поворот обратно снимать не должен.
+  bool _pausedByRotation = false;
+
+  /// Согласование с ориентацией уже идёт. Второй заход не нужен: тот, что
+  /// работает, досверит положение телефона в конце сам.
+  bool _applying = false;
+
   @override
   void initState() {
     super.initState();
     _clock.addListener(_onTick);
     _load();
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final portrait = MediaQuery.orientationOf(context) == Orientation.portrait;
+    if (portrait == _portrait) return;
+    _portrait = portrait;
+    _applyOrientation();
   }
 
   @override
@@ -70,6 +102,9 @@ class _PlayerScreenState extends State<PlayerScreen> {
     _clock.removeListener(_onTick);
     _clock.dispose();
     _player.dispose();
+    // Экран гасить снова можно: держали мы его только ради строк, которые
+    // читают, ничего не нажимая.
+    WakelockPlus.disable();
     super.dispose();
   }
 
@@ -99,10 +134,12 @@ class _PlayerScreenState extends State<PlayerScreen> {
         _stage = _Stage.playing;
       });
 
-      await _player.play(
-        track.isUploaded ? DeviceFileSource(track.path) : AssetSource(track.path),
+      // ГОТОВИМ, НО НЕ ИГРАЕМ. Пуск — дело _applyOrientation: пока телефон
+      // стоймя, играть некому.
+      await _player.setSource(
+        track.isUploaded ? DeviceFileSource(track.path) : AssetSource(track.assetPath),
       );
-      _clock.start();
+      await _applyOrientation();
     } catch (e) {
       if (!mounted) return;
       setState(() {
@@ -124,20 +161,75 @@ class _PlayerScreenState extends State<PlayerScreen> {
     });
   }
 
+  /// Приводит звук в согласие с тем, как повёрнут телефон.
+  ///
+  /// Одна точка на все три случая — первый пуск, уход в портрет, возврат в
+  /// альбом, — потому что порознь они разъезжаются: то запись играет под
+  /// плашкой, то после поворота обратно остаётся стоять.
+  ///
+  /// ПОВОРОТ ВО ВРЕМЯ ПУСКА — не выдумка. Плеер отвечает не мгновенно, и
+  /// между «решили играть» и «заиграло» телефон успевают повернуть обратно.
+  /// Без этого цикла запись зазвучала бы под плашкой — то есть ровно то, от
+  /// чего экран и защищается. Поэтому решение сверяется с положением
+  /// телефона ПОСЛЕ работы, а не только до неё.
+  Future<void> _applyOrientation() async {
+    if (_applying) return;
+    _applying = true;
+    try {
+      while (mounted && _stage == _Stage.playing) {
+        final portrait = _portrait;
+        await _applyOnce(portrait);
+        if (portrait == _portrait) break;
+      }
+    } finally {
+      _applying = false;
+    }
+    if (mounted) setState(() {});
+  }
+
+  Future<void> _applyOnce(bool portrait) async {
+    if (portrait) {
+      if (!_clock.running) return;
+      await _player.pause();
+      _clock.pause();
+      _pausedByRotation = true;
+      await WakelockPlus.disable();
+    } else if (!_started) {
+      _started = true;
+      _pausedByRotation = false;
+      await _player.resume();
+      _clock.start();
+      // Экран не должен гаснуть: строки читают, ничего не нажимая, и
+      // телефон честно считает это бездействием.
+      await WakelockPlus.enable();
+    } else if (_pausedByRotation) {
+      _pausedByRotation = false;
+      await _player.resume();
+      _clock.resume();
+      await WakelockPlus.enable();
+    }
+  }
+
   Future<void> _togglePlay() async {
     if (_clock.running) {
       await _player.pause();
       _clock.pause();
+      await WakelockPlus.disable();
     } else {
       await _player.resume();
       _clock.resume();
+      await WakelockPlus.enable();
     }
+    // Пауза, поставленная руками, поворотом не снимается: игрок её ставил,
+    // игрок и снимет.
+    _pausedByRotation = false;
     if (mounted) setState(() {});
   }
 
   void _finish() {
     if (_stage == _Stage.done) return;
     _clock.markCompleted();
+    WakelockPlus.disable();
     setState(() => _stage = _Stage.done);
   }
 

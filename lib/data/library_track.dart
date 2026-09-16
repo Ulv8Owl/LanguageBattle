@@ -9,7 +9,7 @@ enum TrackSource {
   /// Пришла с игрой: субтитры готовы.
   library,
 
-  /// Файл игрока: играем по пути, субтитры разбираем сами.
+  /// Файл игрока: играем нашу копию, субтитры разбираем сами.
   uploaded,
 }
 
@@ -22,8 +22,10 @@ class LibraryTrack {
 
   final TrackSource source;
 
-  /// Где лежит звук. Для библиотеки — путь ассета, для загруженной — путь в
-  /// памяти телефона.
+  /// Где лежит звук. Для загруженной — наша копия в данных приложения (см.
+  /// TrackLibrary.adopt). Для библиотечной — путь ассета ОТ КОРНЯ
+  /// РЕПОЗИТОРИЯ, то есть `assets/tracks/что-то.mp3`; играть его надо через
+  /// [assetPath], см. там.
   final String path;
 
   final int durationMs;
@@ -54,19 +56,34 @@ class LibraryTrack {
 
   bool get isUploaded => source == TrackSource.uploaded;
 
+  /// Путь для AssetSource — БЕЗ ведущего `assets/`.
+  ///
+  /// Плеер подставляет эту папку сам (`AudioCache.prefix`), поэтому
+  /// `AssetSource('assets/tracks/x.mp3')` ищет `assets/assets/tracks/x.mp3`
+  /// и не находит. В `assets/tracks/index.json` путь пишется так же, как
+  /// везде в проекте — от корня репозитория, — а срезается он здесь, в
+  /// одном месте, а не в каждом, кто соберётся играть.
+  String get assetPath =>
+      path.startsWith('assets/') ? path.substring('assets/'.length) : path;
+
   /// «3:07» — как в любом плеере.
   String get lengthLabel {
     final seconds = durationMs ~/ 1000;
     return '${seconds ~/ 60}:${(seconds % 60).toString().padLeft(2, '0')}';
   }
 
-  LibraryTrack copyWith({bool? hasSubtitles, String? language, String? translationLanguage}) =>
+  LibraryTrack copyWith({
+    String? path,
+    bool? hasSubtitles,
+    String? language,
+    String? translationLanguage,
+  }) =>
       LibraryTrack(
         id: id,
         title: title,
         artist: artist,
         source: source,
-        path: path,
+        path: path ?? this.path,
         durationMs: durationMs,
         language: language ?? this.language,
         translationLanguage: translationLanguage ?? this.translationLanguage,

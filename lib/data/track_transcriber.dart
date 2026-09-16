@@ -91,6 +91,13 @@ class TrackTranscriber {
       return updated;
     } on TranscribeFailed {
       rethrow;
+    } on FunctionException catch (e) {
+      // ПРИЧИНУ ПИШЕТ СЕРВЕР, И ОНА НАПИСАНА СЛОВАМИ: «нужно 6 энергии, а
+      // есть 2», «запись длиннее 12 минут». На любой ответ кроме 2xx клиент
+      // бросает исключение, и `'$e'` превращал бы эту фразу в
+      // «FunctionsHttpException(status: 402, details: {error: …})» — то
+      // есть ровно в то, из чего игрок ничего не поймёт.
+      throw TranscribeFailed(_reasonOf(e));
     } catch (e) {
       throw TranscribeFailed('$e');
     } finally {
@@ -103,6 +110,17 @@ class TrackTranscriber {
         // Не удалилась — не повод ронять уже готовый разбор.
       }
     }
+  }
+
+  /// Фраза сервера из тела отказа. Не нашлась — отвечаем хотя бы кодом.
+  static String _reasonOf(FunctionException e) {
+    final details = e.details;
+    if (details is Map) {
+      final reason = details['error'];
+      if (reason is String && reason.isNotEmpty) return reason;
+    }
+    if (details is String && details.isNotEmpty) return details;
+    return 'сервер ответил ${e.status}';
   }
 
   /// Расширение файла: по нему провайдер определяет формат записи.

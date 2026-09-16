@@ -49,6 +49,11 @@ class _LibraryScreenState extends State<LibraryScreen> {
   }
 
   Future<void> _load() async {
+    // Проверка обязательна ЗДЕСЬ, а не у зовущих. Разбор идёт минуты, и
+    // экран за это время могли закрыть; _load зовётся в том числе из его
+    // finally, и незащищённый setState там падает исключением поверх уже
+    // готового разбора.
+    if (!mounted) return;
     setState(() => _loading = true);
     try {
       final tracks = await TrackLibrary.all();
@@ -94,8 +99,12 @@ class _LibraryScreenState extends State<LibraryScreen> {
       return;
     }
 
-    final track = LibraryTrack(
-      id: 'own_${DateTime.now().microsecondsSinceEpoch}',
+    final id = 'own_${DateTime.now().microsecondsSinceEpoch}';
+
+    // Цену показываем ДО того, как что-то скопировано и потрачено. Отказ на
+    // этом шаге не должен оставлять после себя ни файла, ни строки в списке.
+    final preview = LibraryTrack(
+      id: id,
       title: _titleFrom(path),
       artist: '',
       source: TrackSource.uploaded,
@@ -106,9 +115,18 @@ class _LibraryScreenState extends State<LibraryScreen> {
       hasSubtitles: false,
       addedAt: DateTime.now(),
     );
-
-    final confirmed = await _confirmCost(track);
+    final confirmed = await _confirmCost(preview);
     if (confirmed != true || !mounted) return;
+
+    // Забираем файл себе. То, что отдал выбор файлов на Android, лежит в
+    // кеше приложения и живёт до первой уборки системы — см. TrackLibrary.
+    final LibraryTrack track;
+    try {
+      track = preview.copyWith(path: await TrackLibrary.adopt(path, id));
+    } catch (e) {
+      if (mounted) _say('Не удалось сохранить запись: $e');
+      return;
+    }
 
     await TrackLibrary.add(track);
     if (!mounted) return;
@@ -179,19 +197,34 @@ class _LibraryScreenState extends State<LibraryScreen> {
       if (!mounted) return;
       _say('Не получилось: $e');
     } finally {
-      if (mounted) setState(() => _busyTrackId = null);
-      await _load();
+      if (mounted) {
+        setState(() => _busyTrackId = null);
+        await _load();
+      }
     }
   }
 
   /// Длина записи. Спрашиваем у плеера: имя файла и размер о ней не говорят
   /// ничего, а цена разбора считается именно по длине.
+  ///
+  /// СПРАШИВАЕМ ДВАЖДЫ, И ЭТО НЕ ПЕРЕСТРАХОВКА. Сразу после `setSource`
+  /// длина у части форматов ещё не разобрана, и плеер честно отвечает
+  /// `null`. Одного вопроса хватало, чтобы совершенно исправная запись
+  /// получила «формат не поддерживается» — то есть мы отказывали игроку
+  /// из-за собственной спешки. Поэтому, если первый ответ пуст, ждём
+  /// события `onDurationChanged` — недолго, но столько, сколько нужно.
   Future<int> _durationOf(String path) async {
     final player = AudioPlayer();
     try {
       await player.setSourceDeviceFile(path);
-      final duration = await player.getDuration();
-      return duration?.inMilliseconds ?? 0;
+      final immediate = await player.getDuration();
+      if (immediate != null && immediate.inMilliseconds > 0) {
+        return immediate.inMilliseconds;
+      }
+      final reported = await player.onDurationChanged
+          .firstWhere((d) => d.inMilliseconds > 0)
+          .timeout(const Duration(seconds: 5), onTimeout: () => Duration.zero);
+      return reported.inMilliseconds;
     } catch (_) {
       return 0;
     } finally {
@@ -221,9 +254,23 @@ class _LibraryScreenState extends State<LibraryScreen> {
   // -------------------------------------------------------------------
 
   Future<void> _open(LibraryTrack track) async {
-    if (_busyTrackId == track.id) return;
+    if (_busyTrackId != null) return;
     if (!track.hasSubtitles) {
-      _say('Запись ещё не разобрана.');
+      // РАЗБОР МОГ НЕ ПОЛУЧИТЬСЯ: модель ответила отказом, кончился срок,
+      // пропала сеть. Раньше такая запись оставалась в фонотеке навсегда —
+      // по нажатию говорила «ещё не разобрана», и всё. Единственным выходом
+      // было убрать её и добавить заново, заплатив второй раз ровно за то
+      // же самое. Предложить повтор здесь дешевле для всех.
+      //
+      // ТОЛЬКО ДЛЯ СВОИХ ЗАПИСЕЙ. У записи игры субтитры приходят вместе с
+      // ней, и разбирать её нам нечем — файла в памяти телефона у неё нет.
+      // Дойдя сюда, она означает испорченный список, а не отказ модели, и
+      // брать за это энергию было бы уже прямым обманом.
+      if (track.isUploaded) {
+        await _retry(track);
+      } else {
+        _say('У этой записи нет субтитров — так быть не должно, напиши нам.');
+      }
       return;
     }
     if (await TrackLibrary.missing(track)) {
@@ -233,6 +280,23 @@ class _LibraryScreenState extends State<LibraryScreen> {
     if (!mounted) return;
     await context.push('/listening/${track.id}');
     if (mounted) _load();
+  }
+
+  /// Повторный разбор записи, которая осталась без субтитров.
+  ///
+  /// Плата берётся снова, и плашка это говорит прямо: модель берёт деньги
+  /// за попытку, а не за удачу, и прошлая попытка ей уже оплачена. Скрыть
+  /// это значило бы списать молча.
+  Future<void> _retry(LibraryTrack track) async {
+    if (await TrackLibrary.missing(track)) {
+      if (mounted) _say('Файла больше нет — запись можно только убрать.');
+      return;
+    }
+    if (!mounted) return;
+    final confirmed = await _confirmCost(track);
+    if (confirmed != true || !mounted) return;
+    setState(() => _busyTrackId = track.id);
+    await _transcribe(track);
   }
 
   Future<void> _remove(LibraryTrack track) async {
@@ -412,7 +476,7 @@ class _TrackRow extends StatelessWidget {
                             ? (track.artist.isEmpty
                                 ? (track.isUploaded ? 'своя запись' : 'из библиотеки')
                                 : track.artist)
-                            : 'без субтитров',
+                            : 'без субтитров — нажми, чтобы разобрать',
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: AppFonts.mono(fontSize: 10, color: AppColors.muted),
