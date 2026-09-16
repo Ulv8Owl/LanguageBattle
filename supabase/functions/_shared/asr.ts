@@ -269,12 +269,12 @@ export async function transcribe(req: {
  * `data` принимает И ссылку, И вложение `data:audio/wav;base64,…` —
  * поэтому параметр здесь называется `audio`, а не `audioUrl`.
  */
-async function nativeTranscribe(
+export async function nativeTranscribe(
   model: string,
   audio: string,
   format: string,
   budgetMs: number,
-): Promise<{ raw: string } | { error: string }> {
+): Promise<{ raw: string; body: string } | { error: string }> {
   const key = judgeKey();
   if (!key) return { error: "нет ключа модели" };
   // Хост берём из того же адреса, что и совместимый путь: менять их порознь
@@ -300,7 +300,14 @@ async function nativeTranscribe(
           ],
         },
         // Вот ровно то место, которого не хватало.
-        parameters: { format, sample_rate: SAMPLE_RATE },
+        //
+        // ЧАСТОТА ЕДЕТ ТОЛЬКО С СЫРЫМ ЗВУКОМ. У wav/pcm мы её знаем точно —
+        // приложение пишет 16 кГц. У mp3 и прочих сжатых она записана в
+        // самом файле, документация для них разрешает любую, и сообщить
+        // провайдеру наугад «16000» значит соврать про чужой файл.
+        parameters: format === "wav" || format === "pcm"
+          ? { format, sample_rate: SAMPLE_RATE }
+          : { format },
       }),
       signal: controller.signal,
     });
@@ -308,7 +315,11 @@ async function nativeTranscribe(
     if (!res.ok) return { error: `HTTP ${res.status}: ${body.slice(0, 400)}` };
     const text = nativeText(body);
     if (text === null) return { error: `ответ без текста: ${body.slice(0, 300)}` };
-    return { raw: text };
+    // Тело отдаём целиком НАМЕРЕННО. Боевому разбору хватает текста, а
+    // «Аудированию» нужна разметка по времени — она лежит рядом с текстом,
+    // и вытаскивать её второй копией вызова значило бы чинить особенности
+    // провайдера в двух местах, а замечать в одном.
+    return { raw: text, body };
   } catch (e) {
     if (e instanceof Error && e.name === "AbortError") return { error: "вызов не уложился в срок" };
     return { error: `сбой вызова: ${e}` };

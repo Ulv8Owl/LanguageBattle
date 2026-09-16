@@ -76,22 +76,59 @@ const List<String> llmModels = [
   'qwen-mt-plus',
 ];
 
+
+/// Чем разбирать запись в «Аудировании». Первая — по умолчанию.
+///
+/// ═══ ЗАДАЧА ЗДЕСЬ ДРУГАЯ, ЧЕМ В БОЮ ═══
+///
+/// В бою от распознавателя нужен ТЕКСТ короткой фразы. Здесь нужна
+/// РАЗМЕТКА ПО ВРЕМЕНИ на всю запись: слово подсвечивается ровно тогда,
+/// когда звучит. Мультимодальная модель время не измеряет, а сочиняет —
+/// первая живая проверка это и показала: субтитры сильно разъехались со
+/// звуком. Поэтому первым здесь стоит настоящий распознаватель, а не omni.
+///
+/// ЦЕНА ВЫБОРА. Распознаватель отдаёт только исходный текст, перевода он не
+/// знает — значит, переводить приходится вторым, текстовым вызовом. Omni
+/// делает и то и другое разом, но время у него выдуманное. Именно это и
+/// надо померить на живых записях, ради того список и существует.
+///
+/// ЧЕГО В СПИСКЕ НЕТ И ПОЧЕМУ. `*-filetrans` и `*-streaming` живут на
+/// ДРУГИХ протоколах: первые — на асинхронном пути распознавания файлов
+/// (задача ставится в очередь и опрашивается), вторые — на WebSocket.
+/// Ни того ни другого мы пока не зовём, и держать их здесь значит
+/// показывать кнопку, которая гарантированно ответит отказом.
+/// СПИСОК ОБЯЗАН СОВПАДАТЬ С СЕРВЕРНЫМ (transcribe-track, LISTENING_MODELS).
+/// Разойдясь, они дадут игроку выбор, который сервер молча заменит своим, —
+/// то есть настройку, которая ничего не меняет. Это сторожит тест.
+const List<String> listeningModels = [
+  // Настоящее распознавание: время измеряется, а не сочиняется.
+  'qwen-audio-3.0-asr-flash',
+  // Одна модель на всё: и расшифровка, и перевод, но время выдуманное.
+  'qwen3-omni-flash',
+  'qwen3.5-omni-flash',
+];
+
+String get defaultListeningModel => listeningModels.first;
+
 String get defaultAsrModel => asrModels.first;
 String get defaultLlmModel => llmModels.first;
 
 /// Что выбрано у игрока. Пусто или неизвестное значение — модель по
 /// умолчанию: список моделей меняется, а в профиле может лежать вчерашнее.
-Future<({String asr, String llm})> fetchJudgeModels() async {
+Future<({String asr, String llm, String listening})> fetchJudgeModels() async {
   final row = await supabase
       .from('users')
-      .select('asr_model, llm_model')
+      .select('asr_model, llm_model, listening_model')
       .eq('id', currentUserId)
       .maybeSingle();
   final asr = (row?['asr_model'] as String?)?.trim() ?? '';
   final llm = (row?['llm_model'] as String?)?.trim() ?? '';
+  final listening = (row?['listening_model'] as String?)?.trim() ?? '';
   return (
     asr: asrModels.contains(asr) ? asr : defaultAsrModel,
     llm: llmModels.contains(llm) ? llm : defaultLlmModel,
+    listening:
+        listeningModels.contains(listening) ? listening : defaultListeningModel,
   );
 }
 
@@ -105,4 +142,11 @@ Future<void> saveAsrModel(String model) => supabase
 Future<void> saveLlmModel(String model) => supabase
     .from('users')
     .update({'llm_model': model})
+    .eq('id', currentUserId);
+
+/// Сохраняет выбор разбора «Аудирования». Прочитает его сервер на следующем
+/// разборе — клиент модель не называет, он лишь пишет выбор в свой профиль.
+Future<void> saveListeningModel(String model) => supabase
+    .from('users')
+    .update({'listening_model': model})
     .eq('id', currentUserId);

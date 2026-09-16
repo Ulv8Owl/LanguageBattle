@@ -60,6 +60,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   /// модель между двумя ответами подряд на одной и той же фразе.
   String _asrModel = defaultAsrModel;
   String _llmModel = defaultLlmModel;
+  String _listeningModel = defaultListeningModel;
   bool _savingModels = false;
 
   /// Пока идёт удаление, кнопку нельзя нажать второй раз: повторный вызов
@@ -419,6 +420,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
       setState(() {
         _asrModel = models.asr;
         _llmModel = models.llm;
+        _listeningModel = models.listening;
       });
     } catch (_) {
       // Молча: не прочитался выбор — покажем модели по умолчанию, те же,
@@ -614,6 +616,28 @@ class _SettingsScreenState extends State<SettingsScreen> {
                               current: _llmModel,
                               save: saveLlmModel,
                               apply: (m) => _llmModel = m,
+                            ),
+                  ),
+                  const Divider(height: 1, color: AppColors.line),
+                  _Row(
+                    icon: Icons.headphones_outlined,
+                    title: 'Разбор «Аудирования»',
+                    trailing: _savingModels
+                        ? const SizedBox(
+                            height: 14, width: 14, child: CircularProgressIndicator(strokeWidth: 2))
+                        : Text(_listeningModel,
+                            style: AppFonts.mono(fontSize: 9, color: AppColors.muted)),
+                    onTap: _savingModels
+                        ? null
+                        : () => _pickModel(
+                              title: 'Разбор «Аудирования»',
+                              note: 'Размечает запись по словам и времени.\n'
+                                  'Распознаватель время измеряет, omni — сочиняет,\n'
+                                  'зато переводит сам, без второго вызова.',
+                              options: listeningModels,
+                              current: _listeningModel,
+                              save: saveListeningModel,
+                              apply: (m) => _listeningModel = m,
                             ),
                   ),
                   const Divider(height: 1, color: AppColors.line),

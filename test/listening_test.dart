@@ -348,7 +348,7 @@ void main() {
           .readAsStringSync();
       expect(fn, contains('EdgeRuntime.waitUntil(work)'));
       expect(fn, contains('accepted: true'));
-      expect(fn, contains('}, 202)'));
+      expect(fn, contains('202,'));
       // Наш срок обязан быть МЕНЬШЕ платформенного — иначе он не наступает
       // никогда. У боевого воркера тот же урок и бюджет 125 с.
       final ours = RegExp(r'TRANSCRIBE_TIMEOUT_MS"\) \?\? "(\d+)"').firstMatch(fn);
@@ -383,6 +383,80 @@ void main() {
       // Строка во всю запись — сломанный экран: он показывает одну строку
       // за раз и ужимает её по ширине.
       expect(fn, contains('splitLong'));
+    });
+  });
+
+  group('выбор модели разбора', () {
+    test('списки на клиенте и на сервере совпадают', () {
+      // Разойдясь, они дадут игроку выбор, который сервер молча заменит
+      // своим, — то есть настройку, которая ничего не меняет.
+      final client = RegExp(r"const List<String> listeningModels = \[(.*?)\];", dotAll: true)
+          .firstMatch(File('lib/data/judge_models.dart').readAsStringSync());
+      final server = RegExp(r"const LISTENING_MODELS = \[(.*?)\] as const;", dotAll: true)
+          .firstMatch(File('supabase/functions/transcribe-track/index.ts').readAsStringSync());
+      expect(client, isNotNull);
+      expect(server, isNotNull);
+      List<String> names(String body) =>
+          RegExp(r"""['\"]([\w.\-]+)['\"]""").allMatches(body).map((m) => m.group(1)!).toList();
+      expect(names(client!.group(1)!), names(server!.group(1)!));
+    });
+
+    test('по умолчанию — распознаватель, а не omni', () {
+      // Время у omni выдуманное, и первая живая проверка это показала:
+      // субтитры сильно разъехались со звуком.
+      final models = File('lib/data/judge_models.dart').readAsStringSync();
+      final list = RegExp(r"const List<String> listeningModels = \[(.*?)\];", dotAll: true)
+          .firstMatch(models)!
+          .group(1)!;
+      expect(
+        RegExp(r"'([\w.\-]+)'").firstMatch(list)!.group(1),
+        'qwen-audio-3.0-asr-flash',
+      );
+    });
+
+    test('модель берётся из профиля, а не из запроса', () {
+      // Называть модель платного провайдера клиенту не дают — так же, как
+      // это устроено у боевого воркера.
+      final fn = File('supabase/functions/transcribe-track/index.ts').readAsStringSync();
+      expect(fn, contains('.select("listening_model")'));
+      expect(fn.contains('body.model'), isFalse);
+    });
+
+    test('перевод берётся только при совпадении длин', () {
+      // Перевод, поехавший относительно оригинала, разъезжается молча и до
+      // конца записи. Субтитры без перевода — плохо; с чужим переводом под
+      // каждым словом — ложь.
+      final fn = File('supabase/functions/transcribe-track/index.ts').readAsStringSync();
+      expect(fn, contains('parsed.length !== slice.length'));
+    });
+
+    test('нет разметки — показываем ответ, а не гадаем', () {
+      final fn = File('supabase/functions/transcribe-track/index.ts').readAsStringSync();
+      expect(fn, contains('распознаватель не вернул разметку по времени'));
+      expect(fn, contains('sample: heard.body.slice(0, 400)'));
+    });
+  });
+
+  group('энергия одна на всё приложение', () {
+    test('Арена перечитывает кошелёк после фонотеки', () {
+      // Арена живёт в оболочке с сохранением состояния и сама ничего не
+      // перечитывает: экран поверх неё энергию тратил, а на Арене
+      // оставалось прежнее число. Счётчик при этом ОДИН.
+      final arena =
+          File('lib/features/arena/arena_screen.dart').readAsStringSync();
+      final at = arena.indexOf("push('/listening')");
+      expect(at, greaterThan(0));
+      expect(arena.substring(at, at + 80), contains('_load()'));
+    });
+
+    test('восстановление — одна единица за 10 секунд', () {
+      final sql = File('supabase/migrations/0053_energy_regen_seconds.sql')
+          .readAsStringSync();
+      expect(sql, contains('v_step_seconds constant integer := 10'));
+      // Считаем в секундах: деление целых минут при шаге в 10 секунд дало
+      // бы ноль всегда, и энергия не восстанавливалась бы вовсе.
+      expect(sql, contains('extract(epoch from (now() - v_wallet.energy_last_regen_at))'));
+      expect(sql.contains('/ 60)'), isFalse);
     });
   });
 
@@ -465,15 +539,19 @@ void main() {
 
     test('сначала ссылка, потом списание, потом модель', () {
       // Не собралась ссылка — модель мы даже не звали, и брать за это
-      // плату не за что.
-      final s = fn();
+      // плату не за что. Порядок смотрим В САМОМ ОБРАБОТЧИКЕ: вызовы
+      // модели живут во вспомогательных функциях, и поиск по всему файлу
+      // находил бы их, а не ход запроса.
+      final all = fn();
+      final s = all.substring(all.indexOf('Deno.serve('));
       expect(
         s.indexOf('audioUrlFor(storagePath'),
         lessThan(s.indexOf('rpc("spend_energy"')),
       );
       expect(
         s.indexOf('rpc("spend_energy"'),
-        lessThan(s.indexOf('await requestQwen(')),
+        lessThan(s.indexOf('transcribe({')),
+        reason: 'модель зовётся только после списания',
       );
     });
   });

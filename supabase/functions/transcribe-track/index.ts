@@ -35,12 +35,11 @@
 import { createClient } from "jsr:@supabase/supabase-js@2";
 import { audioUrlFor } from "../_shared/audioLink.ts";
 import { judgeKey, parseJson, requestQwen } from "../_shared/review.ts";
+import { asrFamily, nativeTranscribe } from "../_shared/asr.ts";
+import { llmModel } from "../_shared/textJudge.ts";
 
 /** Тот же приватный бакет, что и у боевых записей. */
 const BUCKET = "voice-recordings";
-
-/** Модель. Та же, что уже разбирает записи в бою. */
-const MODEL = Deno.env.get("OMNI_TRANSCRIBE_MODEL") ?? "qwen3-omni-flash";
 
 /**
  * Длиннее этого не беремся.
@@ -76,6 +75,35 @@ const WRITE_RESERVE_MS = 15_000;
  * Edge Functions; объявлено здесь, потому что в типах Deno этого нет.
  */
 declare const EdgeRuntime: { waitUntil(promise: Promise<unknown>): void } | undefined;
+
+/**
+ * Модели разбора «Аудирования». ПЕРВАЯ — ПО УМОЛЧАНИЮ, и это настоящий
+ * распознаватель, а не omni: время он измеряет, а не сочиняет. Список тот
+ * же, что видит игрок в настройках (lib/data/judge_models.dart) — разойдясь,
+ * они дали бы выбор, который сервер молча заменяет на свой.
+ */
+const LISTENING_MODELS = [
+  "qwen-audio-3.0-asr-flash",
+  "qwen3-omni-flash",
+  "qwen3.5-omni-flash",
+] as const;
+
+/** Выбор игрока сильнее окружения; незнакомое значение — модель по умолчанию. */
+function listeningModel(chosen?: string | null): string {
+  const wanted = (chosen ?? "").trim();
+  if ((LISTENING_MODELS as readonly string[]).includes(wanted)) return wanted;
+  const fromEnv = Deno.env.get("OMNI_TRANSCRIBE_MODEL");
+  if (fromEnv && (LISTENING_MODELS as readonly string[]).includes(fromEnv)) return fromEnv;
+  return LISTENING_MODELS[0];
+}
+
+/** Расширение файла: по нему провайдер определяет формат записи. */
+function extensionOf(storagePath: string): string {
+  const dot = storagePath.lastIndexOf(".");
+  if (dot < 0 || dot === storagePath.length - 1) return "mp3";
+  const ext = storagePath.slice(dot + 1).toLowerCase();
+  return ext.length > 5 ? "mp3" : ext;
+}
 
 /** Куда ляжет разбор. Рядом с записью — по тому же праву, что и она. */
 function resultPathFor(storagePath: string): string {
@@ -231,6 +259,155 @@ function splitLong(line: Record<string, unknown>[]): Record<string, unknown>[][]
   return out;
 }
 
+
+// ═══════════════════════════════════════════════════════════════════════
+// РАСПОЗНАВАТЕЛЬ: ВРЕМЯ ИЗМЕРЕННОЕ, А НЕ СОЧИНЁННОЕ
+//
+// Мультимодальная модель делает всё одним вызовом — и расшифровку, и
+// перевод, и время. Первая живая проверка показала, чего это стоит:
+// субтитры сильно разъехались со звуком. Время она не измеряет, а
+// придумывает правдоподобные числа, и заметно это только на слух.
+//
+// Настоящий распознаватель время измеряет. Платой за это идёт второй вызов:
+// перевода он не знает, и слова приходится переводить отдельно, текстовой
+// моделью. Что лучше — решает не рассуждение, а сравнение на живых записях,
+// ради того выбор модели и вынесен в настройки.
+// ═══════════════════════════════════════════════════════════════════════
+
+interface Timed {
+  text: string;
+  start: number;
+  end: number;
+}
+
+function firstString(o: Record<string, unknown>, keys: string[]): string | null {
+  for (const k of keys) {
+    const v = o[k];
+    if (typeof v === "string" && v.trim().length > 0) return v.trim();
+  }
+  return null;
+}
+
+function firstNumber(o: Record<string, unknown>, keys: string[]): number | null {
+  for (const k of keys) {
+    const v = o[k];
+    if (typeof v === "number" && Number.isFinite(v)) return v;
+    if (typeof v === "string") {
+      const parsed = Number(v);
+      if (Number.isFinite(parsed)) return parsed;
+    }
+  }
+  return null;
+}
+
+/**
+ * Достаёт из ответа распознавателя САМЫЙ ГЛУБОКИЙ уровень разметки.
+ *
+ * Провайдер кладёт её вложенно: у фразы есть своё время, а внутри — слова
+ * со своим. Слова точнее, поэтому спускаемся до упора и берём то, что
+ * лежит глубже всего. Имена полей у разных семейств разные, и угадывать их
+ * по одному мы уже пробовали — здесь перечислены все встречавшиеся.
+ */
+function timedItems(node: unknown): Timed[] {
+  if (Array.isArray(node)) return node.flatMap(timedItems);
+  if (!node || typeof node !== "object") return [];
+  const o = node as Record<string, unknown>;
+
+  const deeper = Object.values(o).flatMap(timedItems);
+  if (deeper.length > 0) return deeper;
+
+  const text = firstString(o, ["text", "word", "w", "punctuated_text"]);
+  const start = firstNumber(o, ["begin_time", "start_time", "beginTime", "start", "begin"]);
+  if (text === null || start === null) return [];
+  const end = firstNumber(o, ["end_time", "stop_time", "endTime", "end", "stop"]) ?? start;
+  return [{ text, start, end: end > start ? end : start }];
+}
+
+/**
+ * Фразу режет на слова, раскладывая её время по буквам.
+ *
+ * ЭТО ПРИБЛИЖЕНИЕ, И ОНО ЧЕСТНОЕ. Когда распознаватель отдал время только
+ * фразам, начало и конец каждой — измеренные, настоящие; выдумано лишь то,
+ * как время распределено ВНУТРИ фразы. Это несравнимо ближе к правде, чем
+ * придуманные с нуля числа, и промах не копится: следующая фраза снова
+ * встаёт на своё измеренное место.
+ */
+function wordsOfPhrase(item: Timed): Timed[] {
+  const parts = item.text.split(/\s+/).filter((p) => p.length > 0);
+  if (parts.length <= 1) return [item];
+  const span = Math.max(1, item.end - item.start);
+  const letters = parts.reduce((sum, p) => sum + p.length, 0) || parts.length;
+  const out: Timed[] = [];
+  let at = item.start;
+  for (const part of parts) {
+    const share = Math.round((span * part.length) / letters);
+    out.push({ text: part, start: at, end: at + share });
+    at += share;
+  }
+  out[out.length - 1].end = item.end;
+  return out;
+}
+
+/**
+ * Переводит слова ПО НОМЕРАМ, а не по смыслу строки.
+ *
+ * Именно здесь живёт опасность, ради которой изначально выбрали один вызов
+ * на всё: перевод, поехавший относительно оригинала, разъезжается молча и
+ * до конца записи. Защита простая и проверяемая — просим ровно столько же
+ * элементов, сколько отдали, и при несовпадении длин НЕ БЕРЁМ НИЧЕГО.
+ * Субтитры без перевода — это плохо; субтитры с чужим переводом под каждым
+ * словом — это ложь.
+ */
+async function translateWords(
+  words: string[],
+  translateTo: string,
+  budgetMs: number,
+): Promise<string[]> {
+  const target = languageName(translateTo);
+  const model = llmModel(Deno.env.get("TRANSCRIBE_TRANSLATE_MODEL"));
+  const out = new Array<string>(words.length).fill("");
+  const CHUNK = 200;
+  const started = Date.now();
+
+  for (let from = 0; from < words.length; from += CHUNK) {
+    const left = budgetMs - (Date.now() - started);
+    if (left < 8_000) break; // не успеем — остаток останется без перевода
+    const slice = words.slice(from, from + CHUNK);
+    const answer = await requestQwen(
+      `You translate word lists into ${target}.`,
+      [{
+        type: "text",
+        text: [
+          `Translate each word into ${target}, keeping the order.`,
+          `Answer with a JSON array of exactly ${slice.length} strings and nothing else.`,
+          "A word with no separate translation (an article, an auxiliary) becomes an empty string.",
+          "",
+          JSON.stringify(slice),
+        ].join("\n"),
+      }],
+      left,
+      model,
+      { temperature: 0, timeoutMs: left },
+    );
+    if ("error" in answer) break;
+
+    const raw = answer.raw.trim();
+    const braced = raw.match(/\[[\s\S]*\]/);
+    let parsed: unknown = null;
+    try {
+      parsed = JSON.parse(braced ? braced[0] : raw);
+    } catch {
+      parsed = null;
+    }
+    if (!Array.isArray(parsed) || parsed.length !== slice.length) continue;
+    for (let i = 0; i < slice.length; i++) {
+      const value = parsed[i];
+      if (typeof value === "string") out[from + i] = value.trim();
+    }
+  }
+  return out;
+}
+
 function json(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
     status,
@@ -347,6 +524,16 @@ Deno.serve(async (req) => {
   // ложится в хранилище рядом с записью, и приложение забирает его оттуда:
   // права на эту папку у него уже есть (миграция 0052), и ждать ему больше
   // нечего — файл появится или не появится.
+  // МОДЕЛЬ БЕРЁМ ИЗ ПРОФИЛЯ, А НЕ ИЗ ЗАПРОСА. Так же, как боевой воркер
+  // берёт asr_model/llm_model: клиент записывает выбор себе в профиль, а
+  // называть модель в запросе к платному провайдеру ему не дают.
+  const { data: profile } = await admin
+    .from("users")
+    .select("listening_model")
+    .eq("id", userId)
+    .maybeSingle();
+  const model = listeningModel((profile?.listening_model as string | null) ?? null);
+
   const resultPath = resultPathFor(storagePath);
 
   // Фоновой задаче база не нужна — ей нужен ровно один способ сохранить
@@ -364,7 +551,15 @@ Deno.serve(async (req) => {
     }
   };
 
-  const work = transcribe({ save, audioUrl, translateTo, cost, left });
+  const work = transcribe({
+    save,
+    audioUrl,
+    translateTo,
+    cost,
+    left,
+    model,
+    format: extensionOf(storagePath),
+  });
   if (typeof EdgeRuntime !== "undefined") {
     EdgeRuntime.waitUntil(work);
   } else {
@@ -373,7 +568,10 @@ Deno.serve(async (req) => {
     await work;
   }
 
-  return json({ accepted: true, result_path: resultPath, energy_spent: cost, energy_left: left }, 202);
+  return json(
+    { accepted: true, result_path: resultPath, model, energy_spent: cost, energy_left: left },
+    202,
+  );
 });
 
 /**
@@ -389,9 +587,15 @@ async function transcribe(job: {
   translateTo: string;
   cost: number;
   left: unknown;
+  model: string;
+  format: string;
 }): Promise<void> {
   const put = job.save;
   try {
+    if (asrFamily(job.model) !== "omni") {
+      await transcribeByAsr(job, put);
+      return;
+    }
     const answer = await requestQwen(
       "",
       [
@@ -399,7 +603,7 @@ async function transcribe(job: {
         { type: "text", text: prompt(job.translateTo) },
       ],
       TIMEOUT_MS - WRITE_RESERVE_MS,
-      MODEL,
+      job.model,
       { audio: true, temperature: 0, timeoutMs: TIMEOUT_MS - WRITE_RESERVE_MS },
     );
 
@@ -432,4 +636,73 @@ async function transcribe(job: {
   } catch (e) {
     await put({ error: `сбой разбора: ${e}`, energy_left: job.left });
   }
+}
+
+/**
+ * Путь распознавателя: сначала разметка по времени, потом перевод.
+ *
+ * Два вызова вместо одного, и это осознанная плата. Первый измеряет время —
+ * ровно то, чего у мультимодальной модели нет. Второй переводит СПИСОК СЛОВ
+ * по номерам, и рассогласоваться там нечему: длины сверяются, а при
+ * несовпадении перевод не берётся вовсе.
+ */
+async function transcribeByAsr(
+  job: {
+    audioUrl: string;
+    translateTo: string;
+    cost: number;
+    left: unknown;
+    model: string;
+    format: string;
+  },
+  put: (body: unknown) => Promise<void>,
+): Promise<void> {
+  const started = Date.now();
+  const budget = TIMEOUT_MS - WRITE_RESERVE_MS;
+  const heard = await nativeTranscribe(job.model, job.audioUrl, job.format, budget);
+  if ("error" in heard) {
+    await put({ error: `распознавание не прошло: ${heard.error}`, energy_left: job.left });
+    return;
+  }
+
+  let parsed: unknown = null;
+  try {
+    parsed = JSON.parse(heard.body);
+  } catch {
+    parsed = null;
+  }
+  const items = timedItems(parsed);
+  if (items.length === 0) {
+    // РАЗМЕТКИ НЕТ — И ЭТО НАДО ПОКАЗАТЬ, А НЕ УГАДЫВАТЬ. Кусок ответа
+    // отвечает на единственный вопрос: где у этой модели лежит время.
+    await put({
+      error: "распознаватель не вернул разметку по времени",
+      sample: heard.body.slice(0, 400),
+      energy_left: job.left,
+    });
+    return;
+  }
+
+  const words = items.flatMap(wordsOfPhrase);
+  const translations = await translateWords(
+    words.map((w) => w.text),
+    job.translateTo,
+    budget - (Date.now() - started),
+  );
+
+  const line = words.map((w, i) => ({
+    w: w.text,
+    t: translations[i] ?? "",
+    start: w.start,
+    end: w.end,
+  }));
+
+  await put({
+    language: "",
+    translation: job.translateTo,
+    lines: splitLong(fillEnds(line)),
+    model: job.model,
+    energy_spent: job.cost,
+    energy_left: job.left,
+  });
 }

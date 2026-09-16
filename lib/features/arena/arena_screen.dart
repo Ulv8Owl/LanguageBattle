@@ -290,7 +290,15 @@ class _ArenaScreenState extends State<ArenaScreen> {
         _Stat(value: '—', label: 'рейтинг', color: AppColors.cyan),
       ],
       primaryLabel: 'Открыть фонотеку',
-      onPrimary: () => context.push('/listening'),
+      // ПОСЛЕ ВОЗВРАТА ПЕРЕЧИТЫВАЕМ КОШЕЛЁК. Арена живёт в оболочке с
+      // сохранением состояния и сама по себе ничего не перечитывает: экран
+      // поверх неё энергию потратил, а здесь оставалось прежнее число.
+      // Счётчик при этом ОДИН — расходились только показания. Тренировка
+      // рядом делает ровно это же.
+      onPrimary: () async {
+        await context.push('/listening');
+        if (mounted) _load();
+      },
       accent: AppColors.cyan,
     );
   }

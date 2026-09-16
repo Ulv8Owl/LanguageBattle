@@ -134,7 +134,11 @@ void main() {
     // частоту читают из parameters — РЯДОМ с input, а не внутри input_audio,
     // куда мы их клали пять кругов подряд.
     expect(s, contains('/api/v1/services/aigc/multimodal-generation/generation'));
-    expect(s, contains('parameters: { format, sample_rate: SAMPLE_RATE }'));
+    // Частота едет ТОЛЬКО с сырым звуком: у wav/pcm мы её знаем точно
+    // (приложение пишет 16 кГц), а у mp3 она записана в самом файле, и
+    // сообщать провайдеру наугад «16000» значит врать про чужой файл.
+    expect(s, contains('{ format, sample_rate: SAMPLE_RATE }'));
+    expect(s, contains('format === "wav" || format === "pcm"'));
     expect(s, contains('content: [{ type: "input_audio", input_audio: { data: audio } }]'));
     expect(s, contains('"X-DashScope-SSE": "disable"'));
     // Короткой формы {audio: …} здесь быть не должно: это схема другого
