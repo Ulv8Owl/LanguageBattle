@@ -88,8 +88,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
       return;
     }
 
-    // С 11-й версии метод статический: FilePicker.platform больше нет.
-    final picked = await FilePicker.pickFiles(type: FileType.audio);
+    final picked = await FilePicker.platform.pickFiles(type: FileType.audio);
     final path = picked?.files.single.path;
     if (path == null || !mounted) return;
 

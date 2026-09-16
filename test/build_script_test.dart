@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
@@ -88,33 +89,64 @@ void main() {
   });
 
   group('android-сборка', () {
-    test('file_picker не ниже 11 — иначе Gradle падает на compileSdk', () {
-      // Версии по 9.x включительно прибивали себе `compileSdk 34`, а их же
-      // зависимость flutter_plugin_android_lifecycle требует от
-      // потребителей 36. Сборка падает на checkReleaseAarMetadata и НИ
-      // СЛОВА не говорит про pubspec — найти причину можно только зная,
-      // что плагин держит свой compileSdk отдельно от приложения.
-      // 11.0.0 вдобавок умеет AGP 9, а он у нас в settings.gradle.kts.
-      final constraint = RegExp(r'file_picker:\s*\^(\d+)\.')
-          .firstMatch(read('pubspec.yaml'));
-      expect(constraint, isNotNull, reason: 'file_picker пропал из pubspec');
-      expect(int.parse(constraint!.group(1)!), greaterThanOrEqualTo(11));
-    });
-
-    test('file_picker умеет тот AGP, который стоит в проекте', () {
-      // Две настройки в разных файлах, которые обязаны сходиться: AGP 9
-      // поддерживается в file_picker только с 11.0.0. Разойдясь, они
-      // ломают не анализ и не тесты, а Gradle — на чужом компьютере,
-      // посреди деплоя.
-      final agp = RegExp(r'com\.android\.application"\) version "(\d+)\.')
-          .firstMatch(read('android/settings.gradle.kts'));
-      expect(agp, isNotNull, reason: 'не нашёл версию AGP');
-      final picker = int.parse(
-        RegExp(r'file_picker:\s*\^(\d+)\.').firstMatch(read('pubspec.yaml'))!.group(1)!,
-      );
-      if (int.parse(agp!.group(1)!) >= 9) {
-        expect(picker, greaterThanOrEqualTo(11), reason: 'AGP 9 требует file_picker 11+');
+    /// Каталоги подключённых пакетов — из того, что разложил pub get.
+    Map<String, Directory> resolvedPackages() {
+      final config = File('.dart_tool/package_config.json');
+      expect(config.existsSync(), isTrue,
+          reason: 'нет .dart_tool/package_config.json — сначала flutter pub get');
+      final json = jsonDecode(config.readAsStringSync()) as Map<String, dynamic>;
+      final out = <String, Directory>{};
+      for (final p in (json['packages'] as List).cast<Map<String, dynamic>>()) {
+        final uri = Uri.parse(p['rootUri'] as String);
+        final path = uri.scheme == 'file'
+            ? uri.toFilePath()
+            : Uri.parse(config.absolute.parent.uri.resolveUri(uri).toString()).toFilePath();
+        out[p['name'] as String] = Directory(path);
       }
+      return out;
+    }
+
+    test('Kotlin в плагине не включается «по условию»', () {
+      // ═══ САМАЯ ДОРОГАЯ ЛОВУШКА ИЗ ВСТРЕЧЕННЫХ ═══
+      //
+      // В android/gradle.properties стоит android.builtInKotlin=false —
+      // встроенный в AGP Kotlin выключен. А некоторые плагины применяют
+      // Kotlin Gradle Plugin УСЛОВНО:
+      //
+      //     def isAgp9OrAbove = ... >= 9
+      //     if (!isAgp9OrAbove) { apply plugin: 'org.jetbrains.kotlin.android' }
+      //
+      // расчитывая, что на AGP 9 их подхватит встроенный Kotlin. У нас он
+      // выключен, а AGP 9 — стоит. Такой плагин собирается ВНЕШНЕ УСПЕШНО:
+      // его .kt-файлы просто никто не компилирует. Падает потом ЧУЖОЙ файл
+      // — GeneratedPluginRegistrant.java: «cannot find symbol: class
+      // FilePickerPlugin». Ни про плагин, ни про pubspec, ни про Kotlin там
+      // нет ни слова.
+      //
+      // Ловим именно УСЛОВНОЕ применение, а не отсутствие применения
+      // вообще: плагин может настраивать Kotlin блоком `kotlin { }` и
+      // прекрасно собираться (так живёт audioplayers_android). Проверять
+      // версию пакета бессмысленно — версия это то, чем ловушка сегодня
+      // называется, а условие — то, чем она является.
+      if (RegExp(r'android\.builtInKotlin\s*=\s*true')
+          .hasMatch(read('android/gradle.properties'))) {
+        return;
+      }
+
+      final conditional = RegExp(
+        r'if\s*\([^)]*\)\s*\{[^}]*apply plugin:\s*[\x27"](kotlin-android|org\.jetbrains\.kotlin\.android)',
+        multiLine: true,
+      );
+      final broken = <String>[];
+      resolvedPackages().forEach((name, dir) {
+        final gradle = File('${dir.path}/android/build.gradle');
+        if (!gradle.existsSync()) return;
+        if (conditional.hasMatch(gradle.readAsStringSync())) broken.add(name);
+      });
+
+      expect(broken, isEmpty,
+          reason: 'эти плагины включают Kotlin по условию, а условие у нас не '
+              'выполняется — их классы молча не попадут в сборку: $broken');
     });
   });
 
