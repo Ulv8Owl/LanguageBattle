@@ -7,6 +7,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'app.dart';
 import 'core/app_locale.dart';
 import 'core/client_secrets_guard.dart';
+import 'core/mascot_widget.dart';
 import 'core/reminders.dart';
 
 Future<void> main() async {
@@ -37,4 +38,7 @@ Future<void> main() async {
   // Переназначаем на КАЖДОМ запуске намеренно: расписание, составленное
   // в прошлый раз, ничего не знает о том, что игрок с тех пор занимался.
   unawaited(Reminders.refresh());
+  // Виджет обновляется ОТДЕЛЬНО от напоминаний: он висит на рабочем
+  // столе и тогда, когда напоминания выключены.
+  unawaited(MascotWidget.refresh());
 }

@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Описание виджета для системы.
+
+     ОБНОВЛЯЕТ СЕБЯ ВИДЖЕТ РЕДКО, И ЭТО НАРОЧНО. Раз в час — верхняя
+     граница, которую советует сама документация («Update as infrequently
+     as possible — no more than once an hour — to conserve the battery»),
+     и она здесь только страховкой: настоящие обновления шлёт приложение
+     (после занятия и на запуске) и будильник напоминания. А отсчёт до
+     полуночи тикает сам, силами Chronometer, и обновлений не требует
+     вовсе.
+
+     Размеры: 4 ячейки в ширину, 2 в высоту — по формуле 70*n-30. Такой
+     виджет читается с рабочего стола, не занимая его целиком. -->
+<appwidget-provider xmlns:android="http://schemas.android.com/apk/res/android"
+    android:description="@string/widget_description"
+    android:initialLayout="@layout/widget_chrolingo"
+    android:minWidth="250dp"
+    android:minHeight="110dp"
+    android:previewLayout="@layout/widget_chrolingo"
+    android:previewImage="@mipmap/ic_launcher"
+    android:resizeMode="horizontal|vertical"
+    android:targetCellWidth="4"
+    android:targetCellHeight="2"
+    android:updatePeriodMillis="3600000"
+    android:widgetCategory="home_screen" />

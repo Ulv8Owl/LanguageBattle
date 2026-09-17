@@ -1,5 +1,5 @@
-/// Мост к уведомлению со своей разметкой и к будильникам Android
-/// (android/.../ChrolingoNotification.kt, ReminderAlarms.kt).
+/// Мост к нативной части: уведомление со своей разметкой, будильники и
+/// виджет (android/app/src/main/kotlin/com/chrolingo/app).
 ///
 /// ═══ ПОЧЕМУ НЕ ПЛАГИН ═══
 ///
@@ -55,9 +55,14 @@ class NotificationSpec {
   /// Имя файла в `res/raw` без расширения. Звук канала.
   final String? sound;
 
-  /// Файл картинки настроения НА ДИСКЕ. Именно файл: вечером ассеты
-  /// Flutter прочитать некому.
-  final String? imagePath;
+  /// Имя ресурса настроения в `res/drawable` (`mascot_worried`).
+  ///
+  /// ИМЕННО РЕСУРС, А НЕ ФАЙЛ И НЕ АССЕТ. Уведомление рисуется, когда
+  /// приложения нет: ассеты Flutter читать нечем, а картинку целиком
+  /// система отказывается принимать, если та велика. Ресурс уезжает
+  /// одним числом, и рисунок берётся из APK — даже если приложение ни
+  /// разу не запускали.
+  final String? mascot;
 
   final NotificationSkin skin;
 
@@ -77,7 +82,7 @@ class NotificationSpec {
     required this.title,
     required this.body,
     this.sound,
-    this.imagePath,
+    this.mascot,
     this.skin = NotificationSkin.gold,
     this.countdownUntil,
     this.at,
@@ -91,7 +96,7 @@ class NotificationSpec {
         'title': title,
         'body': body,
         'sound': sound,
-        'imagePath': imagePath,
+        'mascot': mascot,
         'skin': skin.name,
         'countdownUntil': countdownUntil?.millisecondsSinceEpoch,
         // Момент в обычном времени телефона. Никакой базы часовых
@@ -103,12 +108,19 @@ class NotificationSpec {
       };
 }
 
+/// Один канал на всю нативную часть. ОДНО ОПРЕДЕЛЕНИЕ НА ПРОЕКТ: имя
+/// канала совпадает с константой в RichNotifications.kt, и разойтись им
+/// нельзя — расхождение не падает, а тихо возвращает
+/// MissingPluginException.
+const MethodChannel nativeChannel = MethodChannel('chrolingo/native');
+
+/// Есть ли нативная часть на этой платформе. iOS и тесты её не имеют.
+bool get nativeSupported => !kIsWeb && Platform.isAndroid;
+
 class RichNotification {
   RichNotification._();
 
-  static const MethodChannel _channel = MethodChannel('chrolingo/notifications');
-
-  static bool get supported => !kIsWeb && Platform.isAndroid;
+  static bool get supported => nativeSupported;
 
   /// Показать немедленно. Возвращает false, если нативной части нет.
   static Future<bool> show(NotificationSpec spec) =>
@@ -127,7 +139,7 @@ class RichNotification {
   static Future<bool> _call(String method, String? payload) async {
     if (!supported) return false;
     try {
-      await _channel.invokeMethod<bool>(method, payload);
+      await nativeChannel.invokeMethod<bool>(method, payload);
       return true;
     } on MissingPluginException {
       return false;

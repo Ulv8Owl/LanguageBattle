@@ -6,14 +6,15 @@ import org.json.JSONObject
 
 /**
  * Мост Dart -> Android. Здесь только передача: что показывать и когда,
- * решает Dart (там это проверяется тестами), а как показывать — знает
- * [ChrolingoNotification], потому что вечером Dart уже не запущен.
+ * решает Dart (там это проверяется тестами), а как показывать — знают
+ * [ChrolingoNotification] и [ChrolingoWidget], потому что и вечером, и
+ * на рабочем столе Dart уже не запущен.
  */
 class RichNotifications(private val context: android.content.Context) :
     MethodChannel.MethodCallHandler {
 
     companion object {
-        const val CHANNEL = "chrolingo/notifications"
+        const val CHANNEL = "chrolingo/native"
     }
 
     override fun onMethodCall(call: MethodCall, result: MethodChannel.Result) {
@@ -30,6 +31,10 @@ class RichNotifications(private val context: android.content.Context) :
                 }
                 "cancelAll" -> {
                     ReminderAlarms.cancelAll(context)
+                    result.success(true)
+                }
+                "widget" -> {
+                    ChrolingoWidget.save(context, call.arguments as String)
                     result.success(true)
                 }
                 else -> result.notImplemented()

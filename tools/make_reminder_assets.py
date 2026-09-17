@@ -183,13 +183,27 @@ def make_notification_icon():
 
 
 def make_moods():
+    """Настроения — И В АССЕТЫ, И В РЕСУРСЫ ANDROID.
+
+    В ассеты — потому что их показывает сам экран приложения. В ресурсы
+    — потому что уведомление и виджет рисуются, когда приложения нет ни
+    в каком виде: читать ассеты Flutter там нечем и некому. Ресурс же
+    находится по имени и всегда на месте.
+    """
     width, height, rows = read_png(SOURCE)
     os.makedirs(MASCOT_DIR, exist_ok=True)
+    drawable = os.path.join(RES_DIR, 'drawable-nodpi')
+    os.makedirs(drawable, exist_ok=True)
     for name, tint in MOODS.items():
         big = upscaled(tinted(rows, width, tint), width, SCALE)
-        path = os.path.join(MASCOT_DIR, 'mood_%s.png' % name)
-        write_png(path, width * SCALE, height * SCALE, big)
-        print('%s  %dx%d' % (path, width * SCALE, height * SCALE))
+        for path in (
+            os.path.join(MASCOT_DIR, 'mood_%s.png' % name),
+            # Имя ресурса должно совпадать с MascotMood, как и имя ассета:
+            # и уведомление, и виджет ищут его по имени настроения.
+            os.path.join(drawable, 'mascot_%s.png' % name),
+        ):
+            write_png(path, width * SCALE, height * SCALE, big)
+            print('%s  %dx%d' % (path, width * SCALE, height * SCALE))
 
 
 def make_sound():

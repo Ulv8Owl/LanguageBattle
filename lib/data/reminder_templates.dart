@@ -102,6 +102,10 @@ class Reminder {
   /// настроения — иначе однажды окажется, что для одного из них картинку
   /// назвали иначе, и уведомление уйдёт без неё.
   String get imageAsset => 'assets/mascot/mood_${mood.name}.png';
+
+  /// То же настроение ресурсом Android — для уведомления и виджета.
+  /// Их рисуют без приложения, и ассет Flutter там читать нечем.
+  String get mascotResource => 'mascot_${mood.name}';
 }
 
 /// Шаблон до подстановки чисел.
@@ -228,6 +232,19 @@ Reminder? pickReminder(ReminderState state, {List<String> recentIds = const []})
     body: chosen.body(state),
   );
 }
+
+/// Что показывать, когда показывать нечего: игрок занимался сегодня.
+///
+/// УВЕДОМЛЕНИЮ ЭТО НЕ НУЖНО — оно в таком случае просто молчит. А виджет
+/// молчать не умеет: он всегда на экране, и пустым быть не может.
+Reminder doneTodayReminder(ReminderState s) => Reminder(
+      id: 'done.today',
+      mood: MascotMood.cheerful,
+      title: s.streakDays > 0
+          ? 'Серия ${s.streakDays} ${_days(s.streakDays)}'
+          : 'Сегодня сделано',
+      body: 'На сегодня всё. Возвращайтесь завтра.',
+    );
 
 /// Текст срочного вида, где цифры показывает ТАЙМЕР, а не текст.
 ///

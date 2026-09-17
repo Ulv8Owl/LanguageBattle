@@ -5,8 +5,6 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Context
-import android.graphics.Bitmap
-import android.graphics.BitmapFactory
 import android.media.AudioAttributes
 import android.net.Uri
 import android.os.Build
@@ -40,7 +38,8 @@ data class NotificationSpec(
     val sound: String?,
     val title: String,
     val body: String,
-    val imagePath: String?,
+    /** Имя ресурса настроения в res/drawable (`mascot_worried`). */
+    val mascot: String?,
     val skin: String,
     /** Момент, до которого идёт обратный отсчёт. null — таймера нет. */
     val countdownUntil: Long?,
@@ -56,7 +55,7 @@ data class NotificationSpec(
         .put("sound", sound)
         .put("title", title)
         .put("body", body)
-        .put("imagePath", imagePath)
+        .put("mascot", mascot)
         .put("skin", skin)
         .put("countdownUntil", countdownUntil)
         .put("at", at)
@@ -70,7 +69,7 @@ data class NotificationSpec(
             sound = json.optStringOrNull("sound"),
             title = json.optString("title", ""),
             body = json.optString("body", ""),
-            imagePath = json.optStringOrNull("imagePath"),
+            mascot = json.optStringOrNull("mascot"),
             skin = json.optString("skin", "gold"),
             countdownUntil = json.optLongOrNull("countdownUntil"),
             at = json.optLongOrNull("at"),
@@ -86,10 +85,6 @@ private fun JSONObject.optLongOrNull(key: String): Long? =
     if (isNull(key)) null else optLong(key).takeIf { it != 0L }
 
 object ChrolingoNotification {
-
-    /** Значок в разметке — 44dp; 192px хватает самому плотному экрану, а
-     * посылку между процессами не переполняет. */
-    private const val MAX_IMAGE_PX = 192
 
     private data class Skin(val background: String, val title: Int, val body: Int)
 
@@ -189,31 +184,15 @@ object ChrolingoNotification {
             views.setChronometer(timer, base, null, true)
         }
 
-        val bitmap = spec.imagePath?.let { scaled(it) }
-        if (bitmap != null) views.setImageViewBitmap(mascot, bitmap)
+        // КАРТИНКА — РЕСУРСОМ, А НЕ КАРТИНКОЙ. `setImageViewBitmap`
+        // отправляет пиксели в системный процесс как есть (616x688 —
+        // это 1,7 МБ в одной посылке, а размер посылки ограничен), и
+        // при переполнении уведомление просто не приходит. Ресурс же
+        // уезжает одним числом, а рисунок система берёт из нашего APK —
+        // и берёт даже тогда, когда приложение ни разу не запускали.
+        val drawable = optionalResource(context, spec.mascot, "drawable")
+        if (drawable != 0) views.setImageViewResource(mascot, drawable)
         return views
-    }
-
-    /**
-     * Картинка, уменьшенная до размера значка.
-     *
-     * УМЕНЬШАТЬ ОБЯЗАТЕЛЬНО. `setImageViewBitmap`, в отличие от
-     * `setLargeIcon`, не масштабирует ничего: картинка уезжает в
-     * системный процесс как есть. Наши 616x688 — это 1,7 МБ в одной
-     * посылке, а размер посылки между процессами ограничен. Всё, что
-     * видит игрок при переполнении, — отсутствие уведомления.
-     */
-    private fun scaled(path: String): Bitmap? {
-        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-        BitmapFactory.decodeFile(path, bounds)
-        val longest = maxOf(bounds.outWidth, bounds.outHeight)
-        if (longest <= 0) return null
-        var sample = 1
-        while (longest / sample > MAX_IMAGE_PX) sample *= 2
-        return BitmapFactory.decodeFile(
-            path,
-            BitmapFactory.Options().apply { inSampleSize = sample },
-        )
     }
 
     private fun ensureChannel(context: Context, spec: NotificationSpec) {
@@ -243,9 +222,19 @@ object ChrolingoNotification {
 
     // Ресурсы ищем ПО ИМЕНИ, а не через сгенерированный R: имя одно и то
     // же в Dart, в keep.xml и здесь, и его видно глазами.
-    private fun resource(context: Context, name: String, type: String): Int {
+    internal fun resource(context: Context, name: String, type: String): Int {
         val id = context.resources.getIdentifier(name, type, context.packageName)
         require(id != 0) { "нет ресурса $type/$name" }
         return id
+    }
+
+    /** То же, но для необязательного: 0 вместо исключения.
+     *
+     * Настроение приходит из Dart строкой. Опечатка в ней не должна
+     * стоить уведомления целиком — без картинки оно всё равно придёт,
+     * а без текста уже нет. */
+    internal fun optionalResource(context: Context, name: String?, type: String): Int {
+        if (name.isNullOrEmpty()) return 0
+        return context.resources.getIdentifier(name, type, context.packageName)
     }
 }

@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Подложка виджета. Скругление 28dp — столько же скругляет сам
+     лаунчер на Android 12+; меньше — и по углам проглянет его фон. -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android"
+    android:shape="rectangle">
+    <solid android:color="#4FB876" />
+    <corners android:radius="28dp" />
+</shape>

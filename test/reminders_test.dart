@@ -2,7 +2,7 @@ import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:language_battle/core/reminders.dart';
-import 'package:language_battle/core/rich_notification.dart';
+import 'package:language_battle/core/native_ui.dart';
 import 'package:language_battle/data/practice_diary.dart';
 import 'package:language_battle/data/reminder_templates.dart';
 
@@ -192,7 +192,7 @@ void main() {
       // посчитан по правилам зоны самого устройства — вместе с
       // переводом стрелок, если он случится до этого дня. Городить
       // поверх этого свою базу зон значит гадать там, где телефон знает.
-      final code = File('lib/core/rich_notification.dart').readAsStringSync();
+      final code = File('lib/core/native_ui.dart').readAsStringSync();
       expect(code, contains("'at': at?.millisecondsSinceEpoch"));
       expect(File('pubspec.yaml').readAsStringSync().contains('timezone:'), isFalse,
           reason: 'база часовых поясов больше не нужна — и не должна вернуться');
@@ -397,10 +397,10 @@ void main() {
       expect(
         read('android/app/src/main/kotlin/com/chrolingo/app/'
             'RichNotifications.kt'),
-        contains('const val CHANNEL = "chrolingo/notifications"'),
+        contains('const val CHANNEL = "chrolingo/native"'),
       );
-      expect(read('lib/core/rich_notification.dart'),
-          contains("MethodChannel('chrolingo/notifications')"));
+      expect(read('lib/core/native_ui.dart'),
+          contains("MethodChannel('chrolingo/native')"));
       expect(read('android/app/src/main/kotlin/com/chrolingo/app/MainActivity.kt'),
           contains('RichNotifications.CHANNEL'));
     });
@@ -423,15 +423,30 @@ void main() {
       expect(code, contains('views.setViewVisibility(title, View.GONE)'));
     });
 
-    test('картинка уменьшается перед отправкой в систему', () {
-      // setImageViewBitmap, в отличие от setLargeIcon, не масштабирует
-      // ничего. Наши 616x688 — это 1,7 МБ в одной посылке между
-      // процессами, и при переполнении уведомление просто не приходит.
+    test('картинка уходит РЕСУРСОМ, а не пикселями', () {
+      // setImageViewBitmap отправляет пиксели в системный процесс как
+      // есть: 616x688 — это 1,7 МБ в одной посылке, а размер посылки
+      // ограничен, и при переполнении уведомление просто не приходит.
+      // Ресурс уезжает одним числом.
       final code = kotlin();
-      expect(code, contains('inJustDecodeBounds = true'));
-      expect(code, contains('inSampleSize'));
-      expect(code.contains('setImageViewBitmap(mascot, BitmapFactory'), isFalse,
-          reason: 'картинка уходит в систему неуменьшенной');
+      expect(code, contains('setImageViewResource(mascot'));
+      expect(code.contains('setImageViewBitmap'), isFalse);
+      expect(code.contains('BitmapFactory'), isFalse);
+    });
+
+    test('на каждое настроение есть ресурс Android, а не только ассет', () {
+      // Ассеты Flutter читать некому: и уведомление, и виджет рисуются,
+      // когда приложения нет ни в каком виде.
+      for (final mood in MascotMood.values) {
+        final name = Reminder(id: 'x', mood: mood, title: '', body: '')
+            .mascotResource;
+        expect(
+          File('android/app/src/main/res/drawable-nodpi/$name.png')
+              .existsSync(),
+          isTrue,
+          reason: 'нет ресурса $name — картинка не доедет до телефона',
+        );
+      }
     });
 
     test('высота набирается содержимым, а не прибита гвоздями', () {
@@ -464,6 +479,122 @@ void main() {
       final settings = read('lib/features/profile/settings_screen.dart');
       expect(settings, contains('Reminders.preview'));
       expect(settings, contains('Reminders.previewStreak'));
+    });
+  });
+
+  group('виджет на рабочем столе', () {
+    String read(String path) => File(path).readAsStringSync();
+
+    String layout() =>
+        read('android/app/src/main/res/layout/widget_chrolingo.xml')
+            .replaceAll(RegExp(r'<!--.*?-->', dotAll: true), '');
+
+    String kotlin() => read(
+            'android/app/src/main/kotlin/com/chrolingo/app/ChrolingoWidget.kt')
+        .split('\n')
+        .where((line) => !line.trimLeft().startsWith('//') &&
+            !line.trimLeft().startsWith('*') &&
+            !line.trimLeft().startsWith('/*'))
+        .join('\n');
+
+    test('receiver объявлен ОТКРЫТЫМ и с описанием', () {
+      // exported="true" обязателен: APPWIDGET_UPDATE присылает система,
+      // и закрытый receiver его не получит — виджет никогда не
+      // обновится, молча. Без meta-data система вообще не узнает, что
+      // это виджет.
+      final xml = read('android/app/src/main/AndroidManifest.xml');
+      expect(xml, contains('android:name=".ChrolingoWidget"'));
+      final block = xml.substring(xml.indexOf('.ChrolingoWidget'));
+      expect(block.substring(0, 400), contains('android:exported="true"'));
+      expect(xml, contains('android.appwidget.action.APPWIDGET_UPDATE'));
+      expect(xml, contains('android:name="android.appwidget.provider"'));
+      expect(
+        File('android/app/src/main/res/xml/chrolingo_widget_info.xml')
+            .existsSync(),
+        isTrue,
+      );
+    });
+
+    test('в разметке только то, что RemoteViews умеет показать', () {
+      final xml = layout();
+      for (final forbidden in [
+        '<androidx.',
+        '<com.google.',
+        '<merge',
+        'ConstraintLayout',
+      ]) {
+        expect(xml.contains(forbidden), isFalse);
+      }
+      expect(xml, contains('<Chronometer'));
+    });
+
+    test('каждый id, который ищет Kotlin, есть в разметке', () {
+      final xml = layout();
+      final asked = RegExp(r'id\(context, "([a-z_]+)"\)')
+          .allMatches(kotlin())
+          .map((m) => m.group(1)!)
+          .toSet();
+      expect(asked, isNotEmpty);
+      for (final name in asked) {
+        expect(xml, contains('android:id="@+id/$name"'),
+            reason: 'Kotlin просит @id/$name, а в разметке его нет');
+      }
+    });
+
+    test('каждая подложка виджета лежит файлом', () {
+      final backgrounds = RegExp(r'Skin\("([a-z_]+)"')
+          .allMatches(kotlin())
+          .map((m) => m.group(1)!)
+          .toSet();
+      expect(backgrounds.length, 3, reason: 'обычная, срочная и «сделано»');
+      for (final name in backgrounds) {
+        expect(
+          File('android/app/src/main/res/drawable/$name.xml').existsSync(),
+          isTrue,
+          reason: 'нет подложки $name',
+        );
+      }
+    });
+
+    test('расцветки Dart и Kotlin называются одинаково', () {
+      // Разойдутся — виджет молча покажет золотую подложку вместо
+      // алой: неизвестное имя отваливается на значение по умолчанию.
+      final dart = read('lib/core/mascot_widget.dart');
+      final code = kotlin();
+      for (final skin in ['ok', 'ember', 'gold']) {
+        expect(dart, contains("'$skin'"));
+        expect(code, contains('"$skin" to Skin('));
+      }
+    });
+
+    test('виджет обновляется отдельно от напоминаний', () {
+      // Он висит на рабочем столе и тогда, когда напоминания выключены.
+      expect(read('lib/main.dart'), contains('MascotWidget.refresh()'));
+      expect(read('lib/data/voice_submission.dart'),
+          contains('MascotWidget.refresh()'));
+      // И вечером, заодно с напоминанием: к вечеру нарисованное утром
+      // уже устарело.
+      expect(
+        read('android/app/src/main/kotlin/com/chrolingo/app/'
+            'ReminderAlarmReceiver.kt'),
+        contains('ChrolingoWidget.refresh(context)'),
+      );
+    });
+
+    test('отсчёт на виджете идёт весь день, а не только вечером', () {
+      // Уведомление перебивает, поэтому торопит только поздно. Виджет
+      // не перебивает — на него смотрят сами.
+      final dart = read('lib/core/mascot_widget.dart');
+      expect(dart, contains('state.streakDays > 0 && state.daysSincePractice == 1'));
+      expect(dart.contains('lateEvening'), isFalse);
+    });
+
+    test('ресурсы виджета защищены от сжатия', () {
+      final keep = read('android/app/src/main/res/raw/keep.xml');
+      expect(keep, contains('@drawable/mascot_'));
+      expect(keep, contains('@drawable/widget_bg_'));
+      expect(keep, contains('@layout/widget_chrolingo'));
+      expect(keep, contains('@xml/chrolingo_widget_info'));
     });
   });
 
@@ -505,7 +636,7 @@ void main() {
     test('расписание заменяется целиком, а не дополняется', () {
       // Добавлять к старому значило бы получить вечером и новое
       // напоминание, и вчерашнее.
-      final bridge = read('lib/core/rich_notification.dart');
+      final bridge = read('lib/core/native_ui.dart');
       expect(bridge, contains('schedule(List<NotificationSpec> plan)'));
       expect(
         read('android/app/src/main/kotlin/com/chrolingo/app/ReminderAlarms.kt'),

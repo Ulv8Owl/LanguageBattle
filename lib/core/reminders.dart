@@ -23,17 +23,12 @@
 /// вечером. Проверка, показывающая другое, хуже отсутствующей.
 library;
 
-import 'dart:io';
-
-import 'package:flutter/foundation.dart';
-import 'package:flutter/services.dart' show rootBundle;
-import 'package:path_provider/path_provider.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../data/practice_diary.dart';
 import '../data/reminder_templates.dart';
-import 'rich_notification.dart';
+import 'native_ui.dart';
 
 /// id канала обычных напоминаний.
 ///
@@ -143,7 +138,7 @@ class Reminders {
       if (reminder == null) continue;
       recent.add(reminder.id);
       planned.add(reminder.id);
-      plan.add(await _spec(
+      plan.add(_spec(
         id: _firstId + day,
         reminder: reminder,
         state: state,
@@ -151,7 +146,7 @@ class Reminders {
       ));
     }
 
-    plan.add(await _longSilenceSpec(now: now, atHour: atHour, from: today));
+    plan.add(_longSilenceSpec(now: now, atHour: atHour, from: today));
 
     await RichNotification.schedule(plan);
     if (planned.isNotEmpty) {
@@ -168,7 +163,7 @@ class Reminders {
   /// без единой цифры внутри — цифра протухла бы в первую же неделю.
   /// Молчать вместо него нельзя: неделя молчания — это и есть тот
   /// момент, ради которого напоминания существуют.
-  static Future<NotificationSpec> _longSilenceSpec({
+  static NotificationSpec _longSilenceSpec({
     required DateTime now,
     required int atHour,
     required ReminderState from,
@@ -205,7 +200,7 @@ class Reminders {
     final reminder = pickReminder(state) ??
         pickReminder(projectState(state, 1, DateTime.now().hour))!;
     await RichNotification.show(
-      await _spec(id: _previewId, reminder: reminder, state: state),
+      _spec(id: _previewId, reminder: reminder, state: state),
     );
   }
 
@@ -224,18 +219,18 @@ class Reminders {
       energyMax: diary.energyMax,
     );
     await RichNotification.show(
-      await _spec(id: _streakPreviewId, reminder: pickReminder(state)!, state: state),
+      _spec(id: _streakPreviewId, reminder: pickReminder(state)!, state: state),
     );
   }
 
   /// Одно напоминание целиком: и для показа сейчас, и для будильника.
-  static Future<NotificationSpec> _spec({
+  static NotificationSpec _spec({
     required int id,
     required Reminder reminder,
     required ReminderState state,
     DateTime? at,
     bool repeatWeekly = false,
-  }) async {
+  }) {
     // Серия догорает именно сегодня — единственный повод торопить и
     // единственный, где счётчик до полуночи что-то значит.
     final burning = state.streakDays > 0 &&
@@ -252,7 +247,7 @@ class Reminders {
       // В срочном виде заголовок уступает место крупным цифрам, поэтому
       // текст обязан читаться сам по себе — и не спорить с таймером.
       body: burning ? burningBody(state) : reminder.body,
-      imagePath: await _materialize(reminder.imageAsset),
+      mascot: reminder.mascotResource,
       skin: burning ? NotificationSkin.ember : NotificationSkin.gold,
       countdownUntil:
           burning ? DateTime(day.year, day.month, day.day + 1) : null,
@@ -261,28 +256,4 @@ class Reminders {
     );
   }
 
-  /// Скопировать картинку из ассетов в файл.
-  ///
-  /// ИМЕННО В ФАЙЛ. Вечернее уведомление рисует BroadcastReceiver, когда
-  /// приложения нет ни в каком виде: ассеты Flutter читать некому и
-  /// нечем. Файл на диске — единственное, что доживёт до вечера.
-  static Future<String?> _materialize(String assetKey) async {
-    try {
-      final dir = Directory(
-          '${(await getApplicationSupportDirectory()).path}/notifications');
-      await dir.create(recursive: true);
-      final file = File('${dir.path}/${assetKey.split('/').last}');
-      final data = await rootBundle.load(assetKey);
-      final bytes = data.buffer.asUint8List();
-      if (!file.existsSync() || file.lengthSync() != bytes.length) {
-        await file.writeAsBytes(bytes, flush: true);
-      }
-      return file.path;
-    } catch (e) {
-      // Без картинки уведомление всё равно придёт — с текстом. Ронять
-      // напоминание из-за оформления нельзя.
-      debugPrint('mascot image unavailable: $e');
-      return null;
-    }
-  }
 }

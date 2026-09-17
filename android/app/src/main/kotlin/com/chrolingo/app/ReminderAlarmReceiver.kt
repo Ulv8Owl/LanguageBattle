@@ -22,6 +22,10 @@ class ReminderAlarmReceiver : BroadcastReceiver() {
             "android.intent.action.QUICKBOOT_POWERON",
             "com.htc.intent.action.QUICKBOOT_POWERON" -> {
                 ReminderAlarms.rearm(context)
+                // Виджет после перезагрузки система нарисует сама, но
+                // нарисует ПРОШЛЫМ состоянием: день мог смениться, пока
+                // телефон был выключен.
+                ChrolingoWidget.refresh(context)
                 return
             }
         }
@@ -30,6 +34,9 @@ class ReminderAlarmReceiver : BroadcastReceiver() {
         if (id < 0) return
         val spec = ReminderAlarms.find(context, id) ?: return
         ChrolingoNotification.post(context, spec)
+        // Раз уж проснулись — и виджет заодно: к вечеру нарисованное
+        // утром уже устарело.
+        ChrolingoWidget.refresh(context)
         if (spec.repeatWeekly) ReminderAlarms.rearmWeekly(context, spec)
     }
 }
