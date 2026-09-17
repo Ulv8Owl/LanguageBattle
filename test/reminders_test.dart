@@ -1,12 +1,10 @@
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
-import 'package:language_battle/core/local_timezone.dart';
 import 'package:language_battle/core/reminders.dart';
 import 'package:language_battle/core/rich_notification.dart';
 import 'package:language_battle/data/practice_diary.dart';
 import 'package:language_battle/data/reminder_templates.dart';
-import 'package:timezone/timezone.dart' as tz;
 
 /// Напоминания ломаются ТИШИНОЙ. Не пришло уведомление — и отличить
 /// «правильно промолчали» от «receiver не объявлен в манифесте» на
@@ -127,10 +125,17 @@ void main() {
       expect(RegExp(r'\d').hasMatch('${r.title} ${r.body}'), isFalse);
     });
 
-    test('повторяется раз в неделю, а не раз в день', () {
-      final code = File('lib/core/reminders.dart').readAsStringSync();
-      expect(code, contains('DateTimeComponents.dayOfWeekAndTime'));
-      expect(code, contains('longSilenceReminder()'));
+    test('повторяется раз в неделю силами самого будильника', () {
+      // Пересобрать его будет некому: приложение не открывают. Значит,
+      // заводить себя заново обязан тот, кто его показал.
+      expect(File('lib/core/reminders.dart').readAsStringSync(),
+          contains('longSilenceReminder()'));
+      expect(
+        File('android/app/src/main/kotlin/com/chrolingo/app/'
+                'ReminderAlarmReceiver.kt')
+            .readAsStringSync(),
+        contains('if (spec.repeatWeekly) ReminderAlarms.rearmWeekly'),
+      );
     });
   });
 
@@ -181,94 +186,39 @@ void main() {
     });
   });
 
-  group('часовой пояс без плагина', () {
-    // Смещение телефона подставляем сами — иначе тест проверял бы пояс
-    // машины, на которой его запустили.
-    ZoneOffsetProbe fixed(Duration offset) => (_) => offset;
+  group('когда показывать — считает сам телефон', () {
+    test('момент берётся из DateTime, а не из базы часовых поясов', () {
+      // Будильнику нужен МОМЕНТ, и DateTime(год, месяц, день, час) уже
+      // посчитан по правилам зоны самого устройства — вместе с
+      // переводом стрелок, если он случится до этого дня. Городить
+      // поверх этого свою базу зон значит гадать там, где телефон знает.
+      final code = File('lib/core/rich_notification.dart').readAsStringSync();
+      expect(code, contains("'at': at?.millisecondsSinceEpoch"));
+      expect(File('pubspec.yaml').readAsStringSync().contains('timezone:'), isFalse,
+          reason: 'база часовых поясов больше не нужна — и не должна вернуться');
+    });
 
-    ZoneOffsetProbe northernDst(Duration winter, Duration summer) =>
-        (DateTime m) => m.month >= 4 && m.month <= 10 ? summer : winter;
-
-    test('пояс без перевода стрелок узнаётся по смещению', () {
-      final loc = resolveLocalLocation(
-        now: DateTime.utc(2026, 2, 1, 12),
-        offsetAt: fixed(const Duration(hours: 3)),
-        abbreviation: 'MSK',
-      );
-      for (final month in [1, 4, 7, 10]) {
-        expect(
-          loc.timeZone(DateTime.utc(2026, month, 15).millisecondsSinceEpoch)
-              .offset,
-          const Duration(hours: 3),
-        );
+    test('двадцать часов остаются двадцатью и после перевода стрелок', () {
+      // Проверяем само правило, которым считается момент: показания
+      // часов задаются полями, а смещение подставляет система.
+      for (final month in [1, 7]) {
+        final at = DateTime(2026, month, 15, 20);
+        expect(at.hour, 20);
       }
     });
 
-    test('пояс с переводом стрелок узнаётся по поведению, а не по имени', () {
-      final loc = resolveLocalLocation(
-        now: DateTime.utc(2026, 1, 15, 12),
-        offsetAt: northernDst(const Duration(hours: 1), const Duration(hours: 2)),
-        abbreviation: 'CET',
-      );
-      expect(
-        loc.timeZone(DateTime.utc(2026, 1, 15).millisecondsSinceEpoch).offset,
-        const Duration(hours: 1),
-      );
-      expect(
-        loc.timeZone(DateTime.utc(2026, 7, 15).millisecondsSinceEpoch).offset,
-        const Duration(hours: 2),
-      );
-    });
-
-    test('один и тот же телефон получает один и тот же пояс', () {
-      // Порядок в хэш-таблице зон не обязан повторяться от запуска к
-      // запуску, а «первая подошедшая» обязана.
-      String resolve() => resolveLocalLocation(
-            now: DateTime.utc(2026, 3, 1),
-            offsetAt: fixed(const Duration(hours: 5, minutes: 30)),
-            abbreviation: 'IST',
-          ).name;
-      expect(resolve(), resolve());
-    });
-
-    test('пояса, которого нет в базе, хватает своего смещения', () {
-      final loc = resolveLocalLocation(
-        now: DateTime.utc(2026, 3, 1),
-        offsetAt: fixed(const Duration(hours: 5, minutes: 13)),
-        abbreviation: 'нет такого',
-      );
-      expect(
-        loc.timeZone(DateTime.utc(2026, 3, 1).millisecondsSinceEpoch).offset,
-        const Duration(hours: 5, minutes: 13),
-      );
-      expect(loc.name, 'UTC+05:13');
-    });
-
-    test('смещение к западу от Гринвича подписывается минусом', () {
-      expect(fixedOffsetLocation(const Duration(hours: -3, minutes: -30)).name,
-          'UTC-03:30');
-    });
-
-    test('назначаем показания часов, а не момент времени', () {
-      // ЭТО РАЗНЫЕ ВЕЩИ, И ПУТАНИЦА МЕЖДУ НИМИ СТОИТ ЧАСА. TZDateTime.from
-      // переводит МОМЕНТ в другую зону — двадцать часов станут двадцатью
-      // одним, если смещения разойдутся. TZDateTime(...) строит показания
-      // часов прямо в зоне игрока, и двадцать остаются двадцатью.
-      ensureTimeZoneData();
-      final berlin = tz.getLocation('Europe/Berlin');
-      final winter = tz.TZDateTime(berlin, 2026, 1, 15, 20);
-      final summer = tz.TZDateTime(berlin, 2026, 7, 15, 20);
-      expect(winter.hour, 20);
-      expect(summer.hour, 20);
-      // И при этом это разные моменты по UTC — перевод стрелок учтён.
-      expect(winter.toUtc().hour, 19);
-      expect(summer.toUtc().hour, 18);
-
-      // Тот же способ обязан остаться и в коде: сравнение читает
-      // команду, а не комментарий рядом с ней.
+    test('прошедший час сегодня пропускается, а не показывается сразу', () {
+      // Будильник в прошлом система срабатывает НЕМЕДЛЕННО — посреди
+      // дня, без повода.
       final code = File('lib/core/reminders.dart').readAsStringSync();
-      expect(code, contains('tz.TZDateTime(\n        tz.local,'));
-      expect(code.contains('tz.TZDateTime.from('), isFalse);
+      expect(code, contains('if (!when.isAfter(now)) continue;'));
+      // И то же самое на нативной стороне: план переживает перезагрузку
+      // и доезжает до неё уже устаревшим.
+      expect(
+        File('android/app/src/main/kotlin/com/chrolingo/app/ReminderAlarms.kt')
+            .readAsStringSync(),
+        contains('if (!spec.repeatWeekly) continue'),
+      );
     });
   });
 
@@ -277,34 +227,40 @@ void main() {
 
     String manifest() => read('android/app/src/main/AndroidManifest.xml');
 
-    test('оба receiver\'а объявлены', () {
-      // Лежат они внутри плагина, но объявить обязано приложение. Не
-      // объявишь — сборка пройдёт, плагин отработает, уведомление не
-      // придёт: система не знает, кого будить.
+    test('receiver будильника объявлен', () {
+      // Вечернее уведомление показывает ОН, когда приложения нет.
+      // Не объявишь — сборка пройдёт, будильник заведётся, а будить
+      // будет некого: уведомление просто не придёт, без единой ошибки.
       final xml = manifest();
+      expect(xml, contains('android:name=".ReminderAlarmReceiver"'));
       expect(
-        xml,
-        contains('com.dexterous.flutterlocalnotifications'
-            '.ScheduledNotificationReceiver'),
+        File('android/app/src/main/kotlin/com/chrolingo/app/'
+                'ReminderAlarmReceiver.kt')
+            .existsSync(),
+        isTrue,
       );
-      expect(
-        xml,
-        contains('com.dexterous.flutterlocalnotifications'
-            '.ScheduledNotificationBootReceiver'),
-      );
+      // Перезагрузка стирает все заведённые будильники. Без этого права
+      // и этого фильтра напоминания после неё молча прекращаются.
       expect(xml, contains('android.intent.action.BOOT_COMPLETED'));
-      expect(xml,
-          contains('android.permission.RECEIVE_BOOT_COMPLETED'));
+      expect(xml, contains('android.permission.RECEIVE_BOOT_COMPLETED'));
     });
 
-    test('desugaring включён и библиотека подключена', () {
-      // Без него flutter_local_notifications не собирается вовсе, а
-      // сообщение об этом приходит из чужих классов.
-      final gradle = read('android/app/build.gradle.kts');
-      expect(gradle, contains('isCoreLibraryDesugaringEnabled = true'));
+    test('право на уведомления объявлено', () {
+      // С Android 13 без него уведомления не показываются вовсе. Раньше
+      // его приносил плагин своим манифестом — плагина больше нет.
+      expect(manifest(), contains('android.permission.POST_NOTIFICATIONS'));
+      expect(read('lib/core/reminders.dart'),
+          contains('Permission.notification.request()'));
+    });
+
+    test('точных будильников не просим: разрешения под них нет', () {
+      // SCHEDULE_EXACT_ALARM с Android 14 игрок выдаёт руками. «Около
+      // восьми вечера» — ровно та точность, которой хватает.
+      expect(manifest().contains('SCHEDULE_EXACT_ALARM'), isFalse);
       expect(
-        gradle,
-        contains('coreLibraryDesugaring("com.android.tools:desugar_jdk_libs'),
+        File('android/app/src/main/kotlin/com/chrolingo/app/ReminderAlarms.kt')
+            .readAsStringSync(),
+        contains('setAndAllowWhileIdle'),
       );
     });
 
@@ -353,13 +309,6 @@ void main() {
       expect(keep, contains('@raw/$kReminderSound'));
     });
 
-    test('настройки iOS заданы, хотя собираем APK', () {
-      // Без них initialize БРОСАЕТ на iOS, и приложение падает на
-      // запуске — не «уведомления не работают», а «не открывается».
-      expect(read('lib/core/reminders.dart'),
-          contains('DarwinInitializationSettings('));
-    });
-
     test('id канала несёт версию', () {
       // Звук канала Android фиксирует при СОЗДАНИИ и менять не даёт.
       // Сменили звук, не сменив id, — игрок продолжит слышать старый.
@@ -380,7 +329,8 @@ void main() {
     /// То же и для Kotlin: комментариев здесь больше, чем кода, и
     /// половина из них называет как раз то, чего в коде быть не должно.
     String kotlin() => read(
-            'android/app/src/main/kotlin/com/chrolingo/app/RichNotifications.kt')
+            'android/app/src/main/kotlin/com/chrolingo/app/'
+            'ChrolingoNotification.kt')
         .split('\n')
         .where((line) => !line.trimLeft().startsWith('//') &&
             !line.trimLeft().startsWith('*') &&
@@ -410,7 +360,7 @@ void main() {
       // узнает об этом на телефоне, а не на сборке.
       final xml = layout();
       final code = kotlin();
-      final asked = RegExp(r'id\("([a-z_]+)"\)')
+      final asked = RegExp(r'resource\(context, "([a-z_]+)", "id"\)')
           .allMatches(code)
           .map((m) => m.group(1)!)
           .toSet();
@@ -444,7 +394,11 @@ void main() {
     test('мост назван одинаково с обеих сторон', () {
       // Разойдутся имена — вызов не упадёт, а тихо вернёт
       // MissingPluginException, и уведомление покажется системным видом.
-      expect(kotlin(), contains('const val CHANNEL = "chrolingo/notifications"'));
+      expect(
+        read('android/app/src/main/kotlin/com/chrolingo/app/'
+            'RichNotifications.kt'),
+        contains('const val CHANNEL = "chrolingo/notifications"'),
+      );
       expect(read('lib/core/rich_notification.dart'),
           contains("MethodChannel('chrolingo/notifications')"));
       expect(read('android/app/src/main/kotlin/com/chrolingo/app/MainActivity.kt'),
@@ -456,7 +410,6 @@ void main() {
       // шапку сама. Штамп времени — можно, и это единственное, что там
       // вообще поддаётся.
       expect(kotlin(), contains('setShowWhen(false)'));
-      expect(read('lib/core/reminders.dart'), contains('showWhen: burning'));
     });
 
     test('таймер считает в системном времени, а не в календарном', () {
@@ -467,7 +420,7 @@ void main() {
       expect(code, contains('setChronometerCountDown(timer, true)'));
       // И заголовок обязан уступить место цифрам: во всплывающем
       // уведомлении около 88dp высоты, на всё сразу её не хватает.
-      expect(code, contains('views.setViewVisibility(titleId, android.view.View.GONE)'));
+      expect(code, contains('views.setViewVisibility(title, View.GONE)'));
     });
 
     test('картинка уменьшается перед отправкой в систему', () {
@@ -477,7 +430,7 @@ void main() {
       final code = kotlin();
       expect(code, contains('inJustDecodeBounds = true'));
       expect(code, contains('inSampleSize'));
-      expect(code.contains('BitmapFactory.decodeFile(imagePath)'), isFalse,
+      expect(code.contains('setImageViewBitmap(mascot, BitmapFactory'), isFalse,
           reason: 'картинка уходит в систему неуменьшенной');
     });
 
@@ -496,6 +449,9 @@ void main() {
       expect(kStreakChannelId, matches(RegExp(r'\.v\d+$')));
       final code = read('lib/core/reminders.dart');
       expect(code, contains('burning ? kStreakChannelId : kReminderChannelId'));
+      // И вечернее, и превью собирает ОДНА функция: иначе кнопка
+      // проверки однажды покажет не то, что придёт вечером.
+      expect(RegExp(r'_spec\(').allMatches(code).length, greaterThanOrEqualTo(4));
     });
 
     test('разметка и подложки защищены от сжатия ресурсов', () {
@@ -546,16 +502,22 @@ void main() {
       expect(submission, contains('Reminders.refresh()'));
     });
 
-    test('точное время не просится: разрешения под него нет', () {
-      // SCHEDULE_EXACT_ALARM с Android 14 спрашивают у игрока отдельно.
-      // «Около восьми вечера» — ровно та точность, которой хватает.
-      final code = read('lib/core/reminders.dart');
-      expect(code, contains('AndroidScheduleMode.inexactAllowWhileIdle'));
+    test('расписание заменяется целиком, а не дополняется', () {
+      // Добавлять к старому значило бы получить вечером и новое
+      // напоминание, и вчерашнее.
+      final bridge = read('lib/core/rich_notification.dart');
+      expect(bridge, contains('schedule(List<NotificationSpec> plan)'));
       expect(
-        read('android/app/src/main/AndroidManifest.xml')
-            .contains('SCHEDULE_EXACT_ALARM'),
-        isFalse,
+        read('android/app/src/main/kotlin/com/chrolingo/app/ReminderAlarms.kt'),
+        contains('fun schedule(context: Context, plan: String) {\n        cancelAll(context)'),
       );
+    });
+
+    test('выключенные напоминания снимают уже заведённые будильники', () {
+      // Переключатель, который не снимает будильники, выключает
+      // напоминания только на словах.
+      final code = read('lib/core/reminders.dart');
+      expect(code, contains('RichNotification.cancelAll()'));
     });
   });
 }

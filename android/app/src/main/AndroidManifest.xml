@@ -3,11 +3,14 @@
     <uses-permission android:name="android.permission.RECORD_AUDIO"/>
     <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS"/>
     <!-- Напоминания переживают перезагрузку телефона. Без этого права
-         система не скажет приложению о загрузке, и все назначенные
-         уведомления после перезагрузки просто не придут — молча, без
-         единой ошибки. POST_NOTIFICATIONS и VIBRATE объявляет сам
-         flutter_local_notifications. -->
+         система не скажет приложению о загрузке, все заведённые
+         будильники после перезагрузки пропадут, и напоминания молча
+         прекратятся до следующего запуска приложения. -->
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED"/>
+    <!-- С Android 13 уведомления без этого права не показываются вовсе,
+         и спросить его обязано приложение. -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
+    <uses-permission android:name="android.permission.VIBRATE"/>
     <application
         android:label="Chrolingo"
         android:name="${applicationName}"
@@ -34,14 +37,16 @@
                 <category android:name="android.intent.category.LAUNCHER"/>
             </intent-filter>
         </activity>
-        <!-- КТО ПОКАЗЫВАЕТ НАЗНАЧЕННОЕ УВЕДОМЛЕНИЕ. Оба receiver'а лежат
-             внутри flutter_local_notifications, но объявить их обязано
-             приложение. Не объявишь — сборка пройдёт, плагин отработает,
-             а уведомление не придёт: система не знает, кого будить. -->
-        <receiver android:exported="false"
-            android:name="com.dexterous.flutterlocalnotifications.ScheduledNotificationReceiver" />
-        <receiver android:exported="false"
-            android:name="com.dexterous.flutterlocalnotifications.ScheduledNotificationBootReceiver">
+        <!-- КТО ПОКАЗЫВАЕТ ВЕЧЕРНЕЕ НАПОМИНАНИЕ. Приложения в этот
+             момент нет: есть будильник и этот receiver. Не объявишь —
+             сборка пройдёт, будильник заведётся, а будить будет некого:
+             уведомление просто не придёт, без единой ошибки.
+
+             Он же ловит перезагрузку: система забывает все заведённые
+             будильники, и восстановить их может только приложение. -->
+        <receiver
+            android:name=".ReminderAlarmReceiver"
+            android:exported="false">
             <intent-filter>
                 <action android:name="android.intent.action.BOOT_COMPLETED"/>
                 <action android:name="android.intent.action.MY_PACKAGE_REPLACED"/>

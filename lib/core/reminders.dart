@@ -2,70 +2,62 @@
 ///
 /// ═══ ЧТО ИЗ ЭТОГО СДЕЛАНО «КАК У DUOLINGO», А ЧТО НЕТ ═══
 ///
-/// Их уведомление выглядит как картинка с текстом. Картинка — это
-/// `largeIcon`: система рисует её справа от текста, и ЭТО ЕДИНСТВЕННЫЙ
-/// способ показать свой рисунок, оставшийся у приложений. Полностью своя
-/// разметка уведомления запрещена с Android 12: система накрывает её
-/// своим шаблоном (тем же, что у `DecoratedCustomViewStyle`). Поэтому
-/// «полноценная картинка» — это набор ЗАРАНЕЕ НАРИСОВАННЫХ картинок, из
-/// которого выбирается одна; ровно так же устроен и виджет Duolingo.
+/// Их уведомление выглядит как картинка с текстом. Картинка — это набор
+/// ЗАРАНЕЕ НАРИСОВАННЫХ рисунков, из которого выбирается один по
+/// состоянию игрока; так же устроен и их виджет. Цифры НЕ нарисованы:
+/// заголовок обрезается системным многоточием, а счётчик до полуночи
+/// тикает сам. Такой счётчик есть и у нас — `Chronometer` внутри своей
+/// разметки, его считает система.
 ///
-/// Цифры в их уведомлении НЕ нарисованы: заголовок обрезается системным
-/// многоточием, а счётчик до полуночи тикает сам. Тикающий счётчик у нас
-/// тоже есть — `usesChronometer` + `chronometerCountDown` (см. ниже): он
-/// показывает, сколько осталось до потери серии, и обновляется сам, без
-/// участия приложения.
+/// Чего у нас нет и быть не может, пока `targetSdk >= 31`, — уведомления
+/// БЕЗ ШАПКИ: «For apps targeting Android 12, notifications with custom
+/// content views will no longer use the full notification area; instead,
+/// the system applies a standard template».
 ///
-/// ═══ ЗВУК ═══
+/// ═══ ПОЧЕМУ ВСЁ РИСУЕТ ОДИН КОД ═══
 ///
-/// Свой звук у канала, а не у уведомления, и поменять его у СУЩЕСТВУЮЩЕГО
-/// канала нельзя — Android фиксирует звук в момент создания канала
-/// («Only modifiable before the channel is submitted»). Поэтому в id
-/// канала стоит номер версии: меняя звук, меняют и его, иначе игрок
-/// продолжит слышать старый, и выглядеть это будет как «звук не
-/// применился».
+/// И «показать сейчас», и вечернее напоминание собираются одним
+/// [NotificationSpec] и рисуются одним ChrolingoNotification.kt. Пока
+/// это было не так — расписание ставил плагин системным шаблоном, а
+/// превью рисовало своё, — кнопка проверки показывала не то, что придёт
+/// вечером. Проверка, показывающая другое, хуже отсутствующей.
 library;
 
 import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart' show rootBundle;
-import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:path_provider/path_provider.dart';
+import 'package:permission_handler/permission_handler.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:timezone/timezone.dart' as tz;
 
 import '../data/practice_diary.dart';
 import '../data/reminder_templates.dart';
-import 'local_timezone.dart';
 import 'rich_notification.dart';
-import 'theme.dart';
 
-/// id канала. МЕНЯТЬ ВМЕСТЕ СО ЗВУКОМ ИЛИ ВИБРАЦИЕЙ — см. выше.
+/// id канала обычных напоминаний.
+///
+/// МЕНЯТЬ ВМЕСТЕ СО ЗВУКОМ ИЛИ ВИБРАЦИЕЙ. Android запоминает их при
+/// СОЗДАНИИ канала и менять у существующего не даёт («Only modifiable
+/// before the channel is submitted»). Сменили звук, не сменив id, —
+/// игрок продолжит слышать старый.
 const String kReminderChannelId = 'chrolingo.reminders.v1';
 
 /// Канал срочного напоминания — «серия сгорит сегодня».
 ///
-/// ОТДЕЛЬНЫЙ НАРОЧНО, И ЭТО НЕ ДУБЛИРОВАНИЕ. Важность канала задаёт
-/// игрок, и она у него одна на канал: отключив надоевшие вечерние
-/// напоминания, он вместе с ними отключил бы и единственное, которое
-/// стоит показать поверх остальных. Разными каналами это решается, одним
-/// — нет.
+/// ОТДЕЛЬНЫЙ НАРОЧНО. Важность канала задаёт игрок, и она у него одна на
+/// канал: отключив надоевшие вечерние напоминания, он вместе с ними
+/// отключил бы и единственное, которое стоит показать поверх остальных.
 const String kStreakChannelId = 'chrolingo.streak.v1';
 
 /// Имя файла в `android/app/src/main/res/raw` без расширения.
 const String kReminderSound = 'reminder';
 
 /// Значок в строке состояния: имя ресурса в `res/drawable-*`, БЕЗ
-/// «@drawable/» и без расширения. Плагин ищет его через
-/// `getIdentifier(name, "drawable", ...)`, и лишний префикс — это не
-/// «не та картинка», а отказ на инициализации.
+/// «@drawable/» и без расширения — так его ищет `getIdentifier`.
 const String kReminderIcon = 'ic_notification';
 
 /// На сколько дней вперёд раскладываются напоминания.
-///
-/// Приложение закрыто — назначать новые некому, поэтому назначаем сразу
-/// неделю. Дальше недели молчания их подхватывает [_weeklyId].
 const int kReminderHorizonDays = 7;
 
 /// Час напоминания по умолчанию: вечер, но не ночь.
@@ -81,56 +73,6 @@ const String _hourKey = 'reminders.hour';
 
 class Reminders {
   Reminders._();
-
-  static final FlutterLocalNotificationsPlugin _plugin =
-      FlutterLocalNotificationsPlugin();
-
-  static bool _ready = false;
-
-  /// Поднять плагин и канал. Зовётся из main до первого кадра; на
-  /// платформах без поддержки молча ничего не делает.
-  static Future<void> init() async {
-    if (_ready || !_supported) return;
-    await _plugin.initialize(
-      settings: const InitializationSettings(
-        android: AndroidInitializationSettings(kReminderIcon),
-        // НАСТРОЙКИ iOS ОБЯЗАТЕЛЬНЫ, ДАЖЕ ЕСЛИ iOS НЕ СОБИРАЮТ: без них
-        // initialize БРОСАЕТ на этой платформе, и приложение падает на
-        // запуске. Разрешения здесь не просим — их спрашивают, когда
-        // игрок включает напоминания, а не когда открывает приложение.
-        iOS: DarwinInitializationSettings(
-          requestAlertPermission: false,
-          requestBadgePermission: false,
-          requestSoundPermission: false,
-        ),
-      ),
-    );
-    final android = _plugin.resolvePlatformSpecificImplementation<
-        AndroidFlutterLocalNotificationsPlugin>();
-    await android?.createNotificationChannel(
-      const AndroidNotificationChannel(
-        kReminderChannelId,
-        'Напоминания',
-        description: 'Зайти позаниматься.',
-        importance: Importance.high,
-        sound: RawResourceAndroidNotificationSound(kReminderSound),
-      ),
-    );
-    await android?.createNotificationChannel(
-      const AndroidNotificationChannel(
-        kStreakChannelId,
-        'Серия сгорает',
-        description: 'Последний вечер, когда серию ещё можно сохранить.',
-        importance: Importance.high,
-        sound: RawResourceAndroidNotificationSound(kReminderSound),
-      ),
-    );
-    ensureTimeZoneData();
-    tz.setLocalLocation(resolveLocalLocation());
-    _ready = true;
-  }
-
-  static bool get _supported => !kIsWeb && (Platform.isAndroid || Platform.isIOS);
 
   static Future<bool> isEnabled() async {
     final prefs = await SharedPreferences.getInstance();
@@ -152,16 +94,11 @@ class Reminders {
   /// Включить напоминания. Возвращает false, если разрешение не дали —
   /// тогда переключатель обязан вернуться в «выключено», а не врать.
   static Future<bool> enable({int? atHour}) async {
-    if (!_supported) return false;
-    await init();
-    final android = _plugin.resolvePlatformSpecificImplementation<
-        AndroidFlutterLocalNotificationsPlugin>();
-    final ios = _plugin.resolvePlatformSpecificImplementation<
-        IOSFlutterLocalNotificationsPlugin>();
-    final granted = await android?.requestNotificationsPermission() ??
-        await ios?.requestPermissions(alert: true, sound: true, badge: true) ??
-        false;
-    if (!granted) return false;
+    if (!RichNotification.supported) return false;
+    // С Android 13 без этого права уведомления не показываются вовсе, и
+    // спросить его обязано приложение.
+    final status = await Permission.notification.request();
+    if (!status.isGranted) return false;
 
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool(_enabledKey, true);
@@ -173,49 +110,50 @@ class Reminders {
   static Future<void> disable() async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool(_enabledKey, false);
-    if (!_supported) return;
-    await init();
-    await _plugin.cancelAll();
+    await RichNotification.cancelAll();
   }
 
   /// Переназначить всё расписание заново.
   ///
   /// ВЫЗЫВАЕТСЯ ЧАСТО И НАМЕРЕННО: на запуске приложения и после каждого
-  /// занятия. Уведомление, назначенное вчера, ничего не знает о том, что
+  /// занятия. Будильник, заведённый вчера, ничего не знает о том, что
   /// игрок уже позанимался, — а лишнее «вы сегодня не занимались» после
   /// занятия это ровно тот случай, когда уведомления отключают целиком.
   static Future<void> refresh({int? energyMax}) async {
-    if (!_supported) return;
-    if (!await isEnabled()) return;
-    await init();
-    await _plugin.cancelAll();
+    if (!RichNotification.supported) return;
+    if (!await isEnabled()) {
+      await RichNotification.cancelAll();
+      return;
+    }
 
     final atHour = await hour();
     final now = DateTime.now();
     final today = await PracticeDiary.state(now: now, energyMax: energyMax);
     final recent = [...await PracticeDiary.recentReminders()];
     final planned = <String>[];
+    final plan = <NotificationSpec>[];
 
     for (var day = 0; day < kReminderHorizonDays; day++) {
       final when = DateTime(now.year, now.month, now.day + day, atHour);
-      // Сегодняшний час уже прошёл — сегодня и промолчим: уведомление
-      // «в прошлом» система показывает немедленно, посреди занятия.
+      // Сегодняшний час уже прошёл — сегодня и промолчим: будильник в
+      // прошлом система показывает немедленно, посреди занятия.
       if (!when.isAfter(now)) continue;
       final state = projectState(today, day, atHour);
       final reminder = pickReminder(state, recentIds: recent);
       if (reminder == null) continue;
       recent.add(reminder.id);
       planned.add(reminder.id);
-      await _schedule(
+      plan.add(await _spec(
         id: _firstId + day,
-        at: when,
         reminder: reminder,
         state: state,
-      );
+        at: when,
+      ));
     }
 
-    await _scheduleWeeklyTail(
-        now: now, hour: atHour, energyMax: today.energyMax);
+    plan.add(await _longSilenceSpec(now: now, atHour: atHour, from: today));
+
+    await RichNotification.schedule(plan);
     if (planned.isNotEmpty) {
       await PracticeDiary.rememberReminders(
         [...await PracticeDiary.recentReminders(), ...planned],
@@ -226,163 +164,56 @@ class Reminders {
   /// Хвост на случай, если приложение не откроют неделю.
   ///
   /// Назначать дальше горизонта поимённо бессмысленно: пересобрать их
-  /// всё равно будет некому. Поэтому одно ПОВТОРЯЮЩЕЕСЯ раз в неделю, в
-  /// тот же час, и без единой цифры внутри — цифра протухла бы в первую
-  /// же неделю (см. [longSilenceReminder]). Молчать вместо него нельзя:
-  /// неделя молчания — это и есть тот момент, ради которого напоминания
-  /// существуют.
-  static Future<void> _scheduleWeeklyTail({
+  /// всё равно будет некому. Поэтому одно ПОВТОРЯЮЩЕЕСЯ раз в неделю и
+  /// без единой цифры внутри — цифра протухла бы в первую же неделю.
+  /// Молчать вместо него нельзя: неделя молчания — это и есть тот
+  /// момент, ради которого напоминания существуют.
+  static Future<NotificationSpec> _longSilenceSpec({
     required DateTime now,
-    required int hour,
-    required int energyMax,
-  }) async {
-    final state = ReminderState(
-      daysSincePractice: kReminderHorizonDays + 1,
-      streakDays: 0,
-      hour: hour,
-      energy: energyMax,
-      energyMax: energyMax,
-    );
-    final reminder = longSilenceReminder();
-    final when = DateTime(
-      now.year,
-      now.month,
-      now.day + kReminderHorizonDays + 1,
-      hour,
-    );
-    await _schedule(
-      id: _weeklyId,
-      at: when,
-      reminder: reminder,
-      state: state,
-      repeatWeekly: true,
-    );
-  }
-
-  static Future<void> _schedule({
-    required int id,
-    required DateTime at,
-    required Reminder reminder,
-    required ReminderState state,
-    bool repeatWeekly = false,
-    bool showNow = false,
-  }) async {
-    final picture = await _materialize(reminder.imageAsset);
-    // Счётчик до полуночи — ровно то, что тикает в уведомлениях
-    // Duolingo. Его считает СИСТЕМА от заданного момента, поэтому он
-    // остаётся верным и через час после прихода уведомления, когда
-    // «осталось 4 часа» в тексте давно устарело бы.
-    final burning = state.streakDays > 0 && state.daysSincePractice == 1;
-    final midnight = DateTime(at.year, at.month, at.day + 1);
-
-    final details = AndroidNotificationDetails(
-      burning ? kStreakChannelId : kReminderChannelId,
-      burning ? 'Серия сгорает' : 'Напоминания',
-      channelDescription: burning
-          ? 'Последний вечер, когда серию ещё можно сохранить.'
-          : 'Зайти позаниматься.',
-      importance: Importance.high,
-      priority: Priority.high,
-      color: AppColors.gold,
-      largeIcon: picture == null ? null : FilePathAndroidBitmap(picture),
-      styleInformation: BigTextStyleInformation(
-        reminder.body,
-        contentTitle: reminder.title,
-      ),
-      subText: state.streakDays > 0 ? '🔥 ${state.streakDays}' : null,
-      // «Сейчас» рядом с именем приложения — единственное, что из шапки
-      // вообще убирается. Само имя рисует система, и с Android 12 убрать
-      // его нельзя ничем.
-      showWhen: burning,
-      when: burning ? midnight.millisecondsSinceEpoch : null,
-      usesChronometer: burning,
-      chronometerCountDown: burning,
-      category: AndroidNotificationCategory.reminder,
-    );
-
-    // На iOS та же картинка живёт вложением: своего «largeIcon» там нет,
-    // а вложенный файл система показывает превью справа от текста.
-    final darwin = DarwinNotificationDetails(
-      attachments: picture == null
-          ? null
-          : [DarwinNotificationAttachment(picture)],
-    );
-
-    if (showNow) {
-      await _plugin.show(
-        id: id,
-        title: reminder.title,
-        body: reminder.body,
-        notificationDetails:
-            NotificationDetails(android: details, iOS: darwin),
+    required int atHour,
+    required ReminderState from,
+  }) =>
+      _spec(
+        id: _weeklyId,
+        reminder: longSilenceReminder(),
+        state: ReminderState(
+          daysSincePractice: kReminderHorizonDays + 1,
+          streakDays: 0,
+          hour: atHour,
+          energy: from.energy,
+          energyMax: from.energyMax,
+        ),
+        at: DateTime(
+          now.year,
+          now.month,
+          now.day + kReminderHorizonDays + 1,
+          atHour,
+        ),
+        repeatWeekly: true,
       );
-      return;
-    }
-
-    await _plugin.zonedSchedule(
-      id: id,
-      title: reminder.title,
-      body: reminder.body,
-      scheduledDate: _wallClock(at),
-      notificationDetails: NotificationDetails(android: details, iOS: darwin),
-      // ТОЧНОЕ ВРЕМЯ ЗДЕСЬ НЕ НУЖНО, а разрешение под него нужно было бы
-      // спрашивать отдельно (SCHEDULE_EXACT_ALARM, Android 14). «Около
-      // восьми вечера» — ровно та точность, которой хватает напоминанию.
-      androidScheduleMode: AndroidScheduleMode.inexactAllowWhileIdle,
-      matchDateTimeComponents:
-          repeatWeekly ? DateTimeComponents.dayOfWeekAndTime : null,
-    );
-  }
 
   /// Показать обычное напоминание прямо сейчас — проверить вид, звук и
   /// картинку.
   ///
-  /// БЕЗ ЭТОГО ПРОВЕРИТЬ НЕЧЕМ. Настоящее уведомление приходит вечером и
-  /// только если игрок не занимался; ждать до вечера, чтобы узнать, что
-  /// звук не тот, — это один день на один ответ.
+  /// БЕЗ ЭТОГО ПРОВЕРИТЬ НЕЧЕМ. Настоящее приходит вечером и только если
+  /// игрок не занимался; ждать до вечера, чтобы узнать, что звук не тот,
+  /// — это один день на один ответ.
   static Future<void> preview() async {
-    if (!_supported) return;
-    await init();
     final state = await PracticeDiary.state();
     // Занимался сегодня — напоминания нет и быть не должно, но показать
-    // ЧТО-ТО надо: проверяют же оформление, а не правила.
+    // ЧТО-ТО надо: проверяют оформление, а не правила.
     final reminder = pickReminder(state) ??
         pickReminder(projectState(state, 1, DateTime.now().hour))!;
-
-    final shown = await RichNotification.show(
-      id: _previewId,
-      channelId: kReminderChannelId,
-      channelName: 'Напоминания',
-      sound: kReminderSound,
-      title: reminder.title,
-      body: reminder.body,
-      imagePath: await _materialize(reminder.imageAsset),
-    );
-    if (shown) return;
-    // Своей разметки нет — показываем системной. Хуже на вид, но
-    // молчать вместо проверки нельзя: игрок нажал кнопку.
-    await _schedule(
-      id: _previewId,
-      at: DateTime.now(),
-      reminder: reminder,
-      state: state,
-      showNow: true,
+    await RichNotification.show(
+      await _spec(id: _previewId, reminder: reminder, state: state),
     );
   }
 
-  /// Показать срочное напоминание «серия сгорит» — с живым отсчётом до
-  /// полуночи, на другой подложке и поверх остальных.
-  ///
-  /// ОТСЧЁТ СЧИТАЕТ СИСТЕМА, А НЕ МЫ. Приложение к моменту показа давно
-  /// закрыто, обновлять цифры некому; `Chronometer` внутри разметки
-  /// тикает сам и остаётся верным через час после прихода — в отличие
-  /// от «осталось 4 часа», написанных текстом.
+  /// Показать срочное напоминание — с живым отсчётом до полуночи, на
+  /// другой подложке и поверх остальных.
   static Future<void> previewStreak() async {
-    if (!_supported) return;
-    await init();
-    final now = DateTime.now();
-    final diary = await PracticeDiary.state(now: now);
-    // Серии может не быть вовсе — а показать надо именно срочное. Берём
+    final diary = await PracticeDiary.state();
+    // Серии может не быть вовсе, а показать надо именно срочное. Берём
     // состояние «вчера занимался, серия жива, поздний вечер»: ровно то,
     // ради чего это уведомление и существует.
     final state = ReminderState(
@@ -392,51 +223,49 @@ class Reminders {
       energy: diary.energy,
       energyMax: diary.energyMax,
     );
-    final reminder = pickReminder(state)!;
-    final midnight = DateTime(now.year, now.month, now.day + 1);
-
-    final shown = await RichNotification.show(
-      id: _streakPreviewId,
-      channelId: kStreakChannelId,
-      channelName: 'Серия сгорает',
-      sound: kReminderSound,
-      title: reminder.title,
-      // В этом виде заголовок уступает место крупным цифрам, поэтому
-      // текст обязан читаться сам по себе.
-      body: 'Уже почти полночь. Один бой — и серия цела.',
-      imagePath: await _materialize(reminder.imageAsset),
-      skin: NotificationSkin.ember,
-      countdownUntil: midnight,
-    );
-    if (shown) return;
-    await _schedule(
-      id: _streakPreviewId,
-      at: now,
-      reminder: reminder,
-      state: state,
-      showNow: true,
+    await RichNotification.show(
+      await _spec(id: _streakPreviewId, reminder: pickReminder(state)!, state: state),
     );
   }
 
-  /// «Двадцать часов у игрока» — именно как показания часов, а не как
-  /// момент времени.
-  ///
-  /// РАЗНИЦА НЕ УМОЗРИТЕЛЬНАЯ. `TZDateTime.from` переводит МОМЕНТ в
-  /// другую зону: двадцать часов превратятся в двадцать один, если
-  /// смещения разойдутся хоть на час. А `TZDateTime(...)` строит
-  /// показания часов прямо в нужной зоне — и остаётся двадцатью часами
-  /// и до перевода стрелок, и после.
-  static tz.TZDateTime _wallClock(DateTime at) => tz.TZDateTime(
-        tz.local,
-        at.year,
-        at.month,
-        at.day,
-        at.hour,
-        at.minute,
-      );
+  /// Одно напоминание целиком: и для показа сейчас, и для будильника.
+  static Future<NotificationSpec> _spec({
+    required int id,
+    required Reminder reminder,
+    required ReminderState state,
+    DateTime? at,
+    bool repeatWeekly = false,
+  }) async {
+    // Серия догорает именно сегодня — единственный повод торопить и
+    // единственный, где счётчик до полуночи что-то значит.
+    final burning = state.streakDays > 0 &&
+        state.daysSincePractice == 1 &&
+        state.lateEvening;
+    final day = at ?? DateTime.now();
 
-  /// Скопировать картинку из ассетов в файл: `largeIcon` принимает файл
-  /// или ресурс Android, а ассет Flutter не является ни тем, ни другим.
+    return NotificationSpec(
+      id: id,
+      channelId: burning ? kStreakChannelId : kReminderChannelId,
+      channelName: burning ? 'Серия сгорает' : 'Напоминания',
+      sound: kReminderSound,
+      title: reminder.title,
+      // В срочном виде заголовок уступает место крупным цифрам, поэтому
+      // текст обязан читаться сам по себе — и не спорить с таймером.
+      body: burning ? burningBody(state) : reminder.body,
+      imagePath: await _materialize(reminder.imageAsset),
+      skin: burning ? NotificationSkin.ember : NotificationSkin.gold,
+      countdownUntil:
+          burning ? DateTime(day.year, day.month, day.day + 1) : null,
+      at: at,
+      repeatWeekly: repeatWeekly,
+    );
+  }
+
+  /// Скопировать картинку из ассетов в файл.
+  ///
+  /// ИМЕННО В ФАЙЛ. Вечернее уведомление рисует BroadcastReceiver, когда
+  /// приложения нет ни в каком виде: ассеты Flutter читать некому и
+  /// нечем. Файл на диске — единственное, что доживёт до вечера.
   static Future<String?> _materialize(String assetKey) async {
     try {
       final dir = Directory(

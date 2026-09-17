@@ -36,5 +36,5 @@ Future<void> main() async {
   //
   // Переназначаем на КАЖДОМ запуске намеренно: расписание, составленное
   // в прошлый раз, ничего не знает о том, что игрок с тех пор занимался.
-  unawaited(Reminders.init().then((_) => Reminders.refresh()));
+  unawaited(Reminders.refresh());
 }
