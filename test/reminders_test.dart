@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:language_battle/core/local_timezone.dart';
 import 'package:language_battle/core/reminders.dart';
+import 'package:language_battle/core/rich_notification.dart';
 import 'package:language_battle/data/practice_diary.dart';
 import 'package:language_battle/data/reminder_templates.dart';
 import 'package:timezone/timezone.dart' as tz;
@@ -363,6 +364,150 @@ void main() {
       // Звук канала Android фиксирует при СОЗДАНИИ и менять не даёт.
       // Сменили звук, не сменив id, — игрок продолжит слышать старый.
       expect(kReminderChannelId, matches(RegExp(r'\.v\d+$')));
+    });
+  });
+
+  group('уведомление со своей разметкой', () {
+    String read(String path) => File(path).readAsStringSync();
+
+    /// Разметка БЕЗ КОММЕНТАРИЕВ. Пояснение, в котором написано «сюда
+    /// нельзя класть ConstraintLayout», — это не ConstraintLayout, а
+    /// проверка, считающая иначе, ловит собственные объяснения.
+    String layout() => read(
+            'android/app/src/main/res/layout/notification_chrolingo.xml')
+        .replaceAll(RegExp(r'<!--.*?-->', dotAll: true), '');
+
+    /// То же и для Kotlin: комментариев здесь больше, чем кода, и
+    /// половина из них называет как раз то, чего в коде быть не должно.
+    String kotlin() => read(
+            'android/app/src/main/kotlin/com/chrolingo/app/RichNotifications.kt')
+        .split('\n')
+        .where((line) => !line.trimLeft().startsWith('//') &&
+            !line.trimLeft().startsWith('*') &&
+            !line.trimLeft().startsWith('/*'))
+        .join('\n');
+
+    test('в разметке только то, что RemoteViews умеет показать', () {
+      // RemoteViews принимает горстку виджетов. ConstraintLayout или
+      // любой androidx-виджет НЕ ломает сборку — он ломает телефон:
+      // вместо уведомления приходит «не удалось показать уведомление».
+      final xml = layout();
+      for (final forbidden in [
+        '<androidx.',
+        '<com.google.',
+        '<merge',
+        'ConstraintLayout',
+      ]) {
+        expect(xml.contains(forbidden), isFalse,
+            reason: '$forbidden в RemoteViews не живёт');
+      }
+      expect(xml, contains('<LinearLayout'));
+      expect(xml, contains('<Chronometer'));
+    });
+
+    test('каждый id, который ищет Kotlin, есть в разметке', () {
+      // Ищутся они по ИМЕНИ, в рантайме. Переименовали в xml — Kotlin
+      // узнает об этом на телефоне, а не на сборке.
+      final xml = layout();
+      final code = kotlin();
+      final asked = RegExp(r'id\("([a-z_]+)"\)')
+          .allMatches(code)
+          .map((m) => m.group(1)!)
+          .toSet();
+      expect(asked, isNotEmpty, reason: 'Kotlin перестал искать id — проверка ослепла');
+      for (final name in asked) {
+        expect(xml, contains('android:id="@+id/$name"'),
+            reason: 'Kotlin просит @id/$name, а в разметке его нет');
+      }
+    });
+
+    test('каждая расцветка из Dart есть в Kotlin и лежит файлом', () {
+      final code = kotlin();
+      for (final skin in NotificationSkin.values) {
+        expect(code, contains('"${skin.name}" to Skin('),
+            reason: 'расцветки ${skin.name} нет в SKINS');
+      }
+      final backgrounds = RegExp(r'Skin\("([a-z_]+)"')
+          .allMatches(code)
+          .map((m) => m.group(1)!)
+          .toSet();
+      expect(backgrounds.length, NotificationSkin.values.length);
+      for (final name in backgrounds) {
+        expect(
+          File('android/app/src/main/res/drawable/$name.xml').existsSync(),
+          isTrue,
+          reason: 'нет файла подложки $name',
+        );
+      }
+    });
+
+    test('мост назван одинаково с обеих сторон', () {
+      // Разойдутся имена — вызов не упадёт, а тихо вернёт
+      // MissingPluginException, и уведомление покажется системным видом.
+      expect(kotlin(), contains('const val CHANNEL = "chrolingo/notifications"'));
+      expect(read('lib/core/rich_notification.dart'),
+          contains("MethodChannel('chrolingo/notifications')"));
+      expect(read('android/app/src/main/kotlin/com/chrolingo/app/MainActivity.kt'),
+          contains('RichNotifications.CHANNEL'));
+    });
+
+    test('«Сейчас» из шапки убрано везде, где это вообще возможно', () {
+      // Само имя приложения убрать нельзя: с Android 12 система рисует
+      // шапку сама. Штамп времени — можно, и это единственное, что там
+      // вообще поддаётся.
+      expect(kotlin(), contains('setShowWhen(false)'));
+      expect(read('lib/core/reminders.dart'), contains('showWhen: burning'));
+    });
+
+    test('таймер считает в системном времени, а не в календарном', () {
+      // Chronometer считает от загрузки устройства. Передать ему
+      // обычные миллисекунды — это счётчик на пятьдесят с лишним лет.
+      final code = kotlin();
+      expect(code, contains('SystemClock.elapsedRealtime()'));
+      expect(code, contains('setChronometerCountDown(timer, true)'));
+      // И заголовок обязан уступить место цифрам: во всплывающем
+      // уведомлении около 88dp высоты, на всё сразу её не хватает.
+      expect(code, contains('views.setViewVisibility(titleId, android.view.View.GONE)'));
+    });
+
+    test('картинка уменьшается перед отправкой в систему', () {
+      // setImageViewBitmap, в отличие от setLargeIcon, не масштабирует
+      // ничего. Наши 616x688 — это 1,7 МБ в одной посылке между
+      // процессами, и при переполнении уведомление просто не приходит.
+      final code = kotlin();
+      expect(code, contains('inJustDecodeBounds = true'));
+      expect(code, contains('inSampleSize'));
+      expect(code.contains('BitmapFactory.decodeFile(imagePath)'), isFalse,
+          reason: 'картинка уходит в систему неуменьшенной');
+    });
+
+    test('высота набирается содержимым, а не прибита гвоздями', () {
+      // Именно поэтому уведомление с таймером выше обычного: появляется
+      // строка крупных цифр. Фиксированная высота сделала бы их
+      // одинаковыми.
+      expect(layout(), contains('android:layout_height="wrap_content"'));
+      expect(layout().contains('android:layout_height="64dp"'), isFalse);
+    });
+
+    test('срочное идёт своим каналом', () {
+      // Важность канала задаёт игрок, и она одна на канал. Отключив
+      // надоевшие вечерние, он отключил бы и единственное срочное.
+      expect(kStreakChannelId, isNot(kReminderChannelId));
+      expect(kStreakChannelId, matches(RegExp(r'\.v\d+$')));
+      final code = read('lib/core/reminders.dart');
+      expect(code, contains('burning ? kStreakChannelId : kReminderChannelId'));
+    });
+
+    test('разметка и подложки защищены от сжатия ресурсов', () {
+      final keep = read('android/app/src/main/res/raw/keep.xml');
+      expect(keep, contains('@layout/notification_chrolingo'));
+      expect(keep, contains('@drawable/notification_bg_'));
+    });
+
+    test('обе проверки вынесены в настройки', () {
+      final settings = read('lib/features/profile/settings_screen.dart');
+      expect(settings, contains('Reminders.preview'));
+      expect(settings, contains('Reminders.previewStreak'));
     });
   });
 

@@ -38,10 +38,20 @@ import 'package:timezone/timezone.dart' as tz;
 import '../data/practice_diary.dart';
 import '../data/reminder_templates.dart';
 import 'local_timezone.dart';
+import 'rich_notification.dart';
 import 'theme.dart';
 
 /// id канала. МЕНЯТЬ ВМЕСТЕ СО ЗВУКОМ ИЛИ ВИБРАЦИЕЙ — см. выше.
 const String kReminderChannelId = 'chrolingo.reminders.v1';
+
+/// Канал срочного напоминания — «серия сгорит сегодня».
+///
+/// ОТДЕЛЬНЫЙ НАРОЧНО, И ЭТО НЕ ДУБЛИРОВАНИЕ. Важность канала задаёт
+/// игрок, и она у него одна на канал: отключив надоевшие вечерние
+/// напоминания, он вместе с ними отключил бы и единственное, которое
+/// стоит показать поверх остальных. Разными каналами это решается, одним
+/// — нет.
+const String kStreakChannelId = 'chrolingo.streak.v1';
 
 /// Имя файла в `android/app/src/main/res/raw` без расширения.
 const String kReminderSound = 'reminder';
@@ -63,6 +73,8 @@ const int kReminderDefaultHour = 20;
 
 const int _firstId = 4200;
 const int _weeklyId = 4299;
+const int _previewId = 4199;
+const int _streakPreviewId = 4198;
 
 const String _enabledKey = 'reminders.enabled';
 const String _hourKey = 'reminders.hour';
@@ -99,7 +111,16 @@ class Reminders {
       const AndroidNotificationChannel(
         kReminderChannelId,
         'Напоминания',
-        description: 'Зайти позаниматься и не потерять серию.',
+        description: 'Зайти позаниматься.',
+        importance: Importance.high,
+        sound: RawResourceAndroidNotificationSound(kReminderSound),
+      ),
+    );
+    await android?.createNotificationChannel(
+      const AndroidNotificationChannel(
+        kStreakChannelId,
+        'Серия сгорает',
+        description: 'Последний вечер, когда серию ещё можно сохранить.',
         importance: Importance.high,
         sound: RawResourceAndroidNotificationSound(kReminderSound),
       ),
@@ -255,9 +276,11 @@ class Reminders {
     final midnight = DateTime(at.year, at.month, at.day + 1);
 
     final details = AndroidNotificationDetails(
-      kReminderChannelId,
-      'Напоминания',
-      channelDescription: 'Зайти позаниматься и не потерять серию.',
+      burning ? kStreakChannelId : kReminderChannelId,
+      burning ? 'Серия сгорает' : 'Напоминания',
+      channelDescription: burning
+          ? 'Последний вечер, когда серию ещё можно сохранить.'
+          : 'Зайти позаниматься.',
       importance: Importance.high,
       priority: Priority.high,
       color: AppColors.gold,
@@ -267,6 +290,10 @@ class Reminders {
         contentTitle: reminder.title,
       ),
       subText: state.streakDays > 0 ? '🔥 ${state.streakDays}' : null,
+      // «Сейчас» рядом с именем приложения — единственное, что из шапки
+      // вообще убирается. Само имя рисует система, и с Android 12 убрать
+      // его нельзя ничем.
+      showWhen: burning,
       when: burning ? midnight.millisecondsSinceEpoch : null,
       usesChronometer: burning,
       chronometerCountDown: burning,
@@ -307,7 +334,8 @@ class Reminders {
     );
   }
 
-  /// Показать напоминание прямо сейчас — проверить звук и картинку.
+  /// Показать обычное напоминание прямо сейчас — проверить вид, звук и
+  /// картинку.
   ///
   /// БЕЗ ЭТОГО ПРОВЕРИТЬ НЕЧЕМ. Настоящее уведомление приходит вечером и
   /// только если игрок не занимался; ждать до вечера, чтобы узнать, что
@@ -320,9 +348,70 @@ class Reminders {
     // ЧТО-ТО надо: проверяют же оформление, а не правила.
     final reminder = pickReminder(state) ??
         pickReminder(projectState(state, 1, DateTime.now().hour))!;
+
+    final shown = await RichNotification.show(
+      id: _previewId,
+      channelId: kReminderChannelId,
+      channelName: 'Напоминания',
+      sound: kReminderSound,
+      title: reminder.title,
+      body: reminder.body,
+      imagePath: await _materialize(reminder.imageAsset),
+    );
+    if (shown) return;
+    // Своей разметки нет — показываем системной. Хуже на вид, но
+    // молчать вместо проверки нельзя: игрок нажал кнопку.
     await _schedule(
-      id: _firstId - 1,
+      id: _previewId,
       at: DateTime.now(),
+      reminder: reminder,
+      state: state,
+      showNow: true,
+    );
+  }
+
+  /// Показать срочное напоминание «серия сгорит» — с живым отсчётом до
+  /// полуночи, на другой подложке и поверх остальных.
+  ///
+  /// ОТСЧЁТ СЧИТАЕТ СИСТЕМА, А НЕ МЫ. Приложение к моменту показа давно
+  /// закрыто, обновлять цифры некому; `Chronometer` внутри разметки
+  /// тикает сам и остаётся верным через час после прихода — в отличие
+  /// от «осталось 4 часа», написанных текстом.
+  static Future<void> previewStreak() async {
+    if (!_supported) return;
+    await init();
+    final now = DateTime.now();
+    final diary = await PracticeDiary.state(now: now);
+    // Серии может не быть вовсе — а показать надо именно срочное. Берём
+    // состояние «вчера занимался, серия жива, поздний вечер»: ровно то,
+    // ради чего это уведомление и существует.
+    final state = ReminderState(
+      daysSincePractice: 1,
+      streakDays: diary.streakDays > 0 ? diary.streakDays : 1,
+      hour: 21,
+      energy: diary.energy,
+      energyMax: diary.energyMax,
+    );
+    final reminder = pickReminder(state)!;
+    final midnight = DateTime(now.year, now.month, now.day + 1);
+
+    final shown = await RichNotification.show(
+      id: _streakPreviewId,
+      channelId: kStreakChannelId,
+      channelName: 'Серия сгорает',
+      sound: kReminderSound,
+      title: reminder.title,
+      // В этом виде заголовок уступает место крупным цифрам, поэтому
+      // текст обязан читаться сам по себе.
+      body: 'Уже почти полночь. Один бой — и серия цела.',
+      imagePath: await _materialize(reminder.imageAsset),
+      skin: NotificationSkin.ember,
+      countdownUntil: midnight,
+    );
+    if (shown) return;
+    await _schedule(
+      id: _streakPreviewId,
+      at: now,
       reminder: reminder,
       state: state,
       showNow: true,

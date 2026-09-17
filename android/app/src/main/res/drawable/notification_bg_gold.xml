@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Фон обычного напоминания. Скруглён потому, что своя разметка лежит
+     ВНУТРИ карточки уведомления с отступами по бокам: прямоугольник
+     выглядел бы обрезанным куском, а не плашкой. -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android"
+    android:shape="rectangle">
+    <solid android:color="#FFD400" />
+    <corners android:radius="18dp" />
+</shape>

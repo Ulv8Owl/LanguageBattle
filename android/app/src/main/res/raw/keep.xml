@@ -6,4 +6,6 @@
      выбросит он их молча — уведомление после этого либо приходит без
      значка, либо не приходит вовсе. -->
 <resources xmlns:tools="http://schemas.android.com/tools"
-    tools:keep="@drawable/ic_notification,@raw/reminder" />
+    tools:keep="@drawable/ic_notification,@raw/reminder,
+                @drawable/notification_bg_*,@layout/notification_chrolingo,
+                @id/reminder_*" />

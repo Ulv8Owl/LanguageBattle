@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Фон «серия сгорит»: другой цвет — единственное, чем уведомление
+     может сказать «это не то же самое, что вчера», ещё до чтения. -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android"
+    android:shape="rectangle">
+    <solid android:color="#E23B5A" />
+    <corners android:radius="18dp" />
+</shape>
