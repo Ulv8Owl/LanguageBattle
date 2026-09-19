@@ -42,8 +42,67 @@ MOODS = {
     'cheerful': (0x7C, 0xE5, 0x77),
     'waiting': (0x6F, 0xB6, 0xFF),
     'worried': (0xFF, 0xC4, 0x4D),
+    'angry': (0xFF, 0x5A, 0x3C),
     'sad': (0xB9, 0x8C, 0xFF),
+    'crying': (0x5F, 0xD0, 0xE8),
+    'lost': (0x8A, 0x8A, 0x92),
     'restless': (0xFF, 0x8A, 0x4C),
+}
+
+# ═══ ЗВУКИ: ПО ОДНОМУ НА СРОК ═══
+#
+# Разные потому, что уведомление, звучащее всегда одинаково, перестают
+# слышать на третий день: рука тянется смахнуть его ещё до того, как
+# глаз прочёл. Разный звук — единственное, что успевает сказать «это
+# другое» ДО чтения.
+#
+# Android помнит звук КАНАЛА и менять его у существующего не даёт,
+# поэтому каждому сроку нужен свой канал — см. lib/core/reminders.dart.
+#
+# Устроены все одинаково: чистый звон, пропущенный через перегруз и
+# огрубление разрядности. Отличаются рисунком высоты — он и читается как
+# настроение.
+#
+# segments: (частота в начале, частота в конце, старт, длительность, громкость)
+SOUNDS = {
+    # «Эй! Эй! Эй!» — торопит, но не пугает.
+    'voice_endofday': dict(
+        segments=[(740, 900, 0.00, 0.11, 1.0),
+                  (840, 1010, 0.16, 0.11, 0.95),
+                  (940, 1250, 0.32, 0.16, 0.9)],
+        drive=2.8, crush=22, vibrato=(0.0, 0.0), seconds=0.60,
+    ),
+    # Злость: два низких удара, грубо и коротко.
+    'voice_second': dict(
+        segments=[(330, 210, 0.00, 0.22, 1.0),
+                  (290, 170, 0.28, 0.30, 0.95)],
+        drive=5.5, crush=12, vibrato=(0.0, 0.0), seconds=0.66,
+    ),
+    # Обида: две ноты вниз, медленно.
+    'voice_third': dict(
+        segments=[(560, 540, 0.00, 0.30, 0.9),
+                  (450, 430, 0.34, 0.42, 0.85)],
+        drive=2.2, crush=20, vibrato=(4.0, 0.012), seconds=0.82,
+    ),
+    # Плач: один длинный съезд вниз с дрожью.
+    'voice_fifth': dict(
+        segments=[(760, 360, 0.00, 0.75, 0.95)],
+        drive=2.6, crush=18, vibrato=(9.0, 0.055), seconds=0.82,
+    ),
+    # Отчаяние: низко, глухо, с большой паузой внутри.
+    'voice_week': dict(
+        segments=[(240, 215, 0.00, 0.45, 0.8),
+                  (200, 185, 0.60, 0.60, 0.6)],
+        drive=1.8, crush=14, vibrato=(2.5, 0.01), seconds=1.25,
+    ),
+    # Тревога: частые высокие писки, самый настойчивый из всех.
+    'voice_burning': dict(
+        segments=[(1180, 1180, 0.00, 0.09, 1.0),
+                  (1480, 1480, 0.13, 0.09, 1.0),
+                  (1180, 1180, 0.26, 0.09, 1.0),
+                  (1480, 1600, 0.39, 0.18, 1.0)],
+        drive=4.0, crush=16, vibrato=(0.0, 0.0), seconds=0.62,
+    ),
 }
 
 SCALE = 8
@@ -271,34 +330,43 @@ def make_moods():
             print('%s  %dx%d' % (path, width * SCALE, height * SCALE))
 
 
-def make_sound():
-    """Искажённый звук уведомления: чистый звон, пропущенный через
-    перегруз и огрубление разрядности. Ровно тем и отличается звук
-    Duolingo от системного — он тот же звон, но «сломанный»."""
-    rate, seconds = 44100, 0.85
+def make_sound(name, spec):
+    """Один звук по описанию из SOUNDS."""
+    rate = 44100
+    seconds = spec['seconds']
     total = int(rate * seconds)
-    samples = []
-    for n in range(total):
-        t = n / rate
-        # Две ноты подряд, как у обычного уведомления.
-        first = math.exp(-9.0 * t) * math.sin(2 * math.pi * 987.77 * t)
-        late = max(0.0, t - 0.16)
-        second = math.exp(-7.0 * late) * math.sin(2 * math.pi * 1318.51 * late) if t > 0.16 else 0.0
-        # Расстроенный обертон — от него звук «плывёт».
-        detune = 0.35 * math.exp(-6.0 * t) * math.sin(2 * math.pi * 1479.98 * t * 1.006)
-        v = 0.6 * first + 0.6 * second + detune
-        # Перегруз: мягкое насыщение до жёсткого ограничения.
-        v = math.tanh(3.2 * v)
-        samples.append(v)
-    # Огрубление разрядности и частоты — «цифровая» грязь поверх звона.
+    vib_rate, vib_depth = spec['vibrato']
+    drive, crush = spec['drive'], spec['crush']
+
+    raw = [0.0] * total
+    for f0, f1, start, dur, amp in spec['segments']:
+        first = int(start * rate)
+        length = int(dur * rate)
+        phase = 0.0
+        for n in range(length):
+            at = first + n
+            if at >= total:
+                break
+            k = n / length
+            freq = f0 + (f1 - f0) * k
+            if vib_depth:
+                freq *= 1.0 + vib_depth * math.sin(2 * math.pi * vib_rate * (n / rate))
+            phase += 2 * math.pi * freq / rate
+            raw[at] += amp * math.exp(-4.5 * k) * math.sin(phase)
+
+    # Перегруз и огрубление — та самая «искажённость», ради которой всё
+    # и затевалось: чистый синус звучит как будильник из телефона 2009
+    # года, искажённый — как голос персонажа.
     held, out = 0.0, []
-    for n, v in enumerate(samples):
+    for n, v in enumerate(raw):
+        v = math.tanh(drive * v)
         if n % 3 == 0:
-            held = round(v * 24) / 24
+            held = round(v * crush) / crush
         out.append(held)
+
     peak = max(abs(v) for v in out) or 1.0
     os.makedirs(RAW_DIR, exist_ok=True)
-    path = os.path.join(RAW_DIR, 'reminder.wav')
+    path = os.path.join(RAW_DIR, '%s.wav' % name)
     with wave.open(path, 'wb') as f:
         f.setnchannels(1)
         f.setsampwidth(2)
@@ -308,8 +376,13 @@ def make_sound():
     print('%s  %.2f c' % (path, seconds))
 
 
+def make_sounds():
+    for name, spec in SOUNDS.items():
+        make_sound(name, spec)
+
+
 if __name__ == '__main__':
     make_moods()
     make_widget_preview()
     make_notification_icon()
-    make_sound()
+    make_sounds()

@@ -1,51 +1,189 @@
-/// Из чего складывается напоминание: настроение персонажа и текст с цифрами.
+/// Из чего складывается напоминание: срок, настроение персонажа и текст.
 ///
 /// ═══ ЧТО ИМЕННО МЫ ПОВТОРЯЕМ ЗА DUOLINGO ═══
 ///
-/// Их уведомление — НЕ КАРТИНКА, НАРИСОВАННАЯ НА ЛЕТУ. Это видно на их же
-/// уведомлениях: заголовок обрезается системным многоточием, а таймер до
-/// полуночи тикает сам — ни того ни другого не бывает у готового
-/// изображения. Совпадает другое: набор ЗАРАНЕЕ НАРИСОВАННЫХ картинок, из
-/// которого выбирается одна по состоянию игрока и времени суток (так же
-/// устроен и их виджет — «серия иллюстраций настроения Duo в разное время
-/// дня, в зависимости от того, занимался ты или нет»), плюс обычный текст,
-/// в который подставлены числа.
+/// Не картинку, нарисованную на лету, — таких у них нет. Совпадает
+/// другое: набор ЗАРАНЕЕ НАРИСОВАННЫХ настроений, из которого выбирается
+/// одно по тому, сколько игрока нет. Их сова сначала тревожится («зайди,
+/// а то потеряешь»), назавтра злится, а через несколько дней плачет.
+/// Ровно эта дуга здесь и описана.
 ///
-/// Поэтому здесь нет никакой графики. Здесь решается ровно два вопроса:
-/// КАКУЮ картинку показать и КАКИЕ слова написать. Картинку по настроению
-/// находит слой уведомлений, числа подставляются в текст.
+/// ═══ СРОК РЕШАЕТ ВСЁ ═══
 ///
-/// ═══ ПОЧЕМУ ВЫБОР ЖИВЁТ ОТДЕЛЬНО ОТ УВЕДОМЛЕНИЙ ═══
+/// [ReminderStage] — единственная развилка в этом файле. От неё зависит
+/// и настроение, и слова, и ЗВУК: у каждого срока свой канал Android со
+/// своим звуком. Уведомление, звучащее всегда одинаково, перестают
+/// слышать на третий день — рука смахивает его раньше, чем глаз прочёл
+/// заголовок. Разный звук успевает сказать «это другое» ДО чтения.
 ///
-/// Потому что его можно проверить. Отправку уведомления на сборке не
-/// проверишь — нужен телефон, разрешение и ожидание; а «игрок не заходил
-/// два дня, серия семь, почти полночь — что ему написать» проверяется
-/// тестом за миллисекунду. Разделив, мы получаем единственную часть этой
-/// затеи, которая вообще поддаётся проверке до живого запуска.
+/// ═══ ПОЧЕМУ ВЫБОР ЖИВЁТ ОТДЕЛЬНО ОТ ОТПРАВКИ ═══
+///
+/// Потому что его можно проверить. Отправку на сборке не проверишь —
+/// нужен телефон, разрешение и ожидание; а «игрока нет пять дней — что
+/// ему написать и каким голосом» проверяется тестом за миллисекунду.
 library;
 
 /// Настроение персонажа. Каждому соответствует своя картинка.
 ///
-/// НАБОР ЗАКРЫТЫЙ И НЕБОЛЬШОЙ НАМЕРЕННО: каждое настроение — это рисунок,
-/// который кто-то должен нарисовать. Пять состояний покрывают всё, что мы
-/// вообще умеем различать по данным; шестое пришлось бы придумывать под
-/// несуществующий повод.
+/// КАЖДОЕ — ЭТО РИСУНОК, КОТОРЫЙ КТО-ТО ДОЛЖЕН НАРИСОВАТЬ, поэтому набор
+/// закрытый. Первые семь — дуга «не заходил всё дольше»: от спокойного
+/// ожидания до отчаяния. Восьмое стоит в стороне и к сроку отношения не
+/// имеет.
 enum MascotMood {
   /// Занимался сегодня. Хвалим и уходим.
   cheerful,
 
-  /// День пропущен, но серия ещё цела — зовём вернуться.
+  /// День идёт, занятия ещё не было. Спокойно зовём.
   waiting,
 
-  /// Серия сгорит сегодня. Это единственный повод торопить.
+  /// День кончается. Тревожится и торопит — это он «кричит».
   worried,
 
-  /// Серия уже потеряна, игрока нет несколько дней.
+  /// День пропущен. Злится.
+  angry,
+
+  /// Третий день. Обиделся.
   sad,
 
-  /// Энергия накопилась до потолка и простаивает.
+  /// Пятый день. Плачет.
+  crying,
+
+  /// Неделя и дольше. Перестал считать дни.
+  lost,
+
+  /// Энергия накопилась до потолка и простаивает. К сроку не относится.
   restless,
 }
+
+/// Сколько игрока нет — и, значит, каким голосом с ним говорить.
+///
+/// ГРАНИЦЫ ВЫБРАНЫ ПО ТОМУ, ЧТО ИГРОК РАЗЛИЧАЕТ САМ. «Третий день» и
+/// «четвёртый» для него одно и то же, а «сегодня» и «вчера» — нет.
+enum ReminderStage {
+  /// Серия догорает сегодня вечером. Единственный срок с таймером.
+  burning,
+
+  /// Сегодня ещё не занимались.
+  endOfDay,
+
+  /// Пропущен один день.
+  secondDay,
+
+  /// Третий-четвёртый день.
+  thirdDay,
+
+  /// Пятый-шестой.
+  fifthDay,
+
+  /// Неделя и дольше.
+  lostWeek,
+}
+
+/// Всё, что срок задаёт помимо текста: настроение, канал, звук.
+class ReminderStageInfo {
+  /// Как срок называется в отладке — словами игрока, а не кода.
+  final String label;
+
+  final MascotMood mood;
+
+  /// Канал Android. СВОЙ У КАЖДОГО СРОКА, потому что звук Android
+  /// запоминает при создании канала и менять у существующего не даёт.
+  final String channel;
+
+  /// Как канал подписан в системных настройках телефона. Игрок увидит
+  /// этот список и сможет отключить сроки по одному — это возможность,
+  /// а не побочный эффект.
+  final String channelName;
+
+  /// Имя файла в `res/raw` без расширения.
+  final String sound;
+
+  /// Сколько дней подставить, чтобы получить этот срок в отладке.
+  final int probeDays;
+
+  const ReminderStageInfo({
+    required this.label,
+    required this.mood,
+    required this.channel,
+    required this.channelName,
+    required this.sound,
+    required this.probeDays,
+  });
+}
+
+const Map<ReminderStage, ReminderStageInfo> _stages = {
+  ReminderStage.burning: ReminderStageInfo(
+    label: 'Серия сгорает',
+    mood: MascotMood.worried,
+    channel: 'chrolingo.burning.v1',
+    channelName: 'Серия сгорает',
+    sound: 'voice_burning',
+    probeDays: 1,
+  ),
+  ReminderStage.endOfDay: ReminderStageInfo(
+    label: 'Конец дня',
+    mood: MascotMood.worried,
+    channel: 'chrolingo.endofday.v1',
+    channelName: 'Конец дня',
+    sound: 'voice_endofday',
+    probeDays: 1,
+  ),
+  ReminderStage.secondDay: ReminderStageInfo(
+    label: '2-й день',
+    mood: MascotMood.angry,
+    channel: 'chrolingo.second.v1',
+    channelName: 'Пропущенный день',
+    sound: 'voice_second',
+    probeDays: 2,
+  ),
+  ReminderStage.thirdDay: ReminderStageInfo(
+    label: '3-й день',
+    mood: MascotMood.sad,
+    channel: 'chrolingo.third.v1',
+    channelName: 'Несколько дней',
+    sound: 'voice_third',
+    probeDays: 3,
+  ),
+  ReminderStage.fifthDay: ReminderStageInfo(
+    label: '5 дней',
+    mood: MascotMood.crying,
+    channel: 'chrolingo.fifth.v1',
+    channelName: 'Пять дней',
+    sound: 'voice_fifth',
+    probeDays: 5,
+  ),
+  ReminderStage.lostWeek: ReminderStageInfo(
+    label: 'Больше недели',
+    mood: MascotMood.lost,
+    channel: 'chrolingo.week.v1',
+    channelName: 'Больше недели',
+    sound: 'voice_week',
+    probeDays: 9,
+  ),
+};
+
+ReminderStageInfo stageInfo(ReminderStage stage) => _stages[stage]!;
+
+/// Сроки, которые показывает ОБЫЧНОЕ уведомление. Без [ReminderStage.burning]:
+/// у того свой вид, свой цвет и таймер.
+const List<ReminderStage> ordinaryStages = [
+  ReminderStage.endOfDay,
+  ReminderStage.secondDay,
+  ReminderStage.thirdDay,
+  ReminderStage.fifthDay,
+  ReminderStage.lostWeek,
+];
+
+/// Каналы, которые когда-то были и больше не нужны.
+///
+/// УДАЛЯТЬ ОБЯЗАТЕЛЬНО. Канал, созданный однажды, остаётся в настройках
+/// телефона навсегда — даже если приложение о нём забыло. Список из
+/// восьми каналов, половина которых мертва, выглядит как неряшливость, и
+/// отключают в нём обычно всё сразу.
+const List<String> obsoleteChannels = [
+  'chrolingo.reminders.v1',
+  'chrolingo.streak.v1',
+];
 
 /// Что мы знаем об игроке к моменту напоминания.
 class ReminderState {
@@ -74,25 +212,50 @@ class ReminderState {
 
   bool get energyFull => energyMax > 0 && energy >= energyMax;
 
-  /// Вечер: серия сгорит сегодня, и торопить уже пора. Граница стоит
-  /// РАНЬШЕ времени напоминания по умолчанию (20:00) — иначе самый
+  /// Вечер: день заканчивается, и звать пора уже настойчиво. Граница
+  /// стоит РАНЬШЕ времени напоминания по умолчанию (20:00) — иначе самый
   /// нужный текст не доставался бы никому.
   bool get lateEvening => hour >= 19;
 
   int get hoursLeftToday => hour >= 24 ? 0 : 24 - hour;
 }
 
-/// Готовое напоминание: картинка, заголовок, текст.
+/// Какой срок у этого состояния. null — писать не о чем.
+///
+/// NULL — ЭТО ОТВЕТ, А НЕ ОШИБКА. Занимался сегодня — повода нет, и
+/// уведомление «на всякий случай» ровно так и воспринимается:
+/// приложение, которое пишет без повода, отключают целиком.
+ReminderStage? stageOf(ReminderState state) {
+  if (state.practisedToday) return null;
+  final days = state.daysSincePractice;
+  if (days <= 1) {
+    // Серия жива до полуночи, и только этот случай стоит таймера.
+    return state.streakDays > 0 && state.lateEvening
+        ? ReminderStage.burning
+        : ReminderStage.endOfDay;
+  }
+  if (days == 2) return ReminderStage.secondDay;
+  if (days <= 4) return ReminderStage.thirdDay;
+  if (days <= 6) return ReminderStage.fifthDay;
+  return ReminderStage.lostWeek;
+}
+
+/// Готовое напоминание: срок, картинка, заголовок, текст.
 class Reminder {
   /// Ключ шаблона. По нему же считается, что мы уже недавно присылали:
   /// одно и то же слово, сказанное третий раз подряд, перестают читать.
   final String id;
+
+  /// Срок задаёт канал и звук — см. [stageInfo].
+  final ReminderStage stage;
+
   final MascotMood mood;
   final String title;
   final String body;
 
   const Reminder({
     required this.id,
+    required this.stage,
     required this.mood,
     required this.title,
     required this.body,
@@ -111,11 +274,14 @@ class Reminder {
 /// Шаблон до подстановки чисел.
 class _Template {
   final String id;
-  final MascotMood mood;
   final String Function(ReminderState s) title;
   final String Function(ReminderState s) body;
 
-  const _Template(this.id, this.mood, this.title, this.body);
+  /// Настроение обычно берётся у срока. Здесь — только если в одном
+  /// сроке живут разные лица (день и вечер) или повод вовсе не про срок.
+  final MascotMood? mood;
+
+  const _Template(this.id, this.title, this.body, {this.mood});
 }
 
 String _days(int n) {
@@ -136,23 +302,14 @@ String _hours(int n) {
   return 'часов';
 }
 
-/// ВСЕ ТЕКСТЫ ЛЕЖАТ ЗДЕСЬ, А НЕ РАЗБРОСАНЫ ПО КОДУ. Их правят чаще любого
-/// другого куска этой затеи: голос приложения подбирают наощупь, десятком
-/// попыток. Собранные в одном месте, они правятся без единой мысли о том,
-/// как устроена отправка.
+/// ВСЕ ТЕКСТЫ ЛЕЖАТ ЗДЕСЬ, А НЕ РАЗБРОСАНЫ ПО КОДУ. Их правят чаще
+/// любого другого куска этой затеи: голос приложения подбирают наощупь,
+/// десятком попыток. Собранные в одном месте, они правятся без единой
+/// мысли о том, как устроена отправка.
+
 const List<_Template> _burning = [
-  _Template(
-    'burning.hours',
-    MascotMood.worried,
-    _titleBurning,
-    _bodyBurningHours,
-  ),
-  _Template(
-    'burning.streak',
-    MascotMood.worried,
-    _titleBurning,
-    _bodyBurningStreak,
-  ),
+  _Template('burning.hours', _titleBurning, _bodyBurningHours),
+  _Template('burning.streak', _titleBurning, _bodyBurningStreak),
 ];
 
 String _titleBurning(ReminderState s) => 'Серия ${s.streakDays} сгорит сегодня';
@@ -161,61 +318,121 @@ String _bodyBurningHours(ReminderState s) =>
 String _bodyBurningStreak(ReminderState s) =>
     '${s.streakDays} ${_days(s.streakDays)} подряд — и всё это до полуночи.';
 
-const List<_Template> _waiting = [
-  _Template('waiting.short', MascotMood.waiting, _titleWaiting, _bodyWaitingShort),
-  _Template('waiting.streak', MascotMood.waiting, _titleWaiting, _bodyWaitingStreak),
+/// Днём — зовём спокойно: до полуночи ещё полдня, и «срочно» в полдень
+/// обесценивает «срочно» в девять.
+const List<_Template> _dayCalm = [
+  _Template('day.short', _titleDay, _bodyDayShort, mood: MascotMood.waiting),
+  _Template('day.streak', _titleDay, _bodyDayStreak, mood: MascotMood.waiting),
 ];
 
-String _titleWaiting(ReminderState s) => 'Сегодня ещё не занимались';
-String _bodyWaitingShort(ReminderState s) => 'Один бой занимает пару минут.';
-String _bodyWaitingStreak(ReminderState s) => s.streakDays > 0
+String _titleDay(ReminderState s) => 'Сегодня ещё не занимались';
+String _bodyDayShort(ReminderState s) => 'Один бой занимает пару минут.';
+String _bodyDayStreak(ReminderState s) => s.streakDays > 0
     ? 'Серия ${s.streakDays} ${_days(s.streakDays)} ждёт продолжения.'
     : 'Самое время начать серию.';
 
-const List<_Template> _lost = [
-  _Template('lost.days', MascotMood.sad, _titleLost, _bodyLostDays),
-  _Template('lost.back', MascotMood.sad, _titleLost, _bodyLostBack),
+/// Вечером — торопим. Это и есть то, что у Duolingo «кричит».
+const List<_Template> _eveningRush = [
+  _Template('evening.hours', _titleEvening, _bodyEveningHours),
+  _Template('evening.sleep', _titleEvening, _bodyEveningSleep),
 ];
 
-String _titleLost(ReminderState s) =>
+String _titleEvening(ReminderState s) => 'День заканчивается';
+String _bodyEveningHours(ReminderState s) =>
+    'Осталось ${s.hoursLeftToday} ${_hours(s.hoursLeftToday)}. Один бой — и день не пустой.';
+String _bodyEveningSleep(ReminderState s) =>
+    'Chro не ложится спать. Ждёт один бой — дальше только завтра.';
+
+const List<_Template> _secondDay = [
+  _Template('second.angry', _titleSecond, _bodySecondAngry),
+  _Template('second.habit', _titleSecond, _bodySecondHabit),
+];
+
+String _titleSecond(ReminderState s) => 'Вчера — мимо';
+String _bodySecondAngry(ReminderState s) =>
+    'Chro сердится. Серия обнулилась, новая начинается с одного боя.';
+String _bodySecondHabit(ReminderState s) =>
+    'Второй пропуск даётся легче первого. Один бой это прекращает.';
+
+const List<_Template> _thirdDay = [
+  _Template('third.offended', _titleThird, _bodyThirdOffended),
+  _Template('third.forget', _titleThird, _bodyThirdForget),
+];
+
+String _titleThird(ReminderState s) =>
     'Вас не было ${s.daysSincePractice} ${_days(s.daysSincePractice)}';
-String _bodyLostDays(ReminderState s) => 'Серия обнулилась. Новая начинается с одного боя.';
-String _bodyLostBack(ReminderState s) => 'Язык забывается быстрее, чем кажется. Вернёмся?';
+String _bodyThirdOffended(ReminderState s) =>
+    'Chro обиделся. Он отходчивый — хватит одного боя.';
+String _bodyThirdForget(ReminderState s) =>
+    'Язык забывается быстрее, чем кажется. Начать — две минуты.';
+
+const List<_Template> _fifthDay = [
+  _Template('fifth.crying', _titleFifth, _bodyFifthCrying),
+  _Template('fifth.doubt', _titleFifth, _bodyFifthDoubt),
+];
+
+String _titleFifth(ReminderState s) =>
+    '${s.daysSincePractice} ${_days(s.daysSincePractice)} тишины';
+String _bodyFifthCrying(ReminderState s) =>
+    'Chro плачет в углу. Один бой — и перестанет.';
+String _bodyFifthDoubt(ReminderState s) =>
+    'Chro уже не уверен, что вы вернётесь. Разубедите его.';
+
+const List<_Template> _lostWeek = [
+  _Template('week.place', _titleWeek, _bodyWeekPlace),
+  _Template('week.count', _titleWeek, _bodyWeekCount),
+];
+
+String _titleWeek(ReminderState s) => 'Неделя прошла';
+String _bodyWeekPlace(ReminderState s) =>
+    'Здесь всё на месте: язык, слова, Chro. Нужен один бой.';
+String _bodyWeekCount(ReminderState s) =>
+    'Chro перестал считать дни. Начать заново — это один бой.';
 
 const List<_Template> _restless = [
-  _Template('restless.full', MascotMood.restless, _titleRestless, _bodyRestless),
+  _Template('restless.full', _titleRestless, _bodyRestless,
+      mood: MascotMood.restless),
 ];
 
 String _titleRestless(ReminderState s) => 'Энергия полная: ${s.energy}';
 String _bodyRestless(ReminderState s) =>
     'Копить дальше некуда — она не растёт выше ${s.energyMax}.';
 
+List<_Template> _bucketFor(ReminderState state, ReminderStage stage) {
+  switch (stage) {
+    case ReminderStage.burning:
+      return _burning;
+    case ReminderStage.endOfDay:
+      return [
+        ...(state.lateEvening ? _eveningRush : _dayCalm),
+        // ПОЛНАЯ ЭНЕРГИЯ НЕ ВЫТЕСНЯЕТ ОСТАЛЬНОЕ, А ВСТАЁТ В ОЧЕРЕДЬ. Она
+        // восстанавливается по одной за десять секунд, то есть полна
+        // почти всегда; сделай её отдельной причиной — и игрок получал
+        // бы «энергия полная» каждый вечер и перестал бы читать вовсе.
+        if (state.energyFull) ..._restless,
+      ];
+    case ReminderStage.secondDay:
+      return _secondDay;
+    case ReminderStage.thirdDay:
+      return _thirdDay;
+    case ReminderStage.fifthDay:
+      return _fifthDay;
+    case ReminderStage.lostWeek:
+      return _lostWeek;
+  }
+}
+
 /// Выбирает напоминание под состояние игрока.
 ///
-/// NULL — ЭТО ОТВЕТ, А НЕ ОШИБКА. Занимался сегодня — писать не о чем, и
-/// уведомление, посланное «на всякий случай», ровно так и воспринимается:
-/// приложение, которое пишет без повода, отключают целиком.
-///
 /// [recentIds] — что присылали в последние дни. Из подходящих шаблонов
-/// берётся первый несвежий; если несвежих нет, берётся первый по кругу.
-/// Duolingo решает эту же задачу многоруким бандитом по отклику живых
-/// игроков; у нас откликов нет и не будет ещё долго, а повторяться нельзя
-/// уже сейчас — поэтому простое чередование, а не подделка под обучение.
+/// берётся первый несвежий. Duolingo решает эту же задачу многоруким
+/// бандитом по отклику живых игроков; у нас откликов нет и не будет ещё
+/// долго, а повторяться нельзя уже сейчас — поэтому простое чередование,
+/// а не подделка под обучение.
 Reminder? pickReminder(ReminderState state, {List<String> recentIds = const []}) {
-  if (state.practisedToday) return null;
-
-  final List<_Template> bucket;
-  if (state.daysSincePractice >= 2) {
-    bucket = _lost;
-  } else if (state.streakDays > 0 && state.lateEvening) {
-    bucket = _burning;
-  } else {
-    // ПОЛНАЯ ЭНЕРГИЯ НЕ ВЫТЕСНЯЕТ ОСТАЛЬНОЕ, А ВСТАЁТ В ОЧЕРЕДЬ. Она
-    // восстанавливается по одной за десять секунд, то есть полна почти
-    // всегда; сделай её отдельной причиной — и игрок получал бы
-    // «энергия полная» каждый вечер и перестал бы читать вовсе.
-    bucket = [..._waiting, if (state.energyFull) ..._restless];
-  }
+  final stage = stageOf(state);
+  if (stage == null) return null;
+  final bucket = _bucketFor(state, stage);
 
   final fresh = bucket.where((t) => !recentIds.contains(t.id));
   // Все примелькались — берём тот, что показывали ДОЛЬШЕ ВСЕГО НАЗАД, а
@@ -227,7 +444,8 @@ Reminder? pickReminder(ReminderState state, {List<String> recentIds = const []})
           recentIds.lastIndexOf(a.id) <= recentIds.lastIndexOf(b.id) ? a : b);
   return Reminder(
     id: chosen.id,
-    mood: chosen.mood,
+    stage: stage,
+    mood: chosen.mood ?? stageInfo(stage).mood,
     title: chosen.title(state),
     body: chosen.body(state),
   );
@@ -239,6 +457,7 @@ Reminder? pickReminder(ReminderState state, {List<String> recentIds = const []})
 /// молчать не умеет: он всегда на экране, и пустым быть не может.
 Reminder doneTodayReminder(ReminderState s) => Reminder(
       id: 'done.today',
+      stage: ReminderStage.endOfDay,
       mood: MascotMood.cheerful,
       title: s.streakDays > 0
           ? 'Серия ${s.streakDays} ${_days(s.streakDays)}'
@@ -263,15 +482,27 @@ String burningBody(ReminderState s) =>
 /// неделю и будет врать все остальные.
 Reminder longSilenceReminder() => const Reminder(
       id: 'faded.weekly',
-      mood: MascotMood.sad,
+      stage: ReminderStage.lostWeek,
+      mood: MascotMood.lost,
       title: 'Язык ждёт',
       body: 'Он забывается быстрее, чем кажется. Один бой — и вернулись.',
     );
 
-/// Настроение для картинки, когда напоминания нет: игрок открыл приложение
-/// и заслужил довольного персонажа.
-MascotMood moodForToday(ReminderState state) =>
-    state.practisedToday ? MascotMood.cheerful : pickReminder(state)!.mood;
+/// Состояние, дающее ровно этот срок. Нужно отладке: проверяющий
+/// выбирает срок, а не подбирает дни, при которых тот получится.
+ReminderState stateForStage(ReminderStage stage, {required int energyMax}) {
+  final info = stageInfo(stage);
+  return ReminderState(
+    daysSincePractice: info.probeDays,
+    // Серия нужна только сгорающему сроку: у остальных она к этому
+    // моменту давно сгорела, и рисовать её значило бы врать.
+    streakDays: stage == ReminderStage.burning ? 1 : 0,
+    // Вечер: именно в этот час приходят настоящие напоминания.
+    hour: 21,
+    energy: energyMax,
+    energyMax: energyMax,
+  );
+}
 
 /// Каким станет состояние через [daysAhead] дней, если игрок так и не
 /// зайдёт, и каким будет час в момент напоминания.

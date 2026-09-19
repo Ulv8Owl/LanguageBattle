@@ -37,29 +37,73 @@ void main() {
       // отключают их не по одному, а все сразу и навсегда.
       expect(pickReminder(state(days: 0)), isNull);
       expect(pickReminder(state(days: 0, streak: 9, hour: 23)), isNull);
+      expect(stageOf(state(days: 0)), isNull);
     });
 
-    test('серия догорает сегодня — торопим, и только тогда', () {
+    test('дуга настроений повторяет дуолинговскую', () {
+      // Тревожится в последний вечер, злится назавтра, обижается на
+      // третий, плачет на пятый, перестаёт считать через неделю. Это и
+      // есть «система настроений», а не украшение.
+      final arc = {
+        1: MascotMood.worried,
+        2: MascotMood.angry,
+        3: MascotMood.sad,
+        4: MascotMood.sad,
+        5: MascotMood.crying,
+        6: MascotMood.crying,
+        7: MascotMood.lost,
+        30: MascotMood.lost,
+      };
+      arc.forEach((days, mood) {
+        expect(pickReminder(state(days: days))!.mood, mood,
+            reason: 'на $days-й день настроение должно быть ${mood.name}');
+      });
+    });
+
+    test('срок меняется ровно там, где игрок это различает', () {
+      expect(stageOf(state(days: 1)), ReminderStage.endOfDay);
+      expect(stageOf(state(days: 2)), ReminderStage.secondDay);
+      expect(stageOf(state(days: 3)), ReminderStage.thirdDay);
+      expect(stageOf(state(days: 4)), ReminderStage.thirdDay);
+      expect(stageOf(state(days: 5)), ReminderStage.fifthDay);
+      expect(stageOf(state(days: 7)), ReminderStage.lostWeek);
+    });
+
+    test('серия догорает — свой срок, своё лицо, свой звук', () {
       final evening = pickReminder(state(days: 1, streak: 7, hour: 20))!;
+      expect(evening.stage, ReminderStage.burning);
       expect(evening.mood, MascotMood.worried);
       expect(evening.title, contains('7'));
 
       // Днём та же серия — повод позвать, а не торопить: до полуночи
       // ещё полдня, и «срочно» в полдень обесценивает «срочно» в девять.
       final noon = pickReminder(state(days: 1, streak: 7, hour: 12))!;
+      expect(noon.stage, ReminderStage.endOfDay);
       expect(noon.mood, MascotMood.waiting);
     });
 
-    test('серии нет — не обещаем её сохранность', () {
+    test('вечером последнего дня — торопим и без серии', () {
+      // Терять нечего, но день всё равно заканчивается, и это
+      // единственное, что ещё можно успеть.
       final r = pickReminder(state(days: 1, streak: 0, hour: 21))!;
-      expect(r.mood, MascotMood.waiting);
-      expect(r.body, isNot(contains('серия')));
+      expect(r.stage, ReminderStage.endOfDay);
+      expect(r.mood, MascotMood.worried);
+      expect(r.body, isNot(contains('Серия')));
     });
 
-    test('пропал на несколько дней — считаем дни, а не серию', () {
-      final r = pickReminder(state(days: 4, streak: 0))!;
-      expect(r.mood, MascotMood.sad);
-      expect(r.title, contains('4'));
+    test('каждому сроку — свой набор текстов', () {
+      // Пересечься они не должны: один и тот же текст на втором и на
+      // седьмом дне обесценивает оба.
+      final seen = <String>{};
+      for (final days in [1, 2, 3, 5, 9]) {
+        final recent = <String>[];
+        for (var i = 0; i < 2; i++) {
+          final r = pickReminder(state(days: days), recentIds: recent)!;
+          expect(seen.add(r.id), isTrue,
+              reason: 'текст ${r.id} повторяется на разных сроках');
+          recent.add(r.id);
+        }
+      }
     });
 
     test('полная энергия не вытесняет остальное, а встаёт в очередь', () {
@@ -76,7 +120,7 @@ void main() {
       }
       expect(ids.length, 3, reason: 'три подряд — три разных текста');
       expect(ids.any((id) => id.startsWith('restless')), isTrue);
-      expect(ids.any((id) => id.startsWith('waiting')), isTrue);
+      expect(ids.any((id) => id.startsWith('evening')), isTrue);
     });
 
     test('неполная энергия про энергию молчит', () {
@@ -84,7 +128,7 @@ void main() {
       for (var i = 0; i < 4; i++) {
         final r = pickReminder(state(energy: 3, energyMax: 50),
             recentIds: recent)!;
-        expect(r.mood, MascotMood.waiting);
+        expect(r.mood, isNot(MascotMood.restless));
         recent.add(r.id);
       }
     });
@@ -94,25 +138,60 @@ void main() {
       // всех, а не первый по списку.
       final r = pickReminder(
         state(days: 5),
-        recentIds: const ['lost.days', 'lost.back', 'lost.back'],
+        recentIds: const ['fifth.crying', 'fifth.doubt', 'fifth.doubt'],
       )!;
-      expect(r.id, 'lost.days');
+      expect(r.id, 'fifth.crying');
     });
 
     test('дни и часы склоняются по-русски', () {
-      String title(int days) => pickReminder(state(days: days))!.title;
-      expect(title(2), contains('2 дня'));
-      expect(title(5), contains('5 дней'));
-      expect(title(11), contains('11 дней'));
-      expect(title(21), contains('21 день'));
-      expect(title(22), contains('22 дня'));
+      String streak(int n) =>
+          doneTodayReminder(state(days: 0, streak: n)).title;
+      expect(streak(1), contains('1 день'));
+      expect(streak(2), contains('2 дня'));
+      expect(streak(5), contains('5 дней'));
+      expect(streak(11), contains('11 дней'));
+      expect(streak(21), contains('21 день'));
+      expect(streak(22), contains('22 дня'));
 
-      // Часы — в тексте про догорающую серию.
-      String body(int hour) =>
-          pickReminder(state(days: 1, streak: 3, hour: hour))!.body;
+      // Часы — в вечернем тексте про остаток дня.
+      String body(int hour) => pickReminder(
+            state(days: 1, hour: hour),
+            recentIds: const [],
+          )!.body;
       expect(body(23), contains('1 час'));
       expect(body(21), contains('3 часа'));
       expect(body(19), contains('5 часов'));
+    });
+  });
+
+  group('отладка по сроку', () {
+    test('подставленное состояние даёт ровно тот срок', () {
+      // Иначе кнопка «показать 5 дней» присылала бы третий, и проверка
+      // врала бы молча.
+      for (final stage in ReminderStage.values) {
+        final probe = stateForStage(stage, energyMax: 50);
+        expect(stageOf(probe), stage,
+            reason: 'для ${stage.name} подставлено ${probe.daysSincePractice} дней');
+        expect(pickReminder(probe)!.stage, stage);
+      }
+    });
+
+    test('обычные сроки — все, кроме сгорающего', () {
+      // У сгорающего свой цвет, таймер и отдельная кнопка: мешать его в
+      // список «обычных» значит проверять не то, что проверяешь.
+      expect(ordinaryStages, isNot(contains(ReminderStage.burning)));
+      expect(ordinaryStages.length, ReminderStage.values.length - 1);
+      for (final stage in ordinaryStages) {
+        expect(stageInfo(stage).label, isNotEmpty);
+      }
+    });
+
+    test('выбор срока и отправка — в настройках', () {
+      final settings =
+          File('lib/features/profile/settings_screen.dart').readAsStringSync();
+      expect(settings, contains('Срок для проверки'));
+      expect(settings, contains('Reminders.preview(_stage)'));
+      expect(settings, contains('Reminders.preview(ReminderStage.burning)'));
     });
   });
 
@@ -264,14 +343,47 @@ void main() {
       );
     });
 
-    test('звук лежит там, где его ищет канал', () {
+    test('у каждого срока свой звук, и он лежит файлом', () {
       // Имя ресурса — единственная связь между кодом и файлом: ссылок на
       // него в коде нет, и опечатку видно только молчащим уведомлением.
-      final sound =
-          File('android/app/src/main/res/raw/$kReminderSound.wav');
-      expect(sound.existsSync(), isTrue,
-          reason: 'канал просит @raw/$kReminderSound');
-      expect(sound.readAsBytesSync().sublist(0, 4), 'RIFF'.codeUnits);
+      final sounds = <String>{};
+      for (final stage in ReminderStage.values) {
+        final name = stageInfo(stage).sound;
+        expect(sounds.add(name), isTrue,
+            reason: 'срок ${stage.name} звучит так же, как другой');
+        final file = File('android/app/src/main/res/raw/$name.wav');
+        expect(file.existsSync(), isTrue, reason: 'канал просит @raw/$name');
+        expect(file.readAsBytesSync().sublist(0, 4), 'RIFF'.codeUnits);
+      }
+    });
+
+    test('у каждого срока свой канал', () {
+      // Звук Android помнит за КАНАЛОМ и менять у существующего не даёт.
+      // Один канал на все сроки означал бы один звук на все сроки.
+      final channels = <String>{};
+      for (final stage in ReminderStage.values) {
+        final info = stageInfo(stage);
+        expect(channels.add(info.channel), isTrue,
+            reason: 'срок ${stage.name} делит канал с другим');
+        expect(info.channel, matches(RegExp(r'\.v\d+$')),
+            reason: 'без версии в id звук нельзя будет сменить');
+      }
+    });
+
+    test('отжившие каналы удаляются, а не копятся', () {
+      // Канал живёт в настройках телефона дольше, чем в коде: раз
+      // созданный, остаётся там навсегда.
+      expect(obsoleteChannels, isNotEmpty);
+      for (final stage in ReminderStage.values) {
+        expect(obsoleteChannels.contains(stageInfo(stage).channel), isFalse,
+            reason: 'живой канал попал в список на удаление');
+      }
+      expect(read('lib/main.dart'), contains('Reminders.tidyChannels()'));
+      expect(
+        read('android/app/src/main/kotlin/com/chrolingo/app/'
+            'ChrolingoNotification.kt'),
+        contains('deleteNotificationChannel'),
+      );
     });
 
     test('значок уведомления есть во всех плотностях', () {
@@ -306,14 +418,10 @@ void main() {
       // их молча.
       final keep = read('android/app/src/main/res/raw/keep.xml');
       expect(keep, contains('@drawable/$kReminderIcon'));
-      expect(keep, contains('@raw/$kReminderSound'));
+      expect(keep, contains('@raw/voice_'));
     });
 
-    test('id канала несёт версию', () {
-      // Звук канала Android фиксирует при СОЗДАНИИ и менять не даёт.
-      // Сменили звук, не сменив id, — игрок продолжит слышать старый.
-      expect(kReminderChannelId, matches(RegExp(r'\.v\d+$')));
-    });
+
   });
 
   group('уведомление со своей разметкой', () {
@@ -483,7 +591,7 @@ void main() {
       // Ассеты Flutter читать некому: и уведомление, и виджет рисуются,
       // когда приложения нет ни в каком виде.
       for (final mood in MascotMood.values) {
-        final name = Reminder(id: 'x', mood: mood, title: '', body: '')
+        final name = Reminder(id: 'x', stage: ReminderStage.endOfDay, mood: mood, title: '', body: '')
             .mascotResource;
         expect(
           File('android/app/src/main/res/drawable-nodpi/$name.png')
@@ -502,16 +610,13 @@ void main() {
       expect(layout().contains('android:layout_height="64dp"'), isFalse);
     });
 
-    test('срочное идёт своим каналом', () {
-      // Важность канала задаёт игрок, и она одна на канал. Отключив
-      // надоевшие вечерние, он отключил бы и единственное срочное.
-      expect(kStreakChannelId, isNot(kReminderChannelId));
-      expect(kStreakChannelId, matches(RegExp(r'\.v\d+$')));
+    test('канал и звук берёт срок, а не отправка', () {
       final code = read('lib/core/reminders.dart');
-      expect(code, contains('burning ? kStreakChannelId : kReminderChannelId'));
+      expect(code, contains('channelId: info.channel'));
+      expect(code, contains('sound: info.sound'));
       // И вечернее, и превью собирает ОДНА функция: иначе кнопка
       // проверки однажды покажет не то, что придёт вечером.
-      expect(RegExp(r'_spec\(').allMatches(code).length, greaterThanOrEqualTo(4));
+      expect(RegExp(r'_spec\(').allMatches(code).length, greaterThanOrEqualTo(3));
     });
 
     test('разметка и подложки защищены от сжатия ресурсов', () {
@@ -521,10 +626,9 @@ void main() {
       expect(keep, contains('@drawable/notification_bg_'));
     });
 
-    test('обе проверки вынесены в настройки', () {
-      final settings = read('lib/features/profile/settings_screen.dart');
-      expect(settings, contains('Reminders.preview'));
-      expect(settings, contains('Reminders.previewStreak'));
+    test('проверка вынесена в настройки', () {
+      expect(read('lib/features/profile/settings_screen.dart'),
+          contains('Reminders.preview('));
     });
   });
 
@@ -688,7 +792,7 @@ void main() {
   group('картинки настроений', () {
     test('на каждое настроение есть свой файл', () {
       for (final mood in MascotMood.values) {
-        final asset = Reminder(id: 'x', mood: mood, title: '', body: '')
+        final asset = Reminder(id: 'x', stage: ReminderStage.endOfDay, mood: mood, title: '', body: '')
             .imageAsset;
         expect(File(asset).existsSync(), isTrue,
             reason: 'нет картинки $asset — уведомление уйдёт без неё');

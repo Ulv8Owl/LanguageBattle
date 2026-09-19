@@ -15,6 +15,7 @@ import '../../core/nav_state.dart';
 import '../../data/content_languages.dart';
 import '../../data/judge_models.dart';
 import '../../data/my_languages.dart';
+import '../../data/reminder_templates.dart';
 import '../../widgets/language_fields.dart';
 import '../../widgets/language_picker.dart';
 import '../../data/player_rating.dart';
@@ -43,6 +44,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
   bool _reminders = false;
   int _reminderHour = kReminderDefaultHour;
   bool _savingReminders = false;
+
+  /// Какой срок проверяем отладочной кнопкой.
+  ///
+  /// ВЫБОР ОТДЕЛЬНО ОТ ОТПРАВКИ — по той же причине, по какой он вообще
+  /// нужен: настоящее «вас не было пять дней» приходит на пятый день, и
+  /// без подмены срока проверка каждого стоила бы столько же дней.
+  ReminderStage _stage = ReminderStage.endOfDay;
 
   /// Что система знает о виджете. Пока не спросили — null.
   WidgetStatus? _widget;
@@ -87,6 +95,38 @@ class _SettingsScreenState extends State<SettingsScreen> {
     _loadJudgeModels();
     _loadReminders();
     _loadWidget();
+  }
+
+  /// Выбор срока. Сроки перечислены словами игрока, а не кода: проверяют
+  /// «третий день», а не `ReminderStage.thirdDay`.
+  Future<void> _pickStage() async {
+    final picked = await showModalBottomSheet<ReminderStage>(
+      context: context,
+      backgroundColor: AppColors.navy2,
+      builder: (ctx) => SafeArea(
+        child: ListView(
+          shrinkWrap: true,
+          children: [
+            for (final stage in ordinaryStages)
+              ListTile(
+                title: Text(stageInfo(stage).label,
+                    style: AppFonts.ui(fontSize: 14)),
+                subtitle: Text(
+                  'настроение: ${stageInfo(stage).mood.name} · '
+                  'звук: ${stageInfo(stage).sound}',
+                  style: AppFonts.mono(fontSize: 9, color: AppColors.muted),
+                ),
+                trailing: stage == _stage
+                    ? const Icon(Icons.check, color: AppColors.gold, size: 18)
+                    : null,
+                onTap: () => Navigator.of(ctx).pop(stage),
+              ),
+          ],
+        ),
+      ),
+    );
+    if (picked == null || !mounted) return;
+    setState(() => _stage = picked);
   }
 
   Future<void> _loadWidget() async {
@@ -868,11 +908,21 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   ),
                   const Divider(height: 1, color: AppColors.line),
                   _Row(
+                    icon: Icons.history_toggle_off,
+                    title: 'Срок для проверки',
+                    trailing: Text(
+                      stageInfo(_stage).label,
+                      style: AppFonts.mono(fontSize: 10, color: AppColors.muted),
+                    ),
+                    onTap: _pickStage,
+                  ),
+                  const Divider(height: 1, color: AppColors.line),
+                  _Row(
                     icon: Icons.notifications_active_outlined,
                     title: 'Показать обычное',
                     trailing: const Icon(Icons.play_arrow,
                         color: AppColors.muted, size: 20),
-                    onTap: Reminders.preview,
+                    onTap: () => Reminders.preview(_stage),
                   ),
                   const Divider(height: 1, color: AppColors.line),
                   _Row(
@@ -880,7 +930,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     title: 'Показать срочное с таймером',
                     trailing: const Icon(Icons.play_arrow,
                         color: AppColors.muted, size: 20),
-                    onTap: Reminders.previewStreak,
+                    onTap: () => Reminders.preview(ReminderStage.burning),
                   ),
                   const Divider(height: 1, color: AppColors.line),
                   _Row(

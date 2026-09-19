@@ -37,6 +37,13 @@ class RichNotifications(private val context: android.content.Context) :
                     ChrolingoWidget.save(context, call.arguments as String)
                     result.success(true)
                 }
+                "dropChannels" -> {
+                    ChrolingoNotification.dropChannels(
+                        context,
+                        org.json.JSONArray(call.arguments as String),
+                    )
+                    result.success(true)
+                }
                 "widgetDiagnose" -> result.success(ChrolingoWidget.diagnose(context))
                 "widgetPin" -> result.success(ChrolingoWidget.requestPin(context))
                 else -> result.notImplemented()

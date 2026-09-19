@@ -87,8 +87,20 @@ class MascotWidget {
     // виджета этого достаточно — в отличие от уведомления, ему не нужно
     // дожидаться вечера, чтобы показать отсчёт: он никого не перебивает.
     final burning = state.streakDays > 0 && state.daysSincePractice == 1;
+    // Раз уж показываем отсчёт — берём и лицо к нему. Спокойный
+    // хамелеон над тикающими цифрами противоречит сам себе, а
+    // «догорающий» срок наступает по ЧАСУ, которого у виджета нет.
+    final shown = burning
+        ? ReminderState(
+            daysSincePractice: 1,
+            streakDays: state.streakDays,
+            hour: 21,
+            energy: state.energy,
+            energyMax: state.energyMax,
+          )
+        : state;
     final reminder =
-        state.practisedToday ? doneTodayReminder(state) : pickReminder(state)!;
+        state.practisedToday ? doneTodayReminder(state) : pickReminder(shown)!;
 
     try {
       await nativeChannel.invokeMethod<bool>(

@@ -55,11 +55,16 @@ origin`), а не у списка внутри скрипта: такой спи
   промолчали» от «receiver не объявлен» нельзя ничем: ни ошибки, ни лога.
   Молча ломают: незаявленный `ReminderAlarmReceiver`, отсутствие
   `RECEIVE_BOOT_COMPLETED` (перезагрузка стирает все будильники) или
-  `POST_NOTIFICATIONS`, выброшенные R8 ресурсы (`res/raw/keep.xml`). Звук
-  и вибрацию Android запоминает при СОЗДАНИИ канала и менять у
-  существующего не даёт — меняя звук, менять `kReminderChannelId`. Имя
+  `POST_NOTIFICATIONS`, выброшенные R8 ресурсы (`res/raw/keep.xml`). Имя
   значка — ИМЯ РЕСУРСА (`ic_notification`), без `@drawable/`: ищется через
   `getIdentifier`. Всё это сторожит `test/reminders_test.dart`.
+- **Звук принадлежит КАНАЛУ и фиксируется при его создании** («Only
+  modifiable before the channel is submitted»). Поэтому у каждого СРОКА
+  свой канал и свой звук — см. `_stages` в `reminder_templates.dart`.
+  Меняя звук, менять и `.vN` в id канала: иначе игрок продолжит слышать
+  старый, и выглядеть это будет как «звук не применился». Отживший канал
+  остаётся в настройках телефона навсегда — его имя идёт в
+  `obsoleteChannels`, оттуда его удаляет `Reminders.tidyChannels()`.
 - **`setStyle(DecoratedCustomViewStyle())` — это ПРОСЬБА нарисовать шапку
   и белую рамку. НЕ ЗВАТЬ.** Документация прямо: «If you don't want your
   notification decorated with the standard notification icon and header

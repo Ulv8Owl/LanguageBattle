@@ -30,24 +30,6 @@ import '../data/practice_diary.dart';
 import '../data/reminder_templates.dart';
 import 'native_ui.dart';
 
-/// id канала обычных напоминаний.
-///
-/// МЕНЯТЬ ВМЕСТЕ СО ЗВУКОМ ИЛИ ВИБРАЦИЕЙ. Android запоминает их при
-/// СОЗДАНИИ канала и менять у существующего не даёт («Only modifiable
-/// before the channel is submitted»). Сменили звук, не сменив id, —
-/// игрок продолжит слышать старый.
-const String kReminderChannelId = 'chrolingo.reminders.v1';
-
-/// Канал срочного напоминания — «серия сгорит сегодня».
-///
-/// ОТДЕЛЬНЫЙ НАРОЧНО. Важность канала задаёт игрок, и она у него одна на
-/// канал: отключив надоевшие вечерние напоминания, он вместе с ними
-/// отключил бы и единственное, которое стоит показать поверх остальных.
-const String kStreakChannelId = 'chrolingo.streak.v1';
-
-/// Имя файла в `android/app/src/main/res/raw` без расширения.
-const String kReminderSound = 'reminder';
-
 /// Значок в строке состояния: имя ресурса в `res/drawable-*`, БЕЗ
 /// «@drawable/» и без расширения — так его ищет `getIdentifier`.
 const String kReminderIcon = 'ic_notification';
@@ -61,7 +43,6 @@ const int kReminderDefaultHour = 20;
 const int _firstId = 4200;
 const int _weeklyId = 4299;
 const int _previewId = 4199;
-const int _streakPreviewId = 4198;
 
 const String _enabledKey = 'reminders.enabled';
 const String _hourKey = 'reminders.hour';
@@ -187,41 +168,30 @@ class Reminders {
         repeatWeekly: true,
       );
 
-  /// Показать обычное напоминание прямо сейчас — проверить вид, звук и
-  /// картинку.
+  /// Показать напоминание выбранного срока прямо сейчас.
   ///
-  /// БЕЗ ЭТОГО ПРОВЕРИТЬ НЕЧЕМ. Настоящее приходит вечером и только если
-  /// игрок не занимался; ждать до вечера, чтобы узнать, что звук не тот,
-  /// — это один день на один ответ.
-  static Future<void> preview() async {
-    final state = await PracticeDiary.state();
-    // Занимался сегодня — напоминания нет и быть не должно, но показать
-    // ЧТО-ТО надо: проверяют оформление, а не правила.
-    final reminder = pickReminder(state) ??
-        pickReminder(projectState(state, 1, DateTime.now().hour))!;
+  /// БЕЗ ЭТОГО ПРОВЕРИТЬ НЕЧЕМ. Настоящее «вас не было пять дней»
+  /// приходит на пятый день — то есть проверка вида и звука стоила бы
+  /// пяти дней ожидания на каждый срок.
+  ///
+  /// У каждого срока СВОЙ номер уведомления: так они ложатся в шторку
+  /// рядом, и их видно и слышно подряд, а не по одному поверх другого.
+  static Future<void> preview(ReminderStage stage) async {
+    final diary = await PracticeDiary.state();
+    final state = stateForStage(stage, energyMax: diary.energyMax);
+    final reminder = pickReminder(state)!;
     await RichNotification.show(
-      _spec(id: _previewId, reminder: reminder, state: state),
+      _spec(id: _previewId - stage.index, reminder: reminder, state: state),
     );
   }
 
-  /// Показать срочное напоминание — с живым отсчётом до полуночи, на
-  /// другой подложке и поверх остальных.
-  static Future<void> previewStreak() async {
-    final diary = await PracticeDiary.state();
-    // Серии может не быть вовсе, а показать надо именно срочное. Берём
-    // состояние «вчера занимался, серия жива, поздний вечер»: ровно то,
-    // ради чего это уведомление и существует.
-    final state = ReminderState(
-      daysSincePractice: 1,
-      streakDays: diary.streakDays > 0 ? diary.streakDays : 1,
-      hour: 21,
-      energy: diary.energy,
-      energyMax: diary.energyMax,
-    );
-    await RichNotification.show(
-      _spec(id: _streakPreviewId, reminder: pickReminder(state)!, state: state),
-    );
-  }
+  /// Убрать каналы, которых больше нет в коде.
+  ///
+  /// Канал, созданный однажды, остаётся в настройках телефона навсегда —
+  /// приложение о нём забыло, а игрок видит. Список, где половина мертва,
+  /// выглядит неряшливо, и отключают в нём обычно всё сразу.
+  static Future<void> tidyChannels() =>
+      RichNotification.dropChannels(obsoleteChannels);
 
   /// Одно напоминание целиком: и для показа сейчас, и для будильника.
   static NotificationSpec _spec({
@@ -231,18 +201,18 @@ class Reminders {
     DateTime? at,
     bool repeatWeekly = false,
   }) {
-    // Серия догорает именно сегодня — единственный повод торопить и
-    // единственный, где счётчик до полуночи что-то значит.
-    final burning = state.streakDays > 0 &&
-        state.daysSincePractice == 1 &&
-        state.lateEvening;
+    final info = stageInfo(reminder.stage);
+    final burning = reminder.stage == ReminderStage.burning;
     final day = at ?? DateTime.now();
 
     return NotificationSpec(
       id: id,
-      channelId: burning ? kStreakChannelId : kReminderChannelId,
-      channelName: burning ? 'Серия сгорает' : 'Напоминания',
-      sound: kReminderSound,
+      // КАНАЛ И ЗВУК БЕРЁТ СРОК, А НЕ ОТПРАВКА. У каждого срока свой
+      // звук, а звук Android помнит за каналом и менять у существующего
+      // не даёт — значит, и канал обязан быть свой.
+      channelId: info.channel,
+      channelName: info.channelName,
+      sound: info.sound,
       title: reminder.title,
       // В срочном виде заголовок уступает место крупным цифрам, поэтому
       // текст обязан читаться сам по себе — и не спорить с таймером.

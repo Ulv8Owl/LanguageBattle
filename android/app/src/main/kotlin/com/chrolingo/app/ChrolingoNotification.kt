@@ -217,6 +217,21 @@ object ChrolingoNotification {
         return views
     }
 
+    /**
+     * Убрать каналы, которых больше нет в коде.
+     *
+     * Канал живёт в настройках телефона дольше, чем в приложении: раз
+     * созданный, он остаётся там навсегда, даже если код о нём забыл.
+     * Удалить его может только само приложение.
+     */
+    fun dropChannels(context: Context, ids: org.json.JSONArray) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
+        val manager = manager(context)
+        for (i in 0 until ids.length()) {
+            manager.deleteNotificationChannel(ids.getString(i))
+        }
+    }
+
     private fun ensureChannel(context: Context, spec: NotificationSpec) {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
         val manager = manager(context)

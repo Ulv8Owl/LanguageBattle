@@ -136,6 +136,11 @@ class RichNotification {
 
   static Future<bool> cancelAll() => _call('cancelAll', null);
 
+  /// Удалить каналы по именам. Нужно, когда звук или срок переименовали:
+  /// старый канал иначе останется в настройках телефона навсегда.
+  static Future<bool> dropChannels(List<String> ids) =>
+      _call('dropChannels', jsonEncode(ids));
+
   static Future<bool> _call(String method, String? payload) async {
     if (!supported) return false;
     try {
