@@ -4,6 +4,7 @@ import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../core/app_locale.dart';
 import '../../core/supabase_client.dart';
 import '../../core/theme.dart';
 import '../../data/achievements.dart';
@@ -18,13 +19,13 @@ import '../../widgets/ai_avatar.dart';
 import '../../widgets/chrolingo_widgets.dart';
 import '../../widgets/speak_button.dart';
 
-/// «Тренировка» — три шага вокруг ОДНОЙ фразы.
+/// «Флэш-Карточки» — три шага вокруг ОДНОЙ фразы.
 ///
 /// 1. Игрок видит фразу на родном языке и отмечает слова, перевода которых
 ///    не знает. Не набралось десяти — приходит следующая фраза.
 /// 2. Отмеченные слова он проходит карточками.
 /// 3. Ту фразу, слова которой он учил, он произносит вслух — раундом,
-///    ничем не отличающимся от Одиночной Игры.
+///    ничем не отличающимся от «Голоса».
 ///
 /// ЧЕМ ЭТО ЛУЧШЕ ПРЕЖНЕЙ ТРЕНИРОВКИ. Раньше это была колода из ста слов,
 /// купленных набором в Магазине: слова приходили сами, из списка, никак не
@@ -88,7 +89,8 @@ class _FlashcardsScreenState extends State<FlashcardsScreen> {
   /// чем игрок дочитал.
   List<AchievementGain> _gained = const [];
 
-  /// Карточки: очередь и её правила — общие с прежней Тренировкой.
+  /// Карточки: очередь и её правила — общие с прежней Тренировкой
+  /// (так режим назывался до переименования).
   TrainingSession? _session;
   bool _flipped = false;
   int _known = 0;
@@ -267,14 +269,18 @@ class _FlashcardsScreenState extends State<FlashcardsScreen> {
   /// которую игрок видел только что, и вспоминать её не придётся.
   void _startSpeaking() {
     final index = _lastPickedPhrase >= 0 ? _lastPickedPhrase : _phraseIndex;
-    context.pushReplacement('/training?phrase=$index&title=Тренировка');
+    // Имя режима уезжает в АДРЕС, поэтому его обязательно кодировать:
+    // в «Флэш-Карточки» есть и кириллица, и дефис, а сырая строка в
+    // query сломала бы разбор адреса.
+    final title = Uri.encodeQueryComponent(AppLocale.strings.modeFlashcards);
+    context.pushReplacement('/training?phrase=$index&title=$title');
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Тренировка'),
+        title: Text(AppLocale.strings.modeFlashcards),
         actions: [
           if (_stage == _Stage.picking || _stage == _Stage.cards)
             Padding(
@@ -534,7 +540,7 @@ class _FlashcardsScreenState extends State<FlashcardsScreen> {
   }
 }
 
-/// Реплика хамелеона — та же, что в Одиночной Игре, и по той же причине
+/// Реплика хамелеона — та же, что в «Голосе», и по той же причине
 /// слева с аватаркой: говорит ИИ, а не игрок.
 class _ChameleonSays extends StatelessWidget {
   final int level;
@@ -582,7 +588,7 @@ const List<String> cefrNames = ['A1', 'A2', 'B1', 'B2', 'C1', 'C2'];
 
 /// Фраза, в которой нажимается КАЖДОЕ СЛОВО ПО ОТДЕЛЬНОСТИ.
 ///
-/// В Одиночной Игре по нажатию переворачивается ЭЛЕМЕНТ — кусок смысла
+/// В «Голосе» по нажатию переворачивается ЭЛЕМЕНТ — кусок смысла
 /// целиком, и там это правильно: подсказка нужна на обороте, а не на
 /// слове. Здесь наоборот: игрок отмечает то, чего не знает, а не знать
 /// можно «семь», прекрасно зная «в».

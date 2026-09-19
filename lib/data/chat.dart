@@ -89,9 +89,9 @@ Future<void> offerRematch(String matchId) =>
 /// Принимает реванш и возвращает id нового боя.
 ///
 /// Матч создаёт сервер (RPC rematch_start): режим и языковую пару он
-/// копирует из старого боя, поэтому реванш одинаково работает в Дуэли и в
-/// Состязании. Соперник узнаёт о новом бое из того же чата — сообщением
-/// 'rematch_started', которое пишет та же функция.
+/// копирует из старого боя, поэтому реванш одинаково работает в «Общении»
+/// и в «Голос Vs Голос». Соперник узнаёт о новом бое из того же чата —
+/// сообщением 'rematch_started', которое пишет та же функция.
 Future<String> acceptRematch(String matchId) async {
   final id = await supabase.rpc('rematch_start', params: {'p_match_id': matchId});
   return id as String;

@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../core/app_locale.dart';
 import '../../core/game_access.dart';
 import '../../core/supabase_client.dart';
 import '../../core/theme.dart';
@@ -39,7 +40,7 @@ class _MatchmakingScreenState extends State<MatchmakingScreen> {
   /// Сколько экран ищет соперника.
   ///
   /// БЫЛО ТРИДЦАТЬ СЕКУНД, и это была настоящая причина, по которой
-  /// Состязание «не находило никого». Тикет в очереди жил 35 секунд, экран
+  /// «Голос Vs Голос» «не находил никого». Тикет в очереди жил 35 секунд, экран
   /// сдавался через 30 — то есть матч мог состояться, только если оба
   /// игрока стоят в очереди в одном и том же получасовом окне длиной в
   /// полминуты. Два человека, открывшие режим с разницей в минуту, не
@@ -74,7 +75,9 @@ class _MatchmakingScreenState extends State<MatchmakingScreen> {
   /// ожиданием, первое нет, и игрок вправе знать, что именно происходит.
   String _searchNote = '';
 
-  String get _modeName => widget.gameMode == 'native_duel' ? 'Дуэль' : 'Состязание';
+  String get _modeName => widget.gameMode == 'native_duel'
+      ? AppLocale.strings.modeTalk
+      : AppLocale.strings.modeVoiceDuel;
 
   @override
   void initState() {
@@ -116,7 +119,7 @@ class _MatchmakingScreenState extends State<MatchmakingScreen> {
       // native_for — родной язык ИМЕННО этой пары (миграция 0025), а не
       // общий профильный: у полиглота с несколькими родными активная пара
       // может быть anchored не на главном («японский от китайского», пока
-      // главный родной — русский). Соперника в Дуэли ищем по родному ЭТОЙ
+      // главный родной — русский). Соперника в «Общении» ищем по родному ЭТОЙ
       // пары — иначе матч подобрал бы носителя не того языка, с которого
       // игрок на самом деле учит. null у пар, не тронутых после этой
       // миграции, — тогда откат на общий профильный.

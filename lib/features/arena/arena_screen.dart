@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../core/app_locale.dart';
 import '../../core/game_access.dart';
 import '../../core/app_events.dart';
 import '../../core/leagues.dart';
@@ -12,6 +13,7 @@ import '../../data/player_rating.dart';
 import '../../data/avatar_parts.dart';
 import '../../widgets/avatar_portrait.dart';
 import '../../widgets/chrolingo_widgets.dart';
+import '../../widgets/mode_glyphs.dart';
 
 class ArenaScreen extends StatefulWidget {
   const ArenaScreen({super.key});
@@ -24,9 +26,11 @@ class ArenaScreen extends StatefulWidget {
 /// какая строка сейчас подсвечена (задача итерации, п.6: по умолчанию
 /// ничего не подсвечено, подсветка появляется только пока открыта плашка
 /// этого режима).
-enum _ModeKey { training, solo, sparring, duel,
-  listening,
-}
+///
+/// Порядок здесь тот же, что на экране, и это не совпадение: список Арены
+/// читается сверху вниз как путь игрока — от карточек без ИИ и энергии до
+/// разговора с живым человеком.
+enum _ModeKey { training, listening, solo, sparring, duel }
 
 class _ArenaScreenState extends State<ArenaScreen> {
   Map<String, dynamic>? _profile;
@@ -84,10 +88,11 @@ class _ArenaScreenState extends State<ArenaScreen> {
     }
   }
 
-  /// Единственная точка входа в любой из четырёх режимов. Тренировка не
-  /// использует AI (нет ASR/LLM пайплайна вообще), поэтому она никогда не
-  /// закрывается пробным периодом — три остальных режима закрываются,
-  /// когда подписка/пробный период не активны (задача итерации, п.4/п.7).
+  /// Единственная точка входа в любой из пяти режимов. Карточки и
+  /// Аудирование не используют AI (нет ASR/LLM пайплайна вообще), поэтому
+  /// они никогда не закрываются пробным периодом — три голосовых режима
+  /// закрываются, когда подписка/пробный период не активны (задача
+  /// итерации, п.4/п.7).
   void _onModeTap(_ModeKey key, {required bool aiGated, required WidgetBuilder sheetBuilder}) {
     setState(() => _selectedMode = key);
     final locked = aiGated && !_wallet.hasAccess;
@@ -193,11 +198,11 @@ class _ArenaScreenState extends State<ArenaScreen> {
   Widget _buildTrainingSheet(BuildContext sheetContext) {
     // ВЫБОРА УРОВНЯ ЗДЕСЬ БОЛЬШЕ НЕТ. Он выбирал набор слов из тысячи, а
     // наборов не осталось: слова приходят из фразы раунда, а её уровень —
-    // лига игрока, ровно как в Одиночной Игре. Тренироваться на чужом
-    // уровне значило бы учить слова, которые в игре не встретятся.
+    // лига игрока, ровно как в «Голосе». Учить слова чужого уровня
+    // значило бы учить те, которые в игре не встретятся.
     return _sheetChrome(
       sheetContext: sheetContext,
-      title: 'Тренировка',
+      title: AppLocale.strings.modeFlashcards,
       description: 'Фраза твоего уровня: отмечаешь слова, перевода которых не '
           'знаешь, проходишь их карточками и в конце говоришь эту фразу вслух. '
           'Выбор слов и карточки не тратят энергию и работают без подписки.',
@@ -214,9 +219,10 @@ class _ArenaScreenState extends State<ArenaScreen> {
   Widget _buildSoloSheet(BuildContext sheetContext) {
     return _sheetChrome(
       sheetContext: sheetContext,
-      title: 'Одиночная Игра',
-      description: 'Практика с AI-фидбеком, вне рейтинга. Две попытки на фразу: '
-          'после первой — подробный разбор ошибок, вторая идёт в зачёт.',
+      title: AppLocale.strings.modeVoice,
+      description: 'Говоришь фразу вслух, запись разбирает ИИ. Вне рейтинга, '
+          'две попытки на фразу: после первой — подробный разбор ошибок, '
+          'вторая идёт в зачёт.',
       stats: const [
         _Stat(value: '5', label: 'раундов', color: AppColors.gold),
         _Stat(value: '—', label: 'рейтинг', color: AppColors.cyan),
@@ -235,8 +241,8 @@ class _ArenaScreenState extends State<ArenaScreen> {
   Widget _buildSparringSheet(BuildContext sheetContext) {
     return _sheetChrome(
       sheetContext: sheetContext,
-      title: 'Состязание',
-      description: 'PvP против любого игрока с тем же изучаемым языком. '
+      title: AppLocale.strings.modeVoiceDuel,
+      description: 'Голос против голоса: любой игрок с тем же изучаемым языком. '
           '10 раундов, одно голосовое за раунд.',
       stats: [
         const _Stat(value: '10', label: 'раундов', color: AppColors.gold),
@@ -259,8 +265,8 @@ class _ArenaScreenState extends State<ArenaScreen> {
   Widget _buildDuelSheet(BuildContext sheetContext) {
     return _sheetChrome(
       sheetContext: sheetContext,
-      title: 'Дуэль',
-      description: 'Бой против настоящего носителя изучаемого языка. '
+      title: AppLocale.strings.modeTalk,
+      description: 'Разговор с настоящим носителем изучаемого языка. '
           '10 раундов, по два голосовых с каждой стороны.',
       stats: [
         const _Stat(value: '10', label: 'раундов', color: AppColors.gold),
@@ -281,7 +287,7 @@ class _ArenaScreenState extends State<ArenaScreen> {
   Widget _buildListeningSheet(BuildContext sheetContext) {
     return _sheetChrome(
       sheetContext: sheetContext,
-      title: 'Аудирование',
+      title: AppLocale.strings.modeListening,
       description: 'Фонотека: записи игры и твои собственные. Свою запись '
           'разбирает модель — на слова со временем и переводом, — а дальше '
           'экран поворачивается, и строка идёт крупно, слово за словом.',
@@ -293,8 +299,8 @@ class _ArenaScreenState extends State<ArenaScreen> {
       // ПОСЛЕ ВОЗВРАТА ПЕРЕЧИТЫВАЕМ КОШЕЛЁК. Арена живёт в оболочке с
       // сохранением состояния и сама по себе ничего не перечитывает: экран
       // поверх неё энергию потратил, а здесь оставалось прежнее число.
-      // Счётчик при этом ОДИН — расходились только показания. Тренировка
-      // рядом делает ровно это же.
+      // Счётчик при этом ОДИН — расходились только показания. Карточки
+      // рядом делают ровно это же.
       onPrimary: () async {
         await context.push('/listening');
         if (mounted) _load();
@@ -310,9 +316,11 @@ class _ArenaScreenState extends State<ArenaScreen> {
     return _sheetChrome(
       sheetContext: sheetContext,
       title: 'Пробный период закончился',
-      description: 'Режимы с подключённым ИИ — Одиночная Игра, Состязание и '
-          'Дуэль — заблокированы до оплаты подписки. Тренировка по-прежнему '
-          'доступна бесплатно, а подписку можно оформить, если сочтёшь нужным.',
+      description: 'Режимы с подключённым ИИ — «${AppLocale.strings.modeVoice}», '
+          '«${AppLocale.strings.modeVoiceDuel}» и «${AppLocale.strings.modeTalk}» — '
+          'заблокированы до оплаты подписки. «${AppLocale.strings.modeFlashcards}» '
+          'по-прежнему доступны бесплатно, а подписку можно оформить, если '
+          'сочтёшь нужным.',
       stats: const [],
       primaryLabel: 'Подписка',
       onPrimary: openShopSubscription,
@@ -325,6 +333,7 @@ class _ArenaScreenState extends State<ArenaScreen> {
     if (_loading) {
       return const Center(child: CircularProgressIndicator());
     }
+    final s = AppLocale.strings;
     // Опыт — из кошелька, а не из профиля: он принадлежит ИЗУЧАЕМОМУ
     // языку (миграция 0051), и колонки users.xp больше нет. Читать её
     // здесь значило бы вечно показывать первый уровень.
@@ -397,41 +406,57 @@ class _ArenaScreenState extends State<ArenaScreen> {
             const _LockedBanner(),
           ],
           const SizedBox(height: 22),
+          // ПОРЯДОК И НАЗВАНИЯ — см. _ModeKey и AppStrings.mode*. Имена
+          // режимов взяты оттуда, а не написаны здесь строкой: тот же
+          // заголовок стоит на экране самого режима, в магазине и в
+          // достижениях, и разойтись им нельзя.
           ChMenuRow(
             // Значок ЗОЛОТОЙ, как у остальных режимов: зелёный выбивался из
-            // ряда и читался как «другое», хотя Тренировка — такой же режим.
-            icon: const ChModeIcon(icon: Icons.style, gradient: [AppColors.gold, Color(0xFFFFE066)]),
-            title: 'Тренировка',
+            // ряда и читался как «другое», хотя карточки — такой же режим.
+            icon: const ChModeIcon(
+              glyph: ModeGlyph(ModeGlyphKind.cards),
+              gradient: [AppColors.gold, Color(0xFFFFE066)],
+            ),
+            title: s.modeFlashcards,
             flagship: _selectedMode == _ModeKey.training,
             onTap: () => _onModeTap(_ModeKey.training, aiGated: false, sheetBuilder: _buildTrainingSheet),
           ),
           const SizedBox(height: 9),
           ChMenuRow(
-            icon: const ChModeIcon(icon: Icons.school, gradient: [AppColors.gold, Color(0xFFFFE066)]),
-            title: 'Одиночная Игра',
+            icon: const ChModeIcon(icon: Icons.headphones, gradient: [AppColors.gold, Color(0xFFFFE066)]),
+            title: s.modeListening,
+            flagship: _selectedMode == _ModeKey.listening,
+            onTap: () => _onModeTap(_ModeKey.listening, aiGated: false, sheetBuilder: _buildListeningSheet),
+          ),
+          const SizedBox(height: 9),
+          ChMenuRow(
+            icon: const ChModeIcon(
+              glyph: ModeGlyph(ModeGlyphKind.mic),
+              gradient: [AppColors.gold, Color(0xFFFFE066)],
+            ),
+            title: s.modeVoice,
             flagship: _selectedMode == _ModeKey.solo,
             onTap: () => _onModeTap(_ModeKey.solo, aiGated: true, sheetBuilder: _buildSoloSheet),
           ),
           const SizedBox(height: 9),
           ChMenuRow(
-            icon: const ChModeIcon(icon: Icons.bolt, gradient: [AppColors.gold, Color(0xFFFFE066)]),
-            title: 'Состязание',
+            icon: const ChModeIcon(
+              glyph: ModeGlyph(ModeGlyphKind.micDuo),
+              gradient: [AppColors.gold, Color(0xFFFFE066)],
+            ),
+            title: s.modeVoiceDuel,
             flagship: _selectedMode == _ModeKey.sparring,
             onTap: () => _onModeTap(_ModeKey.sparring, aiGated: true, sheetBuilder: _buildSparringSheet),
           ),
           const SizedBox(height: 9),
           ChMenuRow(
-            icon: const ChModeIcon(icon: Icons.local_fire_department, gradient: [AppColors.gold, Color(0xFFFFE066)]),
-            title: 'Дуэль',
+            icon: const ChModeIcon(
+              glyph: ModeGlyph(ModeGlyphKind.message),
+              gradient: [AppColors.gold, Color(0xFFFFE066)],
+            ),
+            title: s.modeTalk,
             flagship: _selectedMode == _ModeKey.duel,
             onTap: () => _onModeTap(_ModeKey.duel, aiGated: true, sheetBuilder: _buildDuelSheet),
-          ),
-          const SizedBox(height: 9),
-          ChMenuRow(
-            icon: const ChModeIcon(icon: Icons.headphones, gradient: [AppColors.gold, Color(0xFFFFE066)]),
-            title: 'Аудирование',
-            flagship: _selectedMode == _ModeKey.listening,
-            onTap: () => _onModeTap(_ModeKey.listening, aiGated: false, sheetBuilder: _buildListeningSheet),
           ),
           const SizedBox(height: 24),
           // Список «Активные бои» убран: незавершённых боёв больше не
@@ -586,7 +611,8 @@ class _LockedBanner extends StatelessWidget {
           const SizedBox(width: 8),
           Expanded(
             child: Text(
-              'Пробный период закончился — режимы с ИИ закрыты, Тренировка доступна',
+              'Пробный период закончился — режимы с ИИ закрыты, '
+              '«${AppLocale.strings.modeFlashcards}» доступны',
               style: AppFonts.mono(fontSize: 10, color: AppColors.muted),
             ),
           ),

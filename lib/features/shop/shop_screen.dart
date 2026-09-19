@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
+import '../../core/app_locale.dart';
 import '../../core/game_access.dart';
 import '../../core/nav_state.dart';
 import '../../core/supabase_client.dart';
@@ -11,7 +12,7 @@ import '../../widgets/trial_countdown_banner.dart';
 /// Магазин — три раздела: «Подписка» (карточка тарифа, оформление —
 /// заглушка без платёжного шлюза), «Предметы» (сетка косметики 3×4 со
 /// скроллом и фильтром по категориям) и «Наборы слов» (паки по 100 слов
-/// для Тренировки, по 10 на лигу — открываются по мере роста рейтинга).
+/// для карточек, по 10 на лигу — открываются по мере роста рейтинга).
 class ShopScreen extends StatefulWidget {
   const ShopScreen({super.key});
 
@@ -152,7 +153,7 @@ class _ShopScreenState extends State<ShopScreen> {
           ),
           const SizedBox(height: 14),
           // ВКЛАДКИ «СЛОВА» БОЛЬШЕ НЕТ. Наборы слов были колодой, которую
-          // покупали отдельно от игры. Теперь слова в Тренировку приходят
+          // покупали отдельно от игры. Теперь слова на карточки приходят
           // из фразы раунда — те, которые игрок сам отметил как незнакомые,
           // — и продавать там нечего.
           ChTabBar(
@@ -269,9 +270,11 @@ class _ShopScreenState extends State<ShopScreen> {
                 ],
               ),
               const SizedBox(height: 6),
-              const Text(
-                'Одиночная Игра, Состязание и Дуэль — режимы с подключённым ИИ.',
-                style: TextStyle(color: AppColors.cream, fontSize: 12, height: 1.4),
+              Text(
+                '«${AppLocale.strings.modeVoice}», '
+                '«${AppLocale.strings.modeVoiceDuel}» и '
+                '«${AppLocale.strings.modeTalk}» — режимы с подключённым ИИ.',
+                style: const TextStyle(color: AppColors.cream, fontSize: 12, height: 1.4),
               ),
               const SizedBox(height: 10),
               Row(
@@ -283,19 +286,21 @@ class _ShopScreenState extends State<ShopScreen> {
                 ],
               ),
               const SizedBox(height: 6),
-              const Text(
-                'Тренировка (карточки со словами) — она не использует ИИ и '
-                'играется всегда, с подпиской или без.',
-                style: TextStyle(color: AppColors.cream, fontSize: 12, height: 1.4),
+              Text(
+                '«${AppLocale.strings.modeFlashcards}» и '
+                '«${AppLocale.strings.modeListening}» — они не используют ИИ '
+                'и играются всегда, с подпиской или без.',
+                style: const TextStyle(color: AppColors.cream, fontSize: 12, height: 1.4),
               ),
             ],
           ),
         ),
         const SizedBox(height: 12),
         Text(
-          'Энергия к подписке не привязана. Она тратится в Одиночной Игре на '
-          'ответы: 1 за распознанное голосовое и 2, если разбор пришлось '
-          'спросить у ИИ. Восстанавливается со временем.',
+          'Энергия к подписке не привязана. Она тратится в режиме '
+          '«${AppLocale.strings.modeVoice}» на ответы: 1 за распознанное '
+          'голосовое и 2, если разбор пришлось спросить у ИИ. '
+          'Восстанавливается со временем.',
           style: AppFonts.mono(fontSize: 10, color: AppColors.muted).copyWith(height: 1.5),
         ),
       ],

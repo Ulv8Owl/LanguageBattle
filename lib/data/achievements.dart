@@ -23,8 +23,8 @@ enum AchievementKind {
     slug: 'unstoppable',
     title: 'Неудержимый',
     // Описание одно на все ступени, n подставляется — так и просили.
-    description: 'Продержаться в одиночной игре n раундов подряд',
-    howToTemplate: 'Продержись в одиночной игре n раундов подряд',
+    description: 'Продержаться n раундов подряд в одиночном режиме',
+    howToTemplate: 'Продержись n раундов подряд в одиночном режиме',
     // Первая ступень. Она же — то, что показано серым, пока достижения нет.
     firstTier: 5,
   ),
@@ -32,7 +32,7 @@ enum AchievementKind {
     slug: 'conqueror',
     title: 'Покоритель',
     description: 'Одержать n побед в PvP-режимах',
-    howToTemplate: 'Одержи n побед в Состязании или Дуэли',
+    howToTemplate: 'Одержи n побед в голосовых PvP-режимах',
     firstTier: 1,
   ),
   auditor(
@@ -45,8 +45,8 @@ enum AchievementKind {
   scholar(
     slug: 'scholar',
     title: 'Знаток',
-    description: 'Выучить n слов в режиме Тренировки',
-    howToTemplate: 'Выучи n слов в режиме Тренировки',
+    description: 'Выучить n слов на карточках',
+    howToTemplate: 'Выучи n слов на карточках',
     firstTier: 10,
   ),
   social(
@@ -207,7 +207,7 @@ Future<List<AchievementGain>> noteVoiceListen(String recordingId) async {
   }
 }
 
-/// Отмечает слова, выученные в Тренировке («Знаток»).
+/// Отмечает слова, выученные на карточках («Знаток»).
 ///
 /// ПАЧКОЙ, А НЕ ПО ОДНОМУ: карточки проходят колодой, и звать сервер на
 /// каждое слово значило бы двадцать запросов вместо одного. Повторы

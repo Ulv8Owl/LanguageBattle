@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../../core/app_locale.dart';
 import '../../core/nav_state.dart';
 import '../../core/theme.dart';
 import '../../widgets/chrolingo_widgets.dart';
@@ -7,7 +8,7 @@ import '../../widgets/chrolingo_widgets.dart';
 /// Экран "нужна подписка, чтобы продолжить играть" (задача 5 итерации).
 /// Показывается вместо обычного потока при тапе на ЛЮБОЙ из трёх режимов,
 /// когда пробный период кончился и платная подписка не оформлена —
-/// включая Одиночную Игру.
+/// включая «Голос».
 class PaywallScreen extends StatelessWidget {
   /// Название режима, в который игрок пытался войти.
   final String modeName;
@@ -59,12 +60,15 @@ class PaywallScreen extends StatelessWidget {
                 padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 16),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
-                  children: const [
-                    _Perk('Все три режима: Одиночная Игра, Состязание, Дуэль'),
-                    SizedBox(height: 8),
-                    _Perk('Эксклюзивная косметика с меткой «★ Подписка»'),
-                    SizedBox(height: 8),
-                    _Perk('Подписочная ветка наград Battle Pass'),
+                  children: [
+                    _Perk('Все три голосовых режима: '
+                        '${AppLocale.strings.modeVoice}, '
+                        '${AppLocale.strings.modeVoiceDuel}, '
+                        '${AppLocale.strings.modeTalk}'),
+                    const SizedBox(height: 8),
+                    const _Perk('Эксклюзивная косметика с меткой «★ Подписка»'),
+                    const SizedBox(height: 8),
+                    const _Perk('Подписочная ветка наград Battle Pass'),
                   ],
                 ),
               ),

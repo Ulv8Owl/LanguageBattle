@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 
+import '../../core/app_locale.dart';
 import '../../core/supabase_client.dart';
 import '../../core/all_languages.dart';
 import '../../core/theme.dart';
@@ -488,8 +489,9 @@ class _PartyPanel extends StatelessWidget {
           ),
           const SizedBox(height: 4),
           Text(
-            'Групповой вход упрощён: в Состязание/Дуэль оба участника '
-            'нажимают «Найти соперника» одновременно.',
+            'Групповой вход упрощён: в «${AppLocale.strings.modeVoiceDuel}» '
+            'и «${AppLocale.strings.modeTalk}» оба участника нажимают '
+            '«Найти соперника» одновременно.',
             style: AppFonts.mono(fontSize: 8, color: AppColors.muted).copyWith(height: 1.5),
           ),
         ],

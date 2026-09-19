@@ -11,10 +11,10 @@
 /// у переводчика на руках порядок и смысл аргументов, а не догадки.
 ///
 /// ЧТО ЛОКАЛИЗОВАНО. Пока — экраны, добавленные вместе с переключателем
-/// языка: Настройки, выбор уровня CEFR и проверка уровня. Остальные экраны
-/// (Арена, бой, магазин) остаются русскими до отдельной задачи; добавляя
-/// новый элемент интерфейса, строку сюда добавлять ОБЯЗАТЕЛЬНО — на обоих
-/// языках.
+/// языка: Настройки, выбор уровня CEFR и проверка уровня, плюс НАЗВАНИЯ
+/// РЕЖИМОВ (они же заголовки самих режимов). Остальной текст Арены, боя и
+/// магазина остаётся русским до отдельной задачи; добавляя новый элемент
+/// интерфейса, строку сюда добавлять ОБЯЗАТЕЛЬНО — на обоих языках.
 class AppStrings {
   // --- общее ---------------------------------------------------------
   final String cancel;
@@ -23,6 +23,22 @@ class AppStrings {
   final String delete;
   final String applyAction;
   final String continueAction;
+
+  // --- названия режимов Арены ----------------------------------------
+  //
+  // ЕДИНСТВЕННОЕ МЕСТО, ГДЕ ЖИВУТ ИМЕНА РЕЖИМОВ. Одно и то же имя стоит в
+  // списке Арены, в заголовке самого режима, в магазине, в достижениях и
+  // в «Любимом режиме» Профиля. Пока имена лежали строками по экранам,
+  // переименование означало найти их все — и одно место всегда
+  // оставалось со старым названием.
+  final String modeFlashcards;
+  final String modeListening;
+  final String modeVoice;
+  final String modeVoiceDuel;
+  final String modeTalk;
+
+  /// Общее слово для двух PvP-режимов сразу (Профиль, «Любимый режим»).
+  final String modeBattle;
 
   // --- настройки -----------------------------------------------------
   final String settingsTitle;
@@ -88,6 +104,12 @@ class AppStrings {
     required this.delete,
     required this.applyAction,
     required this.continueAction,
+    required this.modeFlashcards,
+    required this.modeListening,
+    required this.modeVoice,
+    required this.modeVoiceDuel,
+    required this.modeTalk,
+    required this.modeBattle,
     required this.settingsTitle,
     required this.sectionInterface,
     required this.sectionDebug,
@@ -138,6 +160,12 @@ class AppStrings {
     delete: 'Удалить',
     applyAction: 'Применить',
     continueAction: 'Продолжить',
+    modeFlashcards: 'Флэш-Карточки',
+    modeListening: 'Аудирование',
+    modeVoice: 'Голос',
+    modeVoiceDuel: 'Голос Vs Голос',
+    modeTalk: 'Общение',
+    modeBattle: 'Бой',
     settingsTitle: 'Настройки',
     sectionInterface: 'ИНТЕРФЕЙС',
     sectionDebug: 'ОТЛАДКА',
@@ -194,6 +222,12 @@ class AppStrings {
     delete: 'Delete',
     applyAction: 'Apply',
     continueAction: 'Continue',
+    modeFlashcards: 'Flashcards',
+    modeListening: 'Listening',
+    modeVoice: 'Voice',
+    modeVoiceDuel: 'Voice Vs Voice',
+    modeTalk: 'Talk',
+    modeBattle: 'Battle',
     settingsTitle: 'Settings',
     sectionInterface: 'INTERFACE',
     sectionDebug: 'DEBUG',

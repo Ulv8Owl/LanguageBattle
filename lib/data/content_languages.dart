@@ -39,7 +39,7 @@ class ContentLanguages {
       if (phrases.isEmpty || words.isEmpty) return _fallback;
 
       // Пересечение: язык готов, только если переведены И фразы, И слова.
-      // Одни фразы без слов ломают Тренировку, одни слова без фраз — все
+      // Одни фразы без слов ломают карточки, одни слова без фраз — все
       // остальные режимы.
       final withPhrases = phrases.first.elementsByLanguage.keys.toSet();
       final withWords = words.first.byLanguage.keys.toSet();

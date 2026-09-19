@@ -192,7 +192,15 @@ void main() {
         nextTier: 5,
       );
       expect(slot.earned, isTrue);
-      expect(slot.detail, 'Продержаться в одиночной игре 10 раундов подряд');
+      // Сверяем с ШАБЛОНОМ, а не с копией текста рядом: копия отстанет при
+      // первой же правке формулировки, и тест этого не заметит. Проверяем
+      // здесь ровно одно — что n заменилось на число полученной ступени.
+      expect(
+        slot.detail,
+        AchievementKind.unstoppable.description.replaceAll('n', '10'),
+      );
+      expect(slot.detail, contains('10'));
+      expect(slot.detail, isNot(contains('n')));
 
       const empty = AchievementSlot(
         kind: AchievementKind.unstoppable,
@@ -200,7 +208,11 @@ void main() {
         nextTier: 5,
       );
       expect(empty.earned, isFalse);
-      expect(empty.detail, 'Продержись в одиночной игре 5 раундов подряд');
+      expect(
+        empty.detail,
+        AchievementKind.unstoppable.howToTemplate.replaceAll('n', '5'),
+      );
+      expect(empty.detail, contains('5'));
     });
 
     test('в профиле ДОСТИЖЕНИЯ вместо ИНВЕНТАРЯ', () {

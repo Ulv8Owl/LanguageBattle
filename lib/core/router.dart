@@ -38,7 +38,7 @@ final GoRouter appRouter = GoRouter(
       path: '/level-select',
       builder: (context, state) => const LevelSelectScreen(),
     ),
-    // Проверка уровня — тот же экран Одиночной Игры, но на фразах
+    // Проверка уровня — тот же экран «Голоса», но на фразах
     // заявленного уровня и без списания энергии. Возвращает долю
     // правильных ответов вызвавшему экрану (см. TrainingScreen).
     GoRoute(
@@ -70,7 +70,7 @@ final GoRouter appRouter = GoRouter(
     ),
     GoRoute(
       path: '/training',
-      // ?phrase=N&title=… — последний шаг Тренировки: та же Одиночная Игра,
+      // ?phrase=N&title=… — последний шаг карточек: тот же «Голос»,
       // но на заранее известной фразе и в один раунд (см. TrainingScreen).
       builder: (context, state) {
         final phrase = int.tryParse(state.uri.queryParameters['phrase'] ?? '');

@@ -172,11 +172,19 @@ class ChMenuRow extends StatelessWidget {
   }
 }
 
+/// Плашка значка режима: золотой квадрат со скруглением и картинка в нём.
+///
+/// Картинка задаётся ЛИБО [icon] из набора Material, ЛИБО [glyph] —
+/// нарисованным вручную значком (см. `mode_glyphs.dart`). Ровно одно из
+/// двух: указать оба значит нарисовать их друг на друге, и утверждение
+/// это держит `assert`, а не комментарий.
 class ChModeIcon extends StatelessWidget {
-  final IconData icon;
+  final IconData? icon;
+  final Widget? glyph;
   final List<Color> gradient;
 
-  const ChModeIcon({super.key, required this.icon, required this.gradient});
+  const ChModeIcon({super.key, this.icon, this.glyph, required this.gradient})
+      : assert((icon == null) != (glyph == null), 'нужен ровно один из icon/glyph');
 
   @override
   Widget build(BuildContext context) {
@@ -188,7 +196,9 @@ class ChModeIcon extends StatelessWidget {
         gradient: LinearGradient(colors: gradient, begin: Alignment.topLeft, end: Alignment.bottomRight),
         boxShadow: const [BoxShadow(color: Colors.black45, blurRadius: 8, offset: Offset(0, 3))],
       ),
-      child: Icon(icon, size: 16, color: Colors.black87),
+      child: Center(
+        child: glyph ?? Icon(icon, size: 16, color: Colors.black87),
+      ),
     );
   }
 }

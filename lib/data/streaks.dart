@@ -21,19 +21,34 @@
 /// она перестаёт означать «я занимался ЭТИМ языком».
 library;
 
+import '../core/app_locale.dart';
 import '../core/supabase_client.dart';
 
 /// Чем игрок закрыл день.
+///
+/// КОД УЕЗЖАЕТ НА СЕРВЕР, ИМЯ — НЕТ. `code` лежит в practice_days и в
+/// user_languages.favourite_mode, поэтому переименование режима на экране
+/// его не трогает: сменишь код — и вчерашние дни перестанут совпадать с
+/// сегодняшними. Имя же берётся из AppStrings, из того же места, что и
+/// список Арены, и переведено на оба языка.
 enum PracticeMode {
-  battle('battle', 'Бой'),
-  solo('solo', 'Одиночная'),
-  listening('listening', 'Аудирование'),
-  training('training', 'Тренировка');
+  battle('battle'),
+  solo('solo'),
+  listening('listening'),
+  training('training');
 
   final String code;
-  final String title;
 
-  const PracticeMode(this.code, this.title);
+  const PracticeMode(this.code);
+
+  /// `battle` — это ОБА PvP-режима сразу: в practice_days они приходят
+  /// одним кодом, и разделить их задним числом нечем.
+  String get title => switch (this) {
+        PracticeMode.battle => AppLocale.strings.modeBattle,
+        PracticeMode.solo => AppLocale.strings.modeVoice,
+        PracticeMode.listening => AppLocale.strings.modeListening,
+        PracticeMode.training => AppLocale.strings.modeFlashcards,
+      };
 
   static String titleOf(String code) => PracticeMode.values
       .firstWhere((m) => m.code == code, orElse: () => PracticeMode.battle)

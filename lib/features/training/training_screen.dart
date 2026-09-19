@@ -75,7 +75,7 @@ enum _Stage {
   failed,
 }
 
-/// Режим 1 «Одиночная Игра» (раздел 2.2) — вне рейтинга, но с реальными
+/// Режим «Голос» (раздел 2.2) — вне рейтинга, но с реальными
 /// наградами, поэтому оценка идёт через тот же серверный пайплайн
 /// voice_recordings → evaluation_jobs → Edge Function, что и PvP.
 /// Клиентская оценка недопустима ни в одном режиме.
@@ -105,21 +105,21 @@ enum _Stage {
 ///    формально принимает он, по тому же порогу.
 class TrainingScreen extends StatefulWidget {
   /// Код уровня CEFR (a0..c2), если экран открыт как проверка уровня.
-  /// null — обычная Одиночная Игра.
+  /// null — обычный «Голос».
   final String? placementLevel;
 
   /// Сквозной индекс фразы, если экран открыт ПОСЛЕДНИМ ШАГОМ ТРЕНИРОВКИ.
   ///
-  /// Тренировка заканчивается тем, что игрок произносит ту самую фразу,
+  /// Карточки заканчиваются тем, что игрок произносит ту самую фразу,
   /// слова которой только что учил. Раунд при этом ничем не отличается от
-  /// раунда Одиночной Игры — значит и экран должен быть тот же: вторая
+  /// раунда «Голоса» — значит и экран должен быть тот же: вторая
   /// копия записи, отправки и ожидания разбора разошлась бы с этой на
   /// первой же правке. Отличий ровно два: фраза задана снаружи и раунд
   /// один.
   final int? fixedPhraseIndex;
 
-  /// Заголовок экрана. Нужен той же Тренировке: раунд тот же, но игрок
-  /// пришёл в него не из Одиночной Игры и должен видеть, где он.
+  /// Заголовок экрана. Нужен тем же карточкам: раунд тот же, но игрок
+  /// пришёл в него не из «Голоса» и должен видеть, где он.
   final String? title;
 
   const TrainingScreen({
@@ -131,7 +131,7 @@ class TrainingScreen extends StatefulWidget {
 
   bool get isPlacement => placementLevel != null;
 
-  /// Раунд один: и на проверке уровня, и на последнем шаге Тренировки.
+  /// Раунд один: и на проверке уровня, и на последнем шаге карточек.
   bool get isSingleRound => placementLevel != null || fixedPhraseIndex != null;
 
   @override
@@ -173,7 +173,7 @@ class _TrainingScreenState extends State<TrainingScreen> {
   /// элемент обратно, перевод он уже увидел.
   final Set<int> _revealed = {};
 
-  /// Подсказки работают только в Одиночной Игре. На проверке уровня они
+  /// Подсказки работают только в «Голосе». На проверке уровня они
   /// выключены: подсмотрев всю фразу, игрок подтвердил бы любой уровень.
   bool get _hintsAllowed => !widget.isPlacement;
 
@@ -316,12 +316,13 @@ class _TrainingScreenState extends State<TrainingScreen> {
       if (!PhraseBank.hasContentFor(level, _nativeLanguage, _targetLanguage)) {
         setState(() {
           _stage = _Stage.failed;
-          _error = 'Для этой языковой пары в Одиночной Игре пока нет фраз — '
+          _error = 'Для этой языковой пары в режиме '
+              '«${AppLocale.strings.modeVoice}» пока нет фраз — '
               'контент на изучаемый и родной языки ещё не готов.';
         });
         return;
       }
-      // Фраза задана снаружи (последний шаг Тренировки) — берём ровно её:
+      // Фраза задана снаружи (последний шаг карточек) — берём ровно её:
       // игрок только что выучил её слова, и говорить он должен именно её.
       _phraseOrder = widget.fixedPhraseIndex != null
           ? [widget.fixedPhraseIndex!]
@@ -347,7 +348,7 @@ class _TrainingScreenState extends State<TrainingScreen> {
         // Пейволл вместо обычного потока — раздел 2.6.
         WidgetsBinding.instance.addPostFrameCallback((_) async {
           if (!mounted) return;
-          await PaywallScreen.show(context, 'Одиночная Игра');
+          await PaywallScreen.show(context, AppLocale.strings.modeVoice);
           if (mounted && context.canPop()) context.pop();
         });
         return;
@@ -927,7 +928,9 @@ class _TrainingScreenState extends State<TrainingScreen> {
         // Версия сборки живёт в Настройках, а не в шапке игрового экрана:
         // во время раунда она только мешает.
         title: Text(widget.title ??
-            (widget.isPlacement ? AppLocale.strings.levelCheckTitle : 'Одиночная Игра')),
+            (widget.isPlacement
+                ? AppLocale.strings.levelCheckTitle
+                : AppLocale.strings.modeVoice)),
         actions: [
           if (_stage != _Stage.starting && _stage != _Stage.failed)
             Padding(
@@ -1279,7 +1282,7 @@ class _RefreshableFeed extends StatelessWidget {
   }
 }
 
-/// Награда за один раунд Одиночной Игры.
+/// Награда за один раунд «Голоса».
 ///
 /// ДВА ЧИСЛА, А НЕ ОДНО. Раньше показывались только монеты, и опыт рос
 /// невидимо — то есть половина награды для игрока не существовала.

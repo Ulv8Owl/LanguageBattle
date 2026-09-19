@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../core/app_locale.dart';
 import '../../core/languages.dart';
 import '../../core/stream_rows.dart';
 import '../../core/supabase_client.dart';
@@ -369,7 +370,7 @@ class _BattleScreenState extends State<BattleScreen> {
             '${PhraseBank.textFor(phraseIndex, m.languageForSlot(m.playerBId!, 'target'))}'
         : PhraseBank.textFor(phraseIndex, m.languagePair ?? 'en');
     // Эталон для оценки — отдельно от того, что показано в ленте, и по
-    // языкам: в Дуэли игроки переводят на разные языки, и по строке «фраза
+    // языкам: в «Общении» игроки переводят на разные языки, и по строке «фраза
     // A / фраза B» невозможно понять, какая половина чья. Разделители «|»
     // есть только здесь; в ленту они не попадают.
     final expectedByLanguage = <String, String>{};
@@ -468,7 +469,7 @@ class _BattleScreenState extends State<BattleScreen> {
   }
 
   /// Слот, который игроку ещё предстоит записать в текущем раунде.
-  /// В Дуэли это сначала 'native', затем 'target'; в Состязании только
+  /// В «Общении» это сначала 'native', затем 'target'; в «Голос Vs Голос» только
   /// 'target'. null — всё записано, ждём соперника.
   String? get _nextSlot {
     final round = _lastRound;
@@ -488,7 +489,7 @@ class _BattleScreenState extends State<BattleScreen> {
 
     try {
       // Загрузка, строка в voice_recordings и задача в очередь оценки —
-      // общий с Одиночной Игрой путь (lib/data/voice_submission.dart).
+      // общий с «Голосом» путь (lib/data/voice_submission.dart).
       // Клиент дальше НЕ ждёт результат синхронно, он придёт через Realtime
       // на round_scores.
       await submitVoiceRecording(
@@ -557,7 +558,9 @@ class _BattleScreenState extends State<BattleScreen> {
       },
       child: Scaffold(
       appBar: AppBar(
-        title: Text(m.isDuel ? 'Дуэль' : 'Состязание'),
+        title: Text(m.isDuel
+            ? AppLocale.strings.modeTalk
+            : AppLocale.strings.modeVoiceDuel),
         // Своя стрелка: штатная просто закрывает экран, а выход из боя
         // теперь его завершает и должен спрашивать подтверждение.
         leading: IconButton(
@@ -711,7 +714,7 @@ class _BattleScreenState extends State<BattleScreen> {
           ? PhraseBank.textFor(round.phraseIndex!, _myNativeLanguage)
           : (round.generatedPhrase ?? '…');
       // Подпись «на каком языке отвечать» — только у текущего раунда: в
-      // Дуэли слоты идут по очереди (сначала родной, потом изучаемый), и
+      // «Общении» слоты идут по очереди (сначала родной, потом изучаемый), и
       // для уже сыгранных раундов правильного ответа на этот вопрос нет.
       final isCurrent = round.id == _lastRound?.id;
       final slot = _nextSlot;
@@ -719,7 +722,7 @@ class _BattleScreenState extends State<BattleScreen> {
         roundNumber: round.roundNumber,
         text: promptText,
         // Подпись «Переведи на …» — только когда следующим идёт перевод. В
-        // Дуэли вторым слотом игрок читает ту же фразу на родном языке, и
+        // «Общении» вторым слотом игрок читает ту же фразу на родном языке, и
         // «переведи на русский» там было бы прямо неверной инструкцией: об
         // этом шаге говорит отдельная реплика хамелеона.
         targetLanguage:
@@ -765,7 +768,7 @@ class _BattleScreenState extends State<BattleScreen> {
           onPlayed: isMine ? null : () => _noteListened(rec.id),
         ));
 
-        // В Дуэли за переводом идёт та же фраза на родном языке. Пока она
+        // В «Общении» за переводом идёт та же фраза на родном языке. Пока она
         // не записана, разбор перевода не показываем: он бы отвлекал ровно
         // в тот момент, когда надо говорить дальше. Оценка при этом уже
         // считается на сервере, так что ждать её потом почти не придётся.
@@ -793,10 +796,10 @@ class _BattleScreenState extends State<BattleScreen> {
         }
 
         // Балл ставится только за голосовое на изучаемом языке — родное
-        // в Дуэли соперник просто слушает (раздел 2.4).
+        // в «Общении» соперник просто слушает (раздел 2.4).
         if (rec.recordingSlot != 'target') continue;
         // РАЗБОР ВИДИТ ТОЛЬКО СВОЙ ХОЗЯИН. Чужие ошибки сопернику ни к
-        // чему, а объяснения к ним написаны на его родном языке — в Дуэли
+        // чему, а объяснения к ним написаны на его родном языке — в «Общении»
         // это язык, которого второй игрок может не знать вовсе.
         //
         // А ВОТ БАЛЛ СОПЕРНИКА ПОКАЗЫВАЕМ. Без него раунд выигрывался и
@@ -1048,7 +1051,7 @@ class _AiVerdict extends StatelessWidget {
 
   /// Изучаемый язык игрока — для озвучки правильного варианта.
   ///
-  /// Берётся из пары языков матча, а не из записи: в Дуэли вторая запись
+  /// Берётся из пары языков матча, а не из записи: в «Общении» вторая запись
   /// сделана на родном языке, и озвучивать по ней исправление было бы
   /// озвучкой не того языка.
   final String targetLanguage;
@@ -1130,7 +1133,7 @@ class _AiVerdict extends StatelessWidget {
                           ],
                         ),
                         const SizedBox(height: 8),
-                        // Тот же разбор, что и в Одиночной Игре: подсветка
+                        // Тот же разбор, что и в «Голосе»: подсветка
                         // несказанного и плашки с пояснениями. Отличие
                         // только в балле над ним — в бою он решает раунд.
                         RoundReview(
