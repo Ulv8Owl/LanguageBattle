@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
@@ -5,6 +7,8 @@ import 'package:go_router/go_router.dart';
 import '../../core/supabase_client.dart';
 import '../../core/theme.dart';
 import '../../data/achievements.dart';
+import '../../data/practice_session.dart';
+import '../../data/streaks.dart';
 import '../../data/phrase_bank.dart';
 import '../../data/phrase_glossary.dart';
 import '../../data/player_rating.dart';
@@ -246,6 +250,9 @@ class _FlashcardsScreenState extends State<FlashcardsScreen> {
   /// единственное честное событие «выучил». Повторы (то же слово в другой
   /// заход) отсеивает сервер: слово засчитывается раз в жизни.
   void _noteLearned() {
+    // ПРОЙДЕННАЯ КОЛОДА — ЭТО ЗАНЯТИЕ. Отмечаем здесь, а не на входе в
+    // экран: серия за открытый и тут же закрытый экран — не серия.
+    unawaited(countAsPractice(PracticeMode.training));
     final gains = noteLearnedWords([for (final w in _picked) w.word]);
     gains.then((list) {
       if (!mounted || list.isEmpty) return;

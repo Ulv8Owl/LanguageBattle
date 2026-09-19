@@ -4,11 +4,10 @@ import 'dart:io';
 import 'package:supabase_flutter/supabase_flutter.dart' show FileOptions;
 
 import '../core/audio_format.dart';
-import '../core/mascot_widget.dart';
-import '../core/reminders.dart';
 import '../core/supabase_client.dart';
 import '../widgets/correction_text.dart';
-import 'practice_diary.dart';
+import 'practice_session.dart';
+import 'streaks.dart';
 
 /// Итог распознавания речи по одной записи. Значения совпадают со
 /// столбцом voice_recordings.transcript_status (миграция 0013) — клиент
@@ -215,10 +214,9 @@ Future<String> submitVoiceRecording({
   // приходят сюда, и ровно за это списывается энергия. Отметка местная,
   // ничего не начисляет и ничего не ждёт — уронить отправку записи из-за
   // дневника напоминаний было бы обменом ценного на ничто.
-  unawaited(PracticeDiary.markPractised().then((_) async {
-    await Reminders.refresh();
-    await MascotWidget.refresh();
-  }));
+  unawaited(countAsPractice(roundId == null
+      ? PracticeMode.solo
+      : PracticeMode.battle));
   return recordingId;
 }
 

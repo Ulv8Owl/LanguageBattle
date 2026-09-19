@@ -4,13 +4,18 @@ import '../../core/nav_state.dart';
 import '../../core/theme.dart';
 import '../friends/friends_screen.dart';
 import '../profile/profile_screen.dart';
-import '../rewards/rewards_screen.dart';
+import '../streak/streak_screen.dart';
 import '../shop/shop_screen.dart';
 import 'arena_screen.dart';
 
 /// Нижняя навигация (раздел 5.1, п.2): Профиль / Друзья / Арена / Магазин /
-/// Награды — только иконки без подписей, растянуто на всю ширину экрана.
+/// Серия — только иконки без подписей, растянуто на всю ширину экрана.
 /// Настроек здесь нет: вход в них только через Профиль.
+///
+/// ПЯТАЯ ВКЛАДКА БЫЛА «НАГРАДАМИ» С КУБКОМ. В ней жили Battle Pass и трек
+/// вех — прогресс, которого игрок не чувствовал: очко за выигранный матч
+/// в игре, где матчей бывает по одному в день. Серия чувствуется каждый
+/// вечер, и огонёк говорит о ней без подписи.
 class ArenaShell extends StatefulWidget {
   const ArenaShell({super.key});
 
@@ -26,7 +31,7 @@ class _ArenaShellState extends State<ArenaShell> {
     FriendsScreen(),
     ArenaScreen(),
     ShopScreen(),
-    RewardsScreen(),
+    StreakScreen(),
   ];
 
   static const _icons = [
@@ -34,7 +39,7 @@ class _ArenaShellState extends State<ArenaShell> {
     Icons.group,
     Icons.stadium,
     Icons.storefront,
-    Icons.emoji_events,
+    Icons.local_fire_department,
   ];
 
   @override

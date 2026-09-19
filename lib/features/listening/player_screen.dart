@@ -9,6 +9,8 @@ import 'package:wakelock_plus/wakelock_plus.dart';
 import '../../core/theme.dart';
 import '../../core/track_clock.dart';
 import '../../data/library_track.dart';
+import '../../data/practice_session.dart';
+import '../../data/streaks.dart';
 import '../../data/track_library.dart';
 import '../../data/track_subtitles.dart';
 
@@ -290,6 +292,9 @@ class _PlayerScreenState extends State<PlayerScreen> {
     _clock.pause();
     _clock.markCompleted();
     WakelockPlus.disable();
+    // ДОСЛУШАННАЯ ЗАПИСЬ — ЭТО ЗАНЯТИЕ. Отмечаем здесь, а не на входе в
+    // экран: серия за открытый и тут же закрытый экран — не серия.
+    unawaited(countAsPractice(PracticeMode.listening));
     if (mounted) setState(() {});
   }
 

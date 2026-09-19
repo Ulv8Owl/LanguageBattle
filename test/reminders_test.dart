@@ -720,7 +720,7 @@ void main() {
     test('виджет обновляется отдельно от напоминаний', () {
       // Он висит на рабочем столе и тогда, когда напоминания выключены.
       expect(read('lib/main.dart'), contains('MascotWidget.refresh()'));
-      expect(read('lib/data/voice_submission.dart'),
+      expect(read('lib/data/practice_session.dart'),
           contains('MascotWidget.refresh()'));
       // И вечером, заодно с напоминанием: к вечеру нарисованное утром
       // уже устарело.
@@ -819,9 +819,18 @@ void main() {
     test('сразу после занятия', () {
       // Иначе вечером придёт «сегодня не занимались» тому, кто занимался
       // утром, — и это последнее уведомление, которое он от нас получит.
-      final submission = read('lib/data/voice_submission.dart');
-      expect(submission, contains('PracticeDiary.markPractised()'));
-      expect(submission, contains('Reminders.refresh()'));
+      final session = read('lib/data/practice_session.dart');
+      expect(session, contains('PracticeDiary.markPractised()'));
+      expect(session, contains('Reminders.refresh()'));
+      // И это ОДНА точка на все режимы: три вызова, разложенные по
+      // экранам, однажды разойдутся, и разойдутся молча.
+      for (final caller in [
+        'lib/data/voice_submission.dart',
+        'lib/features/listening/player_screen.dart',
+      ]) {
+        expect(read(caller), contains('countAsPractice('),
+            reason: '$caller не отмечает занятие');
+      }
     });
 
     test('расписание заменяется целиком, а не дополняется', () {

@@ -7,6 +7,7 @@ import '../../core/theme.dart';
 import '../../data/achievements.dart';
 import '../../data/my_languages.dart';
 import '../../data/player_rating.dart';
+import '../../data/streaks.dart';
 import '../../data/avatar_parts.dart';
 import '../../widgets/avatar_portrait.dart';
 import '../../widgets/chrolingo_widgets.dart';
@@ -32,9 +33,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
   /// посреди достижений, где её случайно и нажимали.
   MyLanguages? _languages;
   WalletState _wallet = WalletState.empty;
-  int _played = 0;
-  int _winPct = 0;
-  int _streak = 0;
+
+  /// Серия занятий. ПРИХОДИТ С СЕРВЕРА ЦЕЛИКОМ — здесь её только
+  /// показывают: свою копию счёта клиент не держит (миграция 0056).
+  StreakState _streak = StreakState.empty;
   /// По одной плашке на вид достижения: полученная или серая (см.
   /// AchievementSlot).
   List<AchievementSlot> _achievements = const [];
@@ -52,21 +54,11 @@ class _ProfileScreenState extends State<ProfileScreen> {
     try {
       final profile = await supabase.from('users').select().eq('id', uid).maybeSingle();
       final languages = await fetchMyLanguages(uid);
-      final asA = await supabase.from('matches').select().eq('player_a_id', uid).eq('status', 'completed');
-      final asB = await supabase.from('matches').select().eq('player_b_id', uid).eq('status', 'completed');
-      final all = [...asA, ...asB]
-        ..sort((a, b) => (b['completed_at'] as String? ?? '').compareTo(a['completed_at'] as String? ?? ''));
-
-      final played = all.length;
-      final wins = all.where((m) => m['winner_id'] == uid).length;
-      var streak = 0;
-      for (final m in all) {
-        if (m['winner_id'] == uid) {
-          streak++;
-        } else {
-          break;
-        }
-      }
+      // ДВУХ ВЫБОРОК ВСЕХ МАТЧЕЙ ЗДЕСЬ БОЛЬШЕ НЕТ. Они тянули всю историю
+      // боёв ради трёх чисел — сыграно, процент побед и серия побед, — и
+      // все три с экрана ушли: победы подряд это про удачу соперника, а
+      // не про занятия, и рядом с настоящей серией они только путали.
+      final streak = await Streaks.fetch();
 
       final achievements = await loadAchievements(uid);
       // sync_wallet заодно отдаёт актуальный статус подписки — нужен для
@@ -79,8 +71,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
         _profile = profile;
         _languages = languages;
         _wallet = wallet;
-        _played = played;
-        _winPct = played == 0 ? 0 : ((wins / played) * 100).round();
         _streak = streak;
         _achievements = achievements;
         _loading = false;
@@ -180,12 +170,57 @@ class _ProfileScreenState extends State<ProfileScreen> {
           const SizedBox(height: 16),
           Row(
             children: [
-              Expanded(child: _StatTile(value: '$_played', label: 'боёв')),
+              Expanded(
+                child: _StatTile(
+                  value: '${_streak.current}',
+                  label: 'дней подряд',
+                  color: _streak.current > 0 ? AppColors.ember : AppColors.muted,
+                  icon: Icons.local_fire_department,
+                ),
+              ),
               const SizedBox(width: 8),
-              Expanded(child: _StatTile(value: '$_winPct%', label: 'побед', color: AppColors.cyan)),
+              Expanded(
+                child: _StatTile(
+                  value: '${_streak.best}',
+                  label: 'рекорд',
+                  color: AppColors.gold,
+                ),
+              ),
               const SizedBox(width: 8),
-              Expanded(child: _StatTile(value: '🔥$_streak', label: 'серия', color: AppColors.ember)),
+              Expanded(
+                child: _StatTile(
+                  value: '${_streak.totalDays}',
+                  label: 'дней всего',
+                ),
+              ),
             ],
+          ),
+          const SizedBox(height: 8),
+          // ЛЮБИМЫЙ РЕЖИМ СЧИТАЕТСЯ ПО ЗАНЯТИЯМ, А НЕ ПО ДНЯМ: за день
+          // можно успеть в три режима, и любимым должен стать тот, в
+          // который возвращаются.
+          ChPanel(
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+            child: Row(
+              children: [
+                const Icon(Icons.favorite_border, size: 16, color: AppColors.muted),
+                const SizedBox(width: 10),
+                Text('Любимый режим',
+                    style: AppFonts.ui(fontSize: 13)),
+                const Spacer(),
+                Text(
+                  _streak.favouriteMode == null
+                      ? 'пока не видно'
+                      : PracticeMode.titleOf(_streak.favouriteMode!),
+                  style: AppFonts.mono(
+                      fontSize: 11,
+                      weight: FontWeight.w700,
+                      color: _streak.favouriteMode == null
+                          ? AppColors.muted
+                          : AppColors.cyan),
+                ),
+              ],
+            ),
           ),
           const SizedBox(height: 18),
           // ИНВЕНТАРЯ ЗДЕСЬ БОЛЬШЕ НЕТ. Он показывал купленные предметы —
@@ -215,7 +250,16 @@ class _StatTile extends StatelessWidget {
   final String label;
   final Color color;
 
-  const _StatTile({required this.value, required this.label, this.color = AppColors.cream});
+  /// Значок перед числом. Есть только у серии: огонёк узнают быстрее,
+  /// чем читают подпись, и на нём держится вся эта вкладка.
+  final IconData? icon;
+
+  const _StatTile({
+    required this.value,
+    required this.label,
+    this.color = AppColors.cream,
+    this.icon,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -223,7 +267,18 @@ class _StatTile extends StatelessWidget {
       padding: const EdgeInsets.symmetric(vertical: 11),
       child: Column(
         children: [
-          Text(value, style: AppFonts.mono(fontSize: 15, weight: FontWeight.w700, color: color)),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              if (icon != null) ...[
+                Icon(icon, size: 15, color: color),
+                const SizedBox(width: 3),
+              ],
+              Text(value,
+                  style: AppFonts.mono(
+                      fontSize: 15, weight: FontWeight.w700, color: color)),
+            ],
+          ),
           const SizedBox(height: 2),
           Text(label, style: const TextStyle(fontSize: 8, color: AppColors.muted)),
         ],

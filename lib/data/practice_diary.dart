@@ -77,10 +77,17 @@ class PracticeDiary {
 
   static const _daysKey = 'practice.days';
   static const _recentKey = 'practice.recentReminders';
+  static const _hoursKey = 'practice.hours';
+  static const _serverStreakKey = 'practice.serverStreak';
+  static const _serverLastKey = 'practice.serverLastDay';
 
   /// Сколько дней держим. Больше года назад не нужно никому: серию
   /// считают назад до первого пропуска, а он случается раньше.
   static const _keepDays = 400;
+
+  /// Сколько часов занятий помним и со скольких начинаем угадывать.
+  static const _keepHours = 60;
+  static const _minHoursToGuess = 4;
 
   /// Сколько последних напоминаний помним, чтобы не повторяться.
   static const keepRecent = 6;
@@ -90,8 +97,19 @@ class PracticeDiary {
   /// Вызывается из [submitVoiceRecording] и НИЧЕГО не ждёт: запись в
   /// настройки не должна ни задержать отправку, ни уронить её.
   static Future<void> markPractised({DateTime? when}) async {
-    final today = dayKey(when ?? DateTime.now());
+    final at = when ?? DateTime.now();
     final prefs = await SharedPreferences.getInstance();
+
+    // Час занятия — отдельно от дня. По нему видно, КОГДА игрок обычно
+    // занимается, а значит, когда его стоит окликать; напоминание в
+    // чужой час читают хуже любого текста.
+    final hours = [...(prefs.getStringList(_hoursKey) ?? const <String>[]), '${at.hour}'];
+    await prefs.setStringList(
+      _hoursKey,
+      hours.length > _keepHours ? hours.sublist(hours.length - _keepHours) : hours,
+    );
+
+    final today = dayKey(at);
     final days = prefs.getStringList(_daysKey) ?? const <String>[];
     if (days.contains(today)) return;
     final next = [...days, today]..sort();
@@ -99,6 +117,43 @@ class PracticeDiary {
       _daysKey,
       next.length > _keepDays ? next.sublist(next.length - _keepDays) : next,
     );
+  }
+
+  /// Час, в который игрок обычно занимается. Null — данных мало.
+  ///
+  /// САМЫЙ ЧАСТЫЙ, А НЕ СРЕДНИЙ: среднее между утром и поздним вечером —
+  /// это обед, когда игрок не занимается никогда.
+  static Future<int?> usualHour() async {
+    final prefs = await SharedPreferences.getInstance();
+    final hours = prefs.getStringList(_hoursKey) ?? const <String>[];
+    if (hours.length < _minHoursToGuess) return null;
+    final counts = <int, int>{};
+    for (final raw in hours) {
+      final hour = int.tryParse(raw);
+      if (hour == null || hour < 0 || hour > 23) continue;
+      counts[hour] = (counts[hour] ?? 0) + 1;
+    }
+    if (counts.isEmpty) return null;
+    var best = counts.keys.first;
+    for (final entry in counts.entries) {
+      if (entry.value > (counts[best] ?? 0)) best = entry.key;
+    }
+    return best;
+  }
+
+  /// Принять серию, посчитанную сервером.
+  ///
+  /// НУЖНО, ЧТОБЫ ЭКРАН И УВЕДОМЛЕНИЕ НЕ СПОРИЛИ. Сервер помнит дни,
+  /// которых на этом телефоне не было: занятия с другого устройства и
+  /// всё, что было до переустановки. Профиль показал бы 12, а вечернее
+  /// напоминание — 5, и верить после этого перестают обоим.
+  static Future<void> adoptServerStreak({
+    required int current,
+    required DateTime? lastDay,
+  }) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setInt(_serverStreakKey, current);
+    if (lastDay != null) await prefs.setString(_serverLastKey, dayKey(lastDay));
   }
 
   static Future<List<String>> days() async {
@@ -126,11 +181,26 @@ class PracticeDiary {
   /// потолок по умолчанию, тот же, что рисует клиент до ответа.
   static Future<ReminderState> state({DateTime? now, int? energyMax}) async {
     final at = now ?? DateTime.now();
-    final recorded = await days();
+    final prefs = await SharedPreferences.getInstance();
+    final recorded = [...await days()];
+    // Серверный день дописываем к местным: он мог случиться на другом
+    // устройстве, и не знать о нём — значит посчитать серию короче.
+    final serverLast = prefs.getString(_serverLastKey);
+    if (serverLast != null && !recorded.contains(serverLast)) {
+      recorded.add(serverLast);
+    }
+    final since = daysSincePractice(recorded, at);
+    var streak = practiceStreak(recorded, at);
+    final serverStreak = prefs.getInt(_serverStreakKey);
+    // Сервер знает БОЛЬШЕ, а не меньше: он помнит дни, которых здесь
+    // никогда не было. Поэтому берём большее, а не последнее.
+    if (serverStreak != null && since <= 1 && serverStreak > streak) {
+      streak = serverStreak;
+    }
     final max = energyMax ?? WalletState.empty.energyMax;
     return ReminderState(
-      daysSincePractice: daysSincePractice(recorded, at),
-      streakDays: practiceStreak(recorded, at),
+      daysSincePractice: since,
+      streakDays: streak,
       hour: at.hour,
       // ЭНЕРГИЯ В БУДУЩЕМ ВСЕГДА ПОЛНАЯ, и это не допущение, а арифметика:
       // восстанавливается она по одной за десять секунд (миграция 0053),
