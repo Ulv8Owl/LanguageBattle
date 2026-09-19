@@ -39,6 +39,10 @@ step "2/2 Деплою Edge Functions"
 # synthesize-speech — озвучка разбора (Google Text-to-Speech).
 npx supabase functions deploy evaluate-recording
 npx supabase functions deploy config-check
+# Вход по нику. Проверку JWT НЕ отключаем: у клиента, который её зовёт,
+# сессии ещё нет, но анонимный ключ проекта есть всегда — именно он и
+# проверяется.
+npx supabase functions deploy login
 npx supabase functions deploy synthesize-speech
 # transcribe-track — разбор записи игрока на слова со временем и переводом
 # («Аудирование»). Функции здесь перечислены ПОИМЁННО, и это ловушка: новая

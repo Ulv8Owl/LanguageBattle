@@ -2,7 +2,8 @@ import 'package:go_router/go_router.dart';
 
 import '../features/arena/arena_shell.dart';
 import '../features/auth/login_screen.dart';
-import '../features/auth/signup_screen.dart';
+import '../features/auth/register_screen.dart';
+import '../features/auth/welcome_screen.dart';
 import '../features/auth/splash_gate.dart';
 import '../features/battle/battle_results_screen.dart';
 import '../features/battle/battle_screen.dart';
@@ -20,8 +21,15 @@ final GoRouter appRouter = GoRouter(
   initialLocation: '/',
   routes: [
     GoRoute(path: '/', builder: (context, state) => const SplashGate()),
+    // ПЕРВЫЙ ЭКРАН — НЕ ВХОД. Форма входа на старте это счёт,
+    // выставленный до того, как показали товар; «Начать» заводит
+    // анонимный аккаунт и пускает играть сразу.
+    GoRoute(path: '/welcome', builder: (context, state) => const WelcomeScreen()),
     GoRoute(path: '/login', builder: (context, state) => const LoginScreen()),
-    GoRoute(path: '/signup', builder: (context, state) => const SignupScreen()),
+    // Не «регистрация» в старом смысле: аккаунт уже есть, здесь к нему
+    // добавляют ник и пароль. Прогресс при этом не переносится — он и
+    // так с самого начала лежит на этом id.
+    GoRoute(path: '/register', builder: (context, state) => const RegisterScreen()),
     GoRoute(
       path: '/onboarding',
       builder: (context, state) => const OnboardingScreen(),

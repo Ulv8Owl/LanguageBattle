@@ -5,9 +5,14 @@ import '../../core/app_locale.dart';
 import '../../core/start_destination.dart';
 import '../../core/supabase_client.dart';
 
-/// Куда попасть при холодном старте: не вошёл -> /login; вошёл, но пары
-/// языков нет -> /onboarding; пара есть, но уровень ещё не определён ->
-/// /level-select; иначе -> /arena.
+/// Куда попасть при холодном старте: сессии нет -> /welcome; есть, но
+/// пары языков нет -> /onboarding; пара есть, но уровень ещё не определён
+/// -> /level-select; иначе -> /arena.
+///
+/// НЕ НА ВХОД, А НА ПРИВЕТСТВИЕ. Человек, открывший игру впервые, ещё не
+/// знает, стоит ли она его почты; форма входа на этом месте закрывала
+/// приложение раньше, чем он успевал что-то попробовать. Гостевая сессия
+/// сюда не попадает: она такая же настоящая, и её ведут по тем же шагам.
 ///
 /// Шаг с уровнем нельзя пропустить, закрыв приложение на нём: до
 /// placement_done = true игрок будет возвращаться сюда же, потому что
@@ -29,7 +34,7 @@ class _SplashGateState extends State<SplashGate> {
   Future<void> _decide() async {
     final session = supabase.auth.currentSession;
     if (session == null) {
-      if (mounted) context.go('/login');
+      if (mounted) context.go('/welcome');
       return;
     }
 

@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../core/all_languages.dart';
-import '../../core/supabase_client.dart';
 import '../../data/content_languages.dart';
 import '../../data/my_languages.dart';
 import '../../widgets/language_picker.dart';
@@ -29,7 +28,6 @@ class OnboardingScreen extends StatefulWidget {
 
 class _OnboardingScreenState extends State<OnboardingScreen> {
   final _formKey = GlobalKey<FormState>();
-  final _usernameController = TextEditingController();
   String _nativeLanguage = 'en';
   String _targetLanguage = 'es';
   bool _loading = false;
@@ -80,7 +78,6 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
 
   @override
   void dispose() {
-    _usernameController.dispose();
     super.dispose();
   }
 
@@ -95,11 +92,11 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
       _error = null;
     });
     try {
-      final userId = currentUserId;
-      await supabase.from('users').update({
-        'username': _usernameController.text.trim(),
-      }).eq('id', userId);
-
+      // НИКНЕЙМ ЗДЕСЬ БОЛЬШЕ НЕ СПРАШИВАЮТ. Игрок попадает сюда сразу
+      // после «Начать», ещё ничего про игру не зная, и придумывать имя
+      // на этом месте — лишний барьер. Гостю имя выдаёт сервер
+      // (ensure_guest_name), а настоящий ник он выберет в короткой
+      // регистрации, когда захочет большего, чем Арена.
       // ЯЗЫКИ ЗАВОДИТ СЕРВЕР, а не групповая вставка с клиента. Вставка
       // строила строки user_languages руками, и один пропущенный ключ в
       // одной из них ронял регистрацию каждого нового игрока; заодно она
@@ -134,13 +131,6 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                   mainAxisSize: MainAxisSize.min,
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
-                    TextFormField(
-                      controller: _usernameController,
-                      decoration: const InputDecoration(labelText: 'Никнейм'),
-                      validator: (v) =>
-                          (v == null || v.trim().length < 3) ? 'Минимум 3 символа' : null,
-                    ),
-                    const SizedBox(height: 20),
                     const Text('Родной язык', style: TextStyle(fontWeight: FontWeight.w700)),
                     const SizedBox(height: 8),
                     _LanguageField(

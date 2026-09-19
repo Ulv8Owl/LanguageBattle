@@ -4,8 +4,21 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../core/app_locale.dart';
 import '../../core/start_destination.dart';
-import '../../core/supabase_client.dart';
+import '../../data/account.dart';
 
+/// Вход для тех, у кого аккаунт уже есть.
+///
+/// ═══ ОДНО ПОЛЕ НА ПОЧТУ И НИК ═══
+///
+/// Игрок, зарегистрировавшийся без почты (а это разрешено), помнит
+/// только ник. Два поля на выбор заставляли бы его угадывать, в какое
+/// писать; одно — не заставляет ни о чём думать. Что именно введено,
+/// разбирает сервер.
+///
+/// ═══ ПОЧЕМУ ЗДЕСЬ НЕТ РЕГИСТРАЦИИ ═══
+///
+/// Она переехала внутрь игры: сначала играют, потом заводят аккаунт.
+/// Отсюда ведут назад — «Начать с начала» — и в восстановление пароля.
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
 
@@ -15,14 +28,14 @@ class LoginScreen extends StatefulWidget {
 
 class _LoginScreenState extends State<LoginScreen> {
   final _formKey = GlobalKey<FormState>();
-  final _emailController = TextEditingController();
+  final _loginController = TextEditingController();
   final _passwordController = TextEditingController();
   bool _loading = false;
   String? _error;
 
   @override
   void dispose() {
-    _emailController.dispose();
+    _loginController.dispose();
     _passwordController.dispose();
     super.dispose();
   }
@@ -34,8 +47,8 @@ class _LoginScreenState extends State<LoginScreen> {
       _error = null;
     });
     try {
-      await supabase.auth.signInWithPassword(
-        email: _emailController.text.trim(),
+      await Account.signIn(
+        login: _loginController.text,
         password: _passwordController.text,
       );
       if (!mounted) return;
@@ -48,6 +61,8 @@ class _LoginScreenState extends State<LoginScreen> {
       await AppLocale.refreshFromServer();
       if (!mounted) return;
       context.go(destination.route);
+    } on AccountError catch (e) {
+      setState(() => _error = e.message);
     } on AuthException catch (e) {
       setState(() => _error = e.message);
     } catch (e) {
@@ -91,11 +106,15 @@ class _LoginScreenState extends State<LoginScreen> {
                     ),
                     const SizedBox(height: 32),
                     TextFormField(
-                      controller: _emailController,
+                      controller: _loginController,
                       keyboardType: TextInputType.emailAddress,
-                      decoration: const InputDecoration(labelText: 'Email'),
-                      validator: (v) =>
-                          (v == null || !v.contains('@')) ? 'Введите email' : null,
+                      autocorrect: false,
+                      decoration: const InputDecoration(
+                        labelText: 'Почта или никнейм',
+                      ),
+                      validator: (v) => (v == null || v.trim().length < 3)
+                          ? 'Введите почту или никнейм'
+                          : null,
                     ),
                     const SizedBox(height: 12),
                     TextFormField(
@@ -122,8 +141,20 @@ class _LoginScreenState extends State<LoginScreen> {
                     ),
                     const SizedBox(height: 12),
                     TextButton(
-                      onPressed: _loading ? null : () => context.push('/signup'),
-                      child: const Text('Нет аккаунта? Зарегистрироваться'),
+                      onPressed: _loading ? null : () => context.go('/welcome'),
+                      child: const Text('Начать с начала'),
+                    ),
+                    TextButton(
+                      // ЗАГЛУШКА, И ОНА ЧЕСТНАЯ. Восстановление пароля
+                      // требует настоящей почтовой рассылки, которой у
+                      // проекта пока нет; кнопка, молча ничего не
+                      // делающая, хуже прямого отказа.
+                      onPressed: _loading
+                          ? null
+                          : () => setState(() => _error =
+                              'Восстановление пароля пока не работает. '
+                              'Напишите владельцу — вернём доступ руками.'),
+                      child: const Text('Восстановить пароль'),
                     ),
                   ],
                 ),
