@@ -377,6 +377,24 @@ void main() {
       }
     });
 
+    test('своего скругления у подложки нет', () {
+      // Форму карточке задаёт сама шторка: без setStyle уведомление
+      // наше целиком, и она обрезает его так, как принято на этой
+      // прошивке. Свои углы поверх её углов — вторые углы внутри чужих.
+      for (final name in ['notification_bg_gold', 'notification_bg_ember']) {
+        final xml = read('android/app/src/main/res/drawable/$name.xml')
+            .replaceAll(RegExp(r'<!--.*?-->', dotAll: true), '');
+        expect(xml.contains('<corners'), isFalse,
+            reason: '$name скругляет сам себя внутри чужой карточки');
+      }
+      // У виджета наоборот: там наша подложка — это вся карточка, и
+      // скруглять её обязаны мы.
+      expect(
+        read('android/app/src/main/res/drawable/widget_bg_gold.xml'),
+        contains('<corners'),
+      );
+    });
+
     test('шапку системы НЕ просим — ни одной строкой', () {
       // setStyle(DecoratedCustomViewStyle()) — это ПРОСЬБА нарисовать
       // шапку с именем приложения и белую рамку вокруг. Именно она
