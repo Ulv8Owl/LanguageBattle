@@ -52,7 +52,7 @@ void main() {
         'title: s.modeFlashcards,',
         'Icons.headphones',
         'title: s.modeListening,',
-        'ModeGlyphKind.mic)',
+        'ModeGlyphKind.mic,',
         'title: s.modeVoice,',
         'ModeGlyphKind.micDuo',
         'title: s.modeVoiceDuel,',
@@ -156,9 +156,23 @@ void main() {
       // Веер стоит ПО ЦЕНТРУ плашки: точка схода ниже карт, но сам веер
       // считается от своей высоты, иначе он висит ниже середины квадрата.
       expect(glyphs, contains('const pivot = Offset(12, 18.3);'));
-      // Два микрофона — это ДВА вызова одного и того же рисования.
-      expect(glyphs, contains('one(5.5, -0.20);'));
-      expect(glyphs, contains('one(18.5, 0.20);'));
+      // Два микрофона — это ДВА вызова одного и того же рисования,
+      // повёрнутых навстречу друг другу: знаки у поворота разные.
+      expect(glyphs, contains('one(3.2, 0.38);'));
+      expect(glyphs, contains('one(20.8, -0.38);'));
+      // У пары нет подставки, а стойка уходит ЗА сетку — её обрезает край
+      // плашки, и только так видно, что микрофон стоит за кадром.
+      expect(glyphs, contains('_mic(canvas, stand: false, stemTo: 30);'));
+    });
+
+    test('пара микрофонов рисуется во всю плашку и ОБРЕЗАЕТСЯ ею', () {
+      // Без обрезки микрофоны вылезут за жёлтый квадрат и лягут поверх
+      // строки меню — а «выглядывают из-за края» получается именно из
+      // обрезки. Две половины одного утверждения, и обе обязаны быть.
+      final arena = code('lib/features/arena/arena_screen.dart');
+      expect(arena, contains('ModeGlyph(ModeGlyphKind.micDuo, size: 32)'));
+      final widgets = code('lib/widgets/chrolingo_widgets.dart');
+      expect(widgets, contains('clipBehavior: Clip.antiAlias'));
     });
 
     test('плашка значка принимает либо icon, либо glyph, но не оба', () {

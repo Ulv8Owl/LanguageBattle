@@ -1,5 +1,3 @@
-import 'dart:math' as math;
-
 import 'package:flutter/material.dart';
 
 import '../core/theme.dart';
@@ -24,10 +22,15 @@ enum ModeGlyphKind {
   /// Колода, раскрытая веером из одной точки, — «Флэш-Карточки».
   cards,
 
-  /// Микрофон — «Голос».
+  /// Студийный микрофон на подставке — «Голос».
   mic,
 
-  /// Два микрофона навстречу друг другу — «Голос Vs Голос».
+  /// Два таких же микрофона, заглядывающих навстречу друг другу из-за
+  /// боковых краёв плашки, — «Голос Vs Голос».
+  ///
+  /// ЭТОТ ЗНАЧОК РИСУЕТСЯ ВО ВСЮ ПЛАШКУ и обрезается её краем, поэтому
+  /// [ChModeIcon] обязан обрезать содержимое (`clipBehavior`). Без обрезки
+  /// микрофоны вылезут за жёлтый квадрат и лягут поверх строки меню.
   micDuo,
 
   /// Окно сообщения со строками текста — «Общение».
@@ -77,7 +80,7 @@ class _ModeGlyphPainter extends CustomPainter {
       case ModeGlyphKind.cards:
         _cards(canvas);
       case ModeGlyphKind.mic:
-        _mic(canvas, stroke: 1.9);
+        _mic(canvas);
       case ModeGlyphKind.micDuo:
         _micDuo(canvas);
       case ModeGlyphKind.message:
@@ -126,46 +129,96 @@ class _ModeGlyphPainter extends CustomPainter {
     }
   }
 
-  /// Микрофон: капсула, дуга-держатель, ножка и подставка.
-  void _mic(Canvas canvas, {required double stroke}) {
-    final body = RRect.fromRectAndRadius(
-      const Rect.fromLTRB(9.2, 2.4, 14.8, 13.4),
-      const Radius.circular(2.8),
+  /// Студийный микрофон: голова с решёткой, стойка и плоская подставка.
+  ///
+  /// ЗА ОБРАЗЕЦ ВЗЯТ РЕТРО-МИКРОФОН (тип Shure 55), упрощённый до
+  /// силуэта: узнают его по ВЫСОКОЙ голове-овалу с горизонтальной
+  /// решёткой и по широкой плоской подставке. Голова именно высокая —
+  /// круглая читается как печать или булочка, и микрофона в ней не
+  /// видно.
+  ///
+  /// Рисовать голову обводкой, как на плакатах, здесь нельзя: при 26
+  /// точках решётка из шести щелей сливается в серую кашу. Поэтому
+  /// голова ЗАЛИТА, щелей три, каждая не тоньше 1.7 единицы, и они
+  /// отступают от краёв — иначе голова читается полосатой, а не
+  /// зарешёченной.
+  ///
+  /// [stand] — подставка. У пары микрофонов её нет: они выглядывают из-за
+  /// края плашки, и подставка осталась бы за кадром.
+  /// [stemTo] — докуда тянуть стойку. Паре нужно вывести её ЗА край, а не
+  /// оборвать на полпути.
+  void _mic(Canvas canvas, {bool stand = true, double stemTo = 19.6}) {
+    final fill = Paint()
+      ..color = ink
+      ..isAntiAlias = true;
+
+    // Стойка рисуется ПЕРВОЙ и заходит под голову: иначе на стыке видна
+    // ступенька в полпикселя.
+    canvas.drawRRect(
+      RRect.fromRectAndRadius(
+        Rect.fromLTRB(10.8, 12.0, 13.2, stemTo),
+        const Radius.circular(0.9),
+      ),
+      fill,
     );
-    canvas.drawRRect(body, Paint()..color = ink..isAntiAlias = true);
-    // Дуга — нижняя половина окружности вокруг капсулы.
-    canvas.drawArc(
-      const Rect.fromLTRB(6.0, 5.0, 18.0, 17.0),
-      0,
-      math.pi,
-      false,
-      _line(stroke),
+    if (stand) {
+      canvas.drawRRect(
+        RRect.fromRectAndRadius(
+          const Rect.fromLTRB(6.2, 19.6, 17.8, 22.2),
+          const Radius.circular(1.3),
+        ),
+        fill,
+      );
+    }
+
+    // Голова: верх круглый, низ скруглён меньше — так она «сидит» на
+    // стойке, а не висит шариком.
+    canvas.drawRRect(
+      RRect.fromRectAndCorners(
+        const Rect.fromLTRB(6.2, 1.6, 17.8, 15.4),
+        topLeft: const Radius.circular(5.8),
+        topRight: const Radius.circular(5.8),
+        bottomLeft: const Radius.circular(4.2),
+        bottomRight: const Radius.circular(4.2),
+      ),
+      fill,
     );
-    canvas.drawLine(const Offset(12, 17.0), const Offset(12, 20.4), _line(stroke));
-    canvas.drawLine(const Offset(8.4, 20.8), const Offset(15.6, 20.8), _line(stroke));
+    final slat = Paint()
+      ..color = paper
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 1.7
+      ..strokeCap = StrokeCap.round
+      ..isAntiAlias = true;
+    for (final y in const [5.4, 8.6, 11.8]) {
+      canvas.drawLine(Offset(8.4, y), Offset(15.6, y), slat);
+    }
   }
 
-  /// Два микрофона, наклонённых навстречу, — режим «голос против голоса».
+  /// Два микрофона, заглядывающих навстречу друг другу из-за краёв.
   ///
-  /// Каждый рисуется тем же [_mic], но сжатым: толщина линий задана с
-  /// запасом, иначе после сжатия дуга и ножка становятся тоньше волоса.
+  /// Поворот идёт вокруг ГОЛОВЫ, а не вокруг середины сетки: крутя вокруг
+  /// середины, головы уезжают вниз, и наклон читается как «микрофон
+  /// падает», а не «повернулся к собеседнику».
   ///
-  /// РАЗВЕДЕНЫ ПОЧТИ ДО КРАЁВ СЕТКИ. Микрофон широк не капсулой, а дугой
-  /// (она идёт от 6 до 18), и сдвинутые ближе друг к другу дуги смыкаются
-  /// в одно пятно — два микрофона перестают читаться как два.
+  /// ЧЕТВЕРТЬ ГОЛОВЫ ОСТАЁТСЯ ЗА КАДРОМ — это и есть «выглядывают».
+  /// Меньше — и обрез читается как криво поставленный значок; больше — и
+  /// от микрофона остаётся полумесяц, в котором его уже не узнать.
   void _micDuo(Canvas canvas) {
-    void one(double dx, double rotation) {
+    void one(double headX, double rotation) {
       canvas.save();
-      canvas.translate(dx, 11.5);
+      canvas.translate(headX, 12.0);
       canvas.rotate(rotation);
-      canvas.scale(0.70);
-      canvas.translate(-12, -12);
-      _mic(canvas, stroke: 2.5);
+      canvas.scale(0.85);
+      // 8.5 — середина ГОЛОВЫ по высоте, а не середина сетки.
+      canvas.translate(-12, -8.5);
+      // Стойка уходит далеко за сетку: её обрежет край плашки, и это
+      // единственный способ показать, что микрофон стоит ЗА кадром.
+      _mic(canvas, stand: false, stemTo: 30);
       canvas.restore();
     }
 
-    one(5.5, -0.20);
-    one(18.5, 0.20);
+    one(3.2, 0.38);
+    one(20.8, -0.38);
   }
 
   /// Окно сообщения: пузырь с хвостиком и две строки текста.

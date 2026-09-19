@@ -178,6 +178,11 @@ class ChMenuRow extends StatelessWidget {
 /// нарисованным вручную значком (см. `mode_glyphs.dart`). Ровно одно из
 /// двух: указать оба значит нарисовать их друг на друге, и утверждение
 /// это держит `assert`, а не комментарий.
+///
+/// СОДЕРЖИМОЕ ОБРЕЗАЕТСЯ ПО СКРУГЛЕНИЮ. Значок «Голос Vs Голос» нарисован
+/// во всю плашку и намеренно выходит за её края — обрезка и делает из
+/// этого «микрофоны выглядывают из-за угла». Без неё они легли бы поверх
+/// строки меню. Тень при этом остаётся: обрезается только ребёнок.
 class ChModeIcon extends StatelessWidget {
   final IconData? icon;
   final Widget? glyph;
@@ -191,6 +196,7 @@ class ChModeIcon extends StatelessWidget {
     return Container(
       width: 32,
       height: 32,
+      clipBehavior: Clip.antiAlias,
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(9),
         gradient: LinearGradient(colors: gradient, begin: Alignment.topLeft, end: Alignment.bottomRight),
