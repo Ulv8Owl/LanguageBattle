@@ -197,7 +197,7 @@ class ChModeIcon extends StatelessWidget {
         boxShadow: const [BoxShadow(color: Colors.black45, blurRadius: 8, offset: Offset(0, 3))],
       ),
       child: Center(
-        child: glyph ?? Icon(icon, size: 16, color: Colors.black87),
+        child: glyph ?? Icon(icon, size: 18, color: Colors.black87),
       ),
     );
   }

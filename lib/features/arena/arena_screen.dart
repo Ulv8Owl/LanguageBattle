@@ -414,7 +414,7 @@ class _ArenaScreenState extends State<ArenaScreen> {
             // Значок ЗОЛОТОЙ, как у остальных режимов: зелёный выбивался из
             // ряда и читался как «другое», хотя карточки — такой же режим.
             icon: const ChModeIcon(
-              glyph: ModeGlyph(ModeGlyphKind.cards),
+              glyph: ModeGlyph(ModeGlyphKind.cards, size: 24),
               gradient: [AppColors.gold, Color(0xFFFFE066)],
             ),
             title: s.modeFlashcards,
@@ -441,7 +441,7 @@ class _ArenaScreenState extends State<ArenaScreen> {
           const SizedBox(height: 9),
           ChMenuRow(
             icon: const ChModeIcon(
-              glyph: ModeGlyph(ModeGlyphKind.micDuo),
+              glyph: ModeGlyph(ModeGlyphKind.micDuo, size: 25),
               gradient: [AppColors.gold, Color(0xFFFFE066)],
             ),
             title: s.modeVoiceDuel,

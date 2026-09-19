@@ -36,6 +36,10 @@ enum ModeGlyphKind {
 
 class ModeGlyph extends StatelessWidget {
   final ModeGlyphKind kind;
+
+  /// Сторона квадрата, в который вписан рисунок. У каждого значка своя:
+  /// рисунок веера и двух микрофонов мельче деталями, и в одном размере
+  /// с остальными они читаются хуже — см. вызовы в Арене.
   final double size;
   final Color ink;
   final Color paper;
@@ -43,7 +47,7 @@ class ModeGlyph extends StatelessWidget {
   const ModeGlyph(
     this.kind, {
     super.key,
-    this.size = 19,
+    this.size = 21,
     this.ink = Colors.black87,
     this.paper = AppColors.gold,
   });
@@ -97,10 +101,16 @@ class _ModeGlyphPainter extends CustomPainter {
 
   /// Пять карт, сведённых в одну точку внизу, — так колоду держат в руке.
   ///
-  /// Точка схода НИЖЕ значка (y = 21), а не в его середине: веер, сведённый
-  /// по центру, читается как звезда, а не как карты.
+  /// Точка схода НИЖЕ карт, а не в их середине: веер, сведённый по центру,
+  /// читается как звезда, а не как карты.
+  ///
+  /// А ВОТ САМ ВЕЕР ОБЯЗАН СТОЯТЬ ПО ЦЕНТРУ ПЛАШКИ. Точка схода центром
+  /// не является: карты уходят от неё только ВВЕРХ, и веер, у которого по
+  /// центру стоит она, висит ниже середины квадрата. Поэтому y считается
+  /// от высоты веера (карта 13.2 длиной плюс разлёт нижних углов), а не
+  /// ставится на глаз.
   void _cards(Canvas canvas) {
-    const pivot = Offset(12, 20.6);
+    const pivot = Offset(12, 18.3);
     const angles = [-0.60, -0.30, 0.0, 0.30, 0.60];
     final card = RRect.fromRectAndRadius(
       const Rect.fromLTRB(-3.5, -13.6, 3.5, -0.4),
@@ -139,10 +149,14 @@ class _ModeGlyphPainter extends CustomPainter {
   ///
   /// Каждый рисуется тем же [_mic], но сжатым: толщина линий задана с
   /// запасом, иначе после сжатия дуга и ножка становятся тоньше волоса.
+  ///
+  /// РАЗВЕДЕНЫ ПОЧТИ ДО КРАЁВ СЕТКИ. Микрофон широк не капсулой, а дугой
+  /// (она идёт от 6 до 18), и сдвинутые ближе друг к другу дуги смыкаются
+  /// в одно пятно — два микрофона перестают читаться как два.
   void _micDuo(Canvas canvas) {
     void one(double dx, double rotation) {
       canvas.save();
-      canvas.translate(dx, 12.4);
+      canvas.translate(dx, 11.5);
       canvas.rotate(rotation);
       canvas.scale(0.70);
       canvas.translate(-12, -12);
@@ -150,8 +164,8 @@ class _ModeGlyphPainter extends CustomPainter {
       canvas.restore();
     }
 
-    one(6.9, -0.20);
-    one(17.1, 0.20);
+    one(5.5, -0.20);
+    one(18.5, 0.20);
   }
 
   /// Окно сообщения: пузырь с хвостиком и две строки текста.
