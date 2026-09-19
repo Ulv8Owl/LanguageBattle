@@ -9,6 +9,6 @@
     tools:keep="@drawable/ic_notification,@raw/reminder,
                 @drawable/notification_bg_*,@layout/notification_chrolingo,
                 @id/reminder_*,
-                @drawable/mascot_*,@drawable/widget_bg_*,
+                @drawable/mascot_*,@drawable/widget_bg_*,@drawable/widget_preview,
                 @layout/widget_chrolingo,@xml/chrolingo_widget_info,
                 @id/widget_*" />

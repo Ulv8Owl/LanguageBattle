@@ -162,6 +162,71 @@ def boxed(rows, width, height, size):
     return out
 
 
+def make_widget_preview():
+    """Картинка виджета для списка при долгом нажатии на рабочий стол.
+
+    ОТДЕЛЬНЫМ ФАЙЛОМ, А НЕ ИКОНКОЙ ПРИЛОЖЕНИЯ. Иконка у нас — адаптивная
+    (XML в mipmap-anydpi-v26), и лаунчеры рисуют её в списке виджетов
+    по-разному, вплоть до пустого места. Обычный PNG рисуют все
+    одинаково, а пустое место в списке неотличимо от «виджета нет».
+    """
+    width, height, rows = read_png(SOURCE)
+    mascot = upscaled(tinted(rows, width, MOODS['waiting']), width, 2)
+    mw, mh = width * 2, height * 2
+
+    out_w, out_h = 360, 160
+    radius = 28
+    bg = (0xFF, 0xD4, 0x00)
+    ink = (0x0D, 0x0D, 0x10)
+
+    canvas = [bytearray(out_w * 4) for _ in range(out_h)]
+    for y in range(out_h):
+        for x in range(out_w):
+            # Скруглённые углы: точка внутри, если она не вышла за
+            # четверть круга в своём углу.
+            cx = radius - x if x < radius else (x - (out_w - radius - 1) if x > out_w - radius - 1 else 0)
+            cy = radius - y if y < radius else (y - (out_h - radius - 1) if y > out_h - radius - 1 else 0)
+            if cx * cx + cy * cy > radius * radius:
+                continue
+            i = x * 4
+            canvas[y][i:i + 4] = bytes(bg + (255,))
+
+    def bar(top, left, w, h, alpha):
+        for y in range(top, min(top + h, out_h)):
+            for x in range(left, min(left + w, out_w)):
+                i = x * 4
+                if canvas[y][i + 3] == 0:
+                    continue
+                canvas[y][i:i + 4] = bytes(ink + (alpha,))
+
+    # Две полоски вместо текста: список виджетов показывает картинку
+    # мелко, и настоящие буквы там всё равно не прочесть.
+    bar(46, 24, 150, 16, 255)
+    bar(74, 24, 190, 10, 150)
+    bar(92, 24, 120, 10, 150)
+
+    at_x, at_y = out_w - mw - 20, (out_h - mh) // 2
+    for y in range(mh):
+        ty = at_y + y
+        if not (0 <= ty < out_h):
+            continue
+        row = mascot[y]
+        for x in range(mw):
+            tx = at_x + x
+            if not (0 <= tx < out_w):
+                continue
+            src = row[x * 4:x * 4 + 4]
+            if src[3] == 0 or canvas[ty][tx * 4 + 3] == 0:
+                continue
+            canvas[ty][tx * 4:tx * 4 + 4] = src
+
+    target = os.path.join(RES_DIR, 'drawable-nodpi')
+    os.makedirs(target, exist_ok=True)
+    path = os.path.join(target, 'widget_preview.png')
+    write_png(path, out_w, out_h, [bytes(r) for r in canvas])
+    print('%s  %dx%d' % (path, out_w, out_h))
+
+
 def make_notification_icon():
     """Силуэт хамелеона для строки состояния."""
     width, height, rows = read_png(SOURCE)
@@ -245,5 +310,6 @@ def make_sound():
 
 if __name__ == '__main__':
     make_moods()
+    make_widget_preview()
     make_notification_icon()
     make_sound()

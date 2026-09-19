@@ -7,6 +7,7 @@ import '../../core/app_events.dart';
 import '../../core/app_locale.dart';
 import '../../core/debug_flags.dart';
 import '../../core/leagues.dart';
+import '../../core/mascot_widget.dart';
 import '../../core/reminders.dart';
 import '../../core/supabase_client.dart';
 import '../../core/all_languages.dart';
@@ -42,6 +43,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
   bool _reminders = false;
   int _reminderHour = kReminderDefaultHour;
   bool _savingReminders = false;
+
+  /// Что система знает о виджете. Пока не спросили — null.
+  WidgetStatus? _widget;
 
   bool _hideFromLeaderboard = false;
 
@@ -82,6 +86,73 @@ class _SettingsScreenState extends State<SettingsScreen> {
     _loadMyLanguages();
     _loadJudgeModels();
     _loadReminders();
+    _loadWidget();
+  }
+
+  Future<void> _loadWidget() async {
+    final status = await MascotWidget.diagnose();
+    if (!mounted) return;
+    setState(() => _widget = status);
+  }
+
+  /// Коротко о состоянии виджета — тем же языком, каким о нём спросят.
+  String get _widgetStatus {
+    final status = _widget;
+    if (status == null) return '…';
+    if (status.providers == 0) return 'система не видит';
+    if (status.placed == 0) return 'не поставлен';
+    return 'на экране: ${status.placed}';
+  }
+
+  /// Поставить виджет.
+  ///
+  /// ЧЕРЕЗ СИСТЕМУ, А НЕ ЧЕРЕЗ СПИСОК ЛАУНЧЕРА. Список держится в кеше и
+  /// после обновления приложения показывает вчерашний набор — из-за
+  /// этого свежий виджет выглядит как несуществующий.
+  Future<void> _addWidget() async {
+    final status = await MascotWidget.diagnose();
+    if (!mounted) return;
+    setState(() => _widget = status);
+
+    if (status.providers == 0) {
+      await _tellAboutWidget(
+        'Система не видит виджет',
+        'Это не кеш лаунчера, а сборка: приложение установлено без '
+            'виджета. Поставьте APK заново — и если не поможет, скажите '
+            'мне, здесь чинить нечего.',
+      );
+      return;
+    }
+    if (await MascotWidget.pin()) {
+      await _loadWidget();
+      return;
+    }
+    await _tellAboutWidget(
+      'Лаунчер не умеет ставить сам',
+      'Система виджет видит, но добавить его может только рабочий стол: '
+          'долгое нажатие на пустом месте → Виджеты → Chrolingo. Если его '
+          'там нет — перезагрузите телефон: список виджетов лаунчер '
+          'держит в кеше и после обновления приложения обновляет не сразу.',
+    );
+  }
+
+  Future<void> _tellAboutWidget(String title, String body) async {
+    if (!mounted) return;
+    await showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: AppColors.navy2,
+        title: Text(title,
+            style: AppFonts.ui(fontSize: 15, weight: FontWeight.w800)),
+        content: Text(body, style: const TextStyle(height: 1.4)),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(),
+            child: const Text('Понятно'),
+          ),
+        ],
+      ),
+    );
   }
 
   Future<void> _loadReminders() async {
@@ -810,6 +881,16 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     trailing: const Icon(Icons.play_arrow,
                         color: AppColors.muted, size: 20),
                     onTap: Reminders.previewStreak,
+                  ),
+                  const Divider(height: 1, color: AppColors.line),
+                  _Row(
+                    icon: Icons.widgets_outlined,
+                    title: 'Виджет на рабочем столе',
+                    trailing: Text(
+                      _widgetStatus,
+                      style: AppFonts.mono(fontSize: 10, color: AppColors.muted),
+                    ),
+                    onTap: _addWidget,
                   ),
                 ],
               ),

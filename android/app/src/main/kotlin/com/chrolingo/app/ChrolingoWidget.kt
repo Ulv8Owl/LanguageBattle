@@ -5,6 +5,7 @@ import android.appwidget.AppWidgetManager
 import android.appwidget.AppWidgetProvider
 import android.content.ComponentName
 import android.content.Context
+import android.os.Build
 import android.os.SystemClock
 import android.view.View
 import android.widget.RemoteViews
@@ -55,6 +56,49 @@ class ChrolingoWidget : AppWidgetProvider() {
             "ember" to Skin("widget_bg_ember", 0xFFFFFFFF.toInt(), 0xE6FFFFFF.toInt()),
             "ok" to Skin("widget_bg_ok", 0xFF0D0D10.toInt(), 0xCC0D0D10.toInt()),
         )
+
+        /** Что о виджете знает САМА СИСТЕМА.
+         *
+         * Нужно потому, что «виджета нет в списке» — это два разных
+         * случая, и снаружи они выглядят одинаково: система не нашла
+         * провайдера вовсе (беда с манифестом или ресурсами) или нашла,
+         * а список в лаунчере устарел. Первое лечится сборкой, второе —
+         * перезагрузкой, и путать их значит чинить не то.
+         */
+        fun diagnose(context: Context): Map<String, Any> {
+            val manager = AppWidgetManager.getInstance(context)
+            val providers = manager
+                ?.getInstalledProvidersForPackage(context.packageName, null)
+                ?.size ?: 0
+            val placed = manager
+                ?.getAppWidgetIds(ComponentName(context, ChrolingoWidget::class.java))
+                ?.size ?: 0
+            val pinnable = Build.VERSION.SDK_INT >= Build.VERSION_CODES.O &&
+                (manager?.isRequestPinAppWidgetSupported ?: false)
+            return mapOf(
+                "providers" to providers,
+                "placed" to placed,
+                "pinnable" to pinnable,
+            )
+        }
+
+        /**
+         * Попросить систему поставить виджет, минуя список лаунчера.
+         *
+         * СПИСОК ВИДЖЕТОВ — САМОЕ НЕНАДЁЖНОЕ ЗВЕНО: лаунчер держит его в
+         * кеше и после обновления приложения обновляет когда захочет, а
+         * иногда только после перезагрузки. Этот путь в кеш не смотрит.
+         */
+        fun requestPin(context: Context): Boolean {
+            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return false
+            val manager = AppWidgetManager.getInstance(context) ?: return false
+            if (!manager.isRequestPinAppWidgetSupported) return false
+            return manager.requestPinAppWidget(
+                ComponentName(context, ChrolingoWidget::class.java),
+                null,
+                null,
+            )
+        }
 
         /** Запомнить состояние и перерисовать. [state] — объект JSON. */
         fun save(context: Context, state: String) {

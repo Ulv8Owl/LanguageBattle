@@ -589,11 +589,52 @@ void main() {
       expect(dart.contains('lateEvening'), isFalse);
     });
 
+    test('превью — обычная картинка, а не иконка приложения', () {
+      // Иконка у нас адаптивная (XML в mipmap-anydpi-v26), и часть
+      // лаунчеров рисует её в списке виджетов пустым местом. Пустое
+      // место в списке неотличимо от «виджета нет вовсе».
+      final info = read('android/app/src/main/res/xml/chrolingo_widget_info.xml');
+      expect(info, contains('android:previewImage="@drawable/widget_preview"'));
+      expect(info.contains('@mipmap/ic_launcher'), isFalse);
+      expect(
+        File('android/app/src/main/res/drawable-nodpi/widget_preview.png')
+            .existsSync(),
+        isTrue,
+      );
+    });
+
+    test('у виджета есть своё имя в списке', () {
+      // Без него в списке стоит имя приложения, и среди десятка чужих
+      // виджетов его не найти глазами.
+      final xml = read('android/app/src/main/AndroidManifest.xml');
+      final block = xml.substring(xml.indexOf('.ChrolingoWidget'));
+      expect(block.substring(0, 400), contains('android:label='));
+    });
+
+    test('приложение умеет спросить систему и поставить виджет само', () {
+      // «Виджета нет в списке» — это два разных случая: система не нашла
+      // провайдера или список в лаунчере устарел. Снаружи они
+      // одинаковы, а чинятся по-разному, поэтому спрашиваем систему.
+      final code = kotlin();
+      expect(code, contains('getInstalledProvidersForPackage'));
+      expect(code, contains('requestPinAppWidget'));
+      // requestPinAppWidget появился в Android 8 — на более старых
+      // вызов без проверки это падение, а не отказ.
+      expect(code, contains('Build.VERSION_CODES.O'));
+
+      final dart = read('lib/core/mascot_widget.dart');
+      expect(dart, contains("invokeMapMethod<String, dynamic>(\n          'widgetDiagnose')"));
+      expect(dart, contains("invokeMethod<bool>('widgetPin')"));
+      expect(read('lib/features/profile/settings_screen.dart'),
+          contains('Виджет на рабочем столе'));
+    });
+
     test('ресурсы виджета защищены от сжатия', () {
       final keep = read('android/app/src/main/res/raw/keep.xml');
       expect(keep, contains('@drawable/mascot_'));
       expect(keep, contains('@drawable/widget_bg_'));
       expect(keep, contains('@layout/widget_chrolingo'));
+      expect(keep, contains('@drawable/widget_preview'));
       expect(keep, contains('@xml/chrolingo_widget_info'));
     });
   });

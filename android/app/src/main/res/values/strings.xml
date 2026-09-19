@@ -1,6 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <!-- Видно в списке виджетов при долгом нажатии на рабочий стол. -->
+    <!-- Имя в списке виджетов. Без него там стоит имя приложения, и
+         среди десятка чужих виджетов его не найти глазами. -->
+    <string name="widget_label">Хамелеон и серия</string>
     <string name="widget_description">Серия, настроение хамелеона и время до полуночи</string>
     <string name="widget_title_default">Серия ждёт</string>
     <string name="widget_body_default">Один бой занимает пару минут</string>

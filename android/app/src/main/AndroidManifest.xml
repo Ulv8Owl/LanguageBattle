@@ -60,6 +60,7 @@
              обновится. Так написано и в образце документации. -->
         <receiver
             android:name=".ChrolingoWidget"
+            android:label="@string/widget_label"
             android:exported="true">
             <intent-filter>
                 <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />

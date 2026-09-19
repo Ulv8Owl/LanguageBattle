@@ -28,8 +28,50 @@ import '../data/practice_diary.dart';
 import '../data/reminder_templates.dart';
 import 'native_ui.dart';
 
+/// Что о виджете знает система. Отличает «провайдера нет вовсе» от
+/// «есть, но игрок его не поставил» — снаружи это выглядит одинаково.
+typedef WidgetStatus = ({int providers, int placed, bool pinnable});
+
 class MascotWidget {
   MascotWidget._();
+
+  /// Спросить систему, видит ли она наш виджет.
+  ///
+  /// НУЖНО ПОТОМУ, ЧТО «ВИДЖЕТА НЕТ В СПИСКЕ» — ЭТО ДВА РАЗНЫХ СЛУЧАЯ.
+  /// Либо система не нашла провайдера (беда со сборкой), либо нашла, а
+  /// список в лаунчере устарел — он держит его в кеше и после
+  /// обновления приложения обновляет когда захочет. Лечатся они
+  /// по-разному, а на экране неотличимы.
+  static Future<WidgetStatus> diagnose() async {
+    if (!nativeSupported) return (providers: 0, placed: 0, pinnable: false);
+    try {
+      final answer = await nativeChannel.invokeMapMethod<String, dynamic>(
+          'widgetDiagnose');
+      return (
+        providers: (answer?['providers'] as num?)?.toInt() ?? 0,
+        placed: (answer?['placed'] as num?)?.toInt() ?? 0,
+        pinnable: answer?['pinnable'] as bool? ?? false,
+      );
+    } catch (e) {
+      debugPrint('widget diagnose failed: $e');
+      return (providers: 0, placed: 0, pinnable: false);
+    }
+  }
+
+  /// Попросить систему поставить виджет, минуя список лаунчера.
+  ///
+  /// Список — самое ненадёжное звено: его кеш переживает обновление
+  /// приложения, и виджет в нём появляется когда лаунчеру вздумается.
+  /// Этот путь в кеш не смотрит.
+  static Future<bool> pin() async {
+    if (!nativeSupported) return false;
+    try {
+      return await nativeChannel.invokeMethod<bool>('widgetPin') ?? false;
+    } catch (e) {
+      debugPrint('widget pin failed: $e');
+      return false;
+    }
+  }
 
   /// Пересчитать и отправить состояние виджета.
   ///
