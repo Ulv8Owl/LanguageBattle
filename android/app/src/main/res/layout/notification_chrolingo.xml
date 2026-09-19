@@ -8,10 +8,15 @@
      не упадут на сборке, они упадут на телефоне надписью «не удалось
      показать уведомление».
 
-     ВЫСОТА ОГРАНИЧЕНА СИСТЕМОЙ: всплывающее уведомление (heads-up) —
-     примерно 88dp. Поэтому картинка 44dp, отступ 10dp, а высота
-     набирается содержимым: без таймера выходит ~64dp (обычная), с
-     таймером ~85dp — те самые «примерно в 1,3 раза выше».
+     ЭТО БОЛЬШОЙ ВИД: всплывающее уведомление и развёрнутое в шторке.
+     Свёрнутому на Android 12+ достаётся 48dp — для него есть отдельная
+     разметка notification_chrolingo_compact. Верхняя граница здесь —
+     около 88dp: столько отводится всплывающему.
+
+     На Android 11 и старше система в разметку не вмешивается вовсе:
+     это и есть ВСЁ уведомление, от края до края, без шапки и без белой
+     рамки. Поэтому фон скруглён как карточка, а не как плашка внутри
+     чужой карточки.
 
      Цвета НЕ ЗАДАНЫ ЗДЕСЬ НАРОЧНО: и фон, и цвет текста ставит
      RichNotifications.kt под каждый вид уведомления. Иначе на каждую
@@ -22,7 +27,7 @@
     android:layout_height="wrap_content"
     android:orientation="horizontal"
     android:gravity="center_vertical"
-    android:padding="10dp">
+    android:padding="14dp">
 
     <LinearLayout
         android:layout_width="0dp"
@@ -47,7 +52,7 @@
             android:layout_height="wrap_content"
             android:ellipsize="end"
             android:maxLines="2"
-            android:textSize="16sp"
+            android:textSize="17sp"
             android:textStyle="bold" />
 
         <TextView
@@ -62,8 +67,8 @@
 
     <ImageView
         android:id="@+id/reminder_mascot"
-        android:layout_width="44dp"
-        android:layout_height="44dp"
+        android:layout_width="56dp"
+        android:layout_height="56dp"
         android:layout_marginStart="10dp"
         android:importantForAccessibility="no"
         android:scaleType="fitCenter" />

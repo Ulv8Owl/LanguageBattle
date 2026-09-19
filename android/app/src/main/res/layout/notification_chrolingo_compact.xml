@@ -1,0 +1,60 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Свёрнутый вид.
+
+     НУЖЕН ТОЛЬКО ИЗ-ЗА ANDROID 12. Там система накрывает уведомление
+     своим шаблоном и оставляет свёрнутому виду 48dp — большая разметка
+     обрезается ровно посередине, и вместо карточки выходит её верхняя
+     половина. На телефонах постарше свёрнутому виду достаётся 106dp, и
+     там показывается большая разметка.
+
+     Идентификаторы ТЕ ЖЕ, что в большой разметке: Kotlin не должен
+     знать, какую из двух он сейчас заполняет. -->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/reminder_root"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:gravity="center_vertical"
+    android:orientation="horizontal"
+    android:padding="6dp">
+
+    <LinearLayout
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_weight="1"
+        android:orientation="vertical">
+
+        <Chronometer
+            android:id="@+id/reminder_timer"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:includeFontPadding="false"
+            android:textSize="16sp"
+            android:textStyle="bold"
+            android:visibility="gone" />
+
+        <TextView
+            android:id="@+id/reminder_title"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:ellipsize="end"
+            android:maxLines="1"
+            android:textSize="14sp"
+            android:textStyle="bold" />
+
+        <TextView
+            android:id="@+id/reminder_body"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:ellipsize="end"
+            android:maxLines="1"
+            android:textSize="12sp" />
+    </LinearLayout>
+
+    <ImageView
+        android:id="@+id/reminder_mascot"
+        android:layout_width="34dp"
+        android:layout_height="34dp"
+        android:layout_marginStart="8dp"
+        android:importantForAccessibility="no"
+        android:scaleType="fitCenter" />
+</LinearLayout>

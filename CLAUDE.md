@@ -60,21 +60,26 @@ origin`), а не у списка внутри скрипта: такой спи
   существующего не даёт — меняя звук, менять `kReminderChannelId`. Имя
   значка — ИМЯ РЕСУРСА (`ic_notification`), без `@drawable/`: ищется через
   `getIdentifier`. Всё это сторожит `test/reminders_test.dart`.
-- **Шапку уведомления («Chrolingo · Сейчас») убрать нельзя, пока
-  `targetSdk >= 31`.** Дословно: «For apps targeting Android 12,
-  notifications with custom content views will no longer use the full
-  notification area; instead, the system applies a standard template».
-  Это ограничение привязано именно к targetSdk, а не к версии телефона:
-  уведомление без шапки существует только у приложения с `targetSdk <=
-  30`, а такое не принимает Google Play. Из шапки убирается лишь штамп
-  времени (`setShowWhen(false)`). Залить фон всей карточки
-  (`setColorized`) можно только у foreground service или MediaStyle с
-  медиасессией — то есть нельзя. Цветная плашка живёт ВНУТРИ своей
-  разметки. Свёрнутое уведомление ужато со 106dp до 48dp, всплывающее —
-  около 88dp: выше не нарисовать. **Уведомление без шапки, «на всё
-  пространство», — это ВИДЖЕТ, а не уведомление.** У виджета шапки нет ни
-  у кого, фон и высота его собственные; так устроено и то, что видно у
-  Duolingo. См. `ChrolingoWidget.kt` и `lib/core/mascot_widget.dart`.
+- **`setStyle(DecoratedCustomViewStyle())` — это ПРОСЬБА нарисовать шапку
+  и белую рамку. НЕ ЗВАТЬ.** Документация прямо: «If you don't want your
+  notification decorated with the standard notification icon and header
+  … don't call setStyle()». Без неё на Android 11 и старше уведомление
+  наше целиком, от края до края — ровно так выглядят уведомления
+  Duolingo. Эта строка однажды уже стояла в `ChrolingoNotification.kt`, и
+  из-за неё уведомление на ЛЮБОМ телефоне выглядело вложенным в чужую
+  карточку. Сторожит тест.
+- **Шапку убирает не targetSdk, а ПРОШИВКА.** «For apps targeting Android
+  12, notifications with custom content views will no longer use the full
+  notification area; instead, the system applies a standard template» —
+  применяет это сама Android 12+, поэтому на телефонах постарше шапки
+  нет, а на новых она будет при любом targetSdk, который примет Play.
+  Из неё убирается лишь штамп времени (`setShowWhen(false)`). Залить фон
+  всей карточки (`setColorized`) можно только у foreground service или
+  MediaStyle с медиасессией — то есть нельзя. Свёрнутое уведомление на
+  12+ ужато со 106dp до 48dp (поэтому для него отдельная разметка
+  `notification_chrolingo_compact`), всплывающее — около 88dp.
+  **Гарантированно «на всё пространство» умеет только ВИДЖЕТ** — у него
+  шапки нет ни на одной прошивке. См. `ChrolingoWidget.kt`.
 - **В своей разметке (RemoteViews) живут не все виджеты.** ConstraintLayout
   и любой androidx-виджет собираются успешно и падают на ТЕЛЕФОНЕ:
   «не удалось показать уведомление». Картинка передаётся РЕСУРСОМ

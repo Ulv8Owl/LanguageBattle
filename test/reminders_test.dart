@@ -355,20 +355,47 @@ void main() {
       expect(xml, contains('<Chronometer'));
     });
 
-    test('каждый id, который ищет Kotlin, есть в разметке', () {
-      // Ищутся они по ИМЕНИ, в рантайме. Переименовали в xml — Kotlin
-      // узнает об этом на телефоне, а не на сборке.
-      final xml = layout();
+    test('каждый id, который ищет Kotlin, есть в ОБЕИХ разметках', () {
+      // Ищутся они по ИМЕНИ, в рантайме. Разметки две — большая и
+      // свёрнутая, — и Kotlin не знает, какую заполняет. Значит, в
+      // обеих должен быть один и тот же набор.
       final code = kotlin();
       final asked = RegExp(r'resource\(context, "([a-z_]+)", "id"\)')
           .allMatches(code)
           .map((m) => m.group(1)!)
           .toSet();
       expect(asked, isNotEmpty, reason: 'Kotlin перестал искать id — проверка ослепла');
-      for (final name in asked) {
-        expect(xml, contains('android:id="@+id/$name"'),
-            reason: 'Kotlin просит @id/$name, а в разметке его нет');
+      for (final file in [
+        'notification_chrolingo',
+        'notification_chrolingo_compact',
+      ]) {
+        final xml = read('android/app/src/main/res/layout/$file.xml');
+        for (final name in asked) {
+          expect(xml, contains('android:id="@+id/$name"'),
+              reason: 'Kotlin просит @id/$name, а в $file его нет');
+        }
       }
+    });
+
+    test('шапку системы НЕ просим — ни одной строкой', () {
+      // setStyle(DecoratedCustomViewStyle()) — это ПРОСЬБА нарисовать
+      // шапку с именем приложения и белую рамку вокруг. Именно она
+      // однажды и стояла здесь, и именно из-за неё уведомление
+      // выглядело вложенным в чужую карточку на телефонах, где система
+      // ничего не навязывает.
+      final code = kotlin();
+      expect(code.contains('DecoratedCustomViewStyle'), isFalse);
+      expect(code.contains('.setStyle('), isFalse);
+    });
+
+    test('свёрнутый вид отдельный — и только там, где система обрезает', () {
+      // На Android 12+ свёрнутому достаётся 48dp: большая разметка там
+      // обрезается пополам. На телефонах постарше — 106dp, и там нужна
+      // большая.
+      final code = kotlin();
+      expect(code, contains('Build.VERSION.SDK_INT >= Build.VERSION_CODES.S'));
+      expect(code, contains('compact = decorated'));
+      expect(code, contains('setCustomHeadsUpContentView(views(context, spec, skin, compact = false))'));
     });
 
     test('каждая расцветка из Dart есть в Kotlin и лежит файлом', () {
@@ -472,6 +499,7 @@ void main() {
     test('разметка и подложки защищены от сжатия ресурсов', () {
       final keep = read('android/app/src/main/res/raw/keep.xml');
       expect(keep, contains('@layout/notification_chrolingo'));
+      expect(keep, contains('@layout/notification_chrolingo_compact'));
       expect(keep, contains('@drawable/notification_bg_'));
     });
 

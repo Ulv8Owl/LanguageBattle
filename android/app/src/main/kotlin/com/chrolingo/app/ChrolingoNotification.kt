@@ -16,6 +16,16 @@ import org.json.JSONObject
 /**
  * Одно уведомление: из чего состоит и как его показать.
  *
+ * ═══ ЗДЕСЬ НЕТ setStyle, И ЭТО ГЛАВНАЯ СТРОКА ФАЙЛА ═══
+ *
+ * `setStyle(DecoratedCustomViewStyle())` — это ПРОСЬБА нарисовать шапку
+ * с именем приложения и белую рамку вокруг. Документация говорит прямо:
+ * «If you don't want your notification decorated with the standard
+ * notification icon and header … don't call setStyle()». Без неё на
+ * Android 11 и старше уведомление наше целиком — ровно так выглядят
+ * уведомления Duolingo. Вернёте setStyle — вернётся и рамка, на всех
+ * телефонах разом.
+ *
  * ═══ ПОЧЕМУ ЭТО ОТДЕЛЬНО ОТ МОСТА С FLUTTER ═══
  *
  * Вечернее напоминание показывает BroadcastReceiver, разбуженный
@@ -23,13 +33,15 @@ import org.json.JSONObject
  * Flutter, ни Dart-кода. Значит, всё, что нужно для показа, обязано
  * лежать здесь и уметь собираться из сохранённого текста.
  *
- * ═══ ЧЕГО НЕЛЬЗЯ, И ЭТО ПРОВЕРЕНО ПО ДОКУМЕНТАЦИИ ═══
+ * ═══ ГДЕ ШАПКА ВСЁ-ТАКИ ОСТАНЕТСЯ ═══
  *
- * Шапку с именем приложения убрать нельзя, пока targetSdk >= 31:
- * «For apps targeting Android 12, notifications with custom content
- * views will no longer use the full notification area; instead, the
- * system applies a standard template». Там же — про высоту: свёрнутое
- * уведомление ужато со 106dp до 48dp.
+ * На Android 12 и новее её рисует система, и отказаться нельзя: «For
+ * apps targeting Android 12, notifications with custom content views
+ * will no longer use the full notification area; instead, the system
+ * applies a standard template». Запрет живёт в ПРОШИВКЕ Android 12+ —
+ * на телефонах постарше его просто некому применять, и там уведомление
+ * выходит без шапки. Там же про высоту: свёрнутое ужато со 106dp до
+ * 48dp, всплывающее — около 88dp.
  */
 data class NotificationSpec(
     val id: Int,
@@ -130,15 +142,20 @@ object ChrolingoNotification {
             // времени. Имя приложения рисует система.
             .setShowWhen(false)
             .setCategory(Notification.CATEGORY_REMINDER)
-            .setStyle(Notification.DecoratedCustomViewStyle())
             // Внутри своих уведомлений порядок задаём сами: у срочного
             // ключ меньше — значит выше. Между ПРИЛОЖЕНИЯМИ порядок
             // решает система, и повлиять на него нельзя ничем.
             .setSortKey(if (spec.countdownUntil == null) "1" else "0")
 
-        builder.setCustomContentView(views(context, spec, skin))
-        builder.setCustomHeadsUpContentView(views(context, spec, skin))
-        builder.setCustomBigContentView(views(context, spec, skin))
+        // СВЁРНУТОЕ УВЕДОМЛЕНИЕ РИСУЕТСЯ ПО-РАЗНОМУ, И ЭТО НЕ КАПРИЗ.
+        // На Android 12 и новее система накрывает своим шаблоном и
+        // оставляет свёрнутому виду 48dp — большая разметка там будет
+        // обрезана пополам. На более старых система не вмешивается
+        // вовсе: весь вид наш, и места 106dp.
+        val decorated = Build.VERSION.SDK_INT >= Build.VERSION_CODES.S
+        builder.setCustomContentView(views(context, spec, skin, compact = decorated))
+        builder.setCustomHeadsUpContentView(views(context, spec, skin, compact = false))
+        builder.setCustomBigContentView(views(context, spec, skin, compact = false))
 
         manager(context).notify(spec.id, builder.build())
     }
@@ -147,10 +164,15 @@ object ChrolingoNotification {
         context: Context,
         spec: NotificationSpec,
         skin: Skin,
+        compact: Boolean,
     ): RemoteViews {
         val views = RemoteViews(
             context.packageName,
-            resource(context, "notification_chrolingo", "layout"),
+            resource(
+                context,
+                if (compact) "notification_chrolingo_compact" else "notification_chrolingo",
+                "layout",
+            ),
         )
         val root = resource(context, "reminder_root", "id")
         val timer = resource(context, "reminder_timer", "id")
