@@ -92,11 +92,71 @@ void main() {
       expect(account, contains(': email.trim().toLowerCase()'));
     });
 
+    test('выключенное manual linking объясняется словами', () {
+      // Документация: «Converting an anonymous user to a permanent user
+      // requires linking an identity… This requires you to enable manual
+      // linking». Без него достройка падает, и причина не в коде.
+      expect(const AccountError('manual_linking_disabled').message,
+          contains('manual linking'));
+      expect(read('lib/data/account.dart'), contains('manual_linking_disabled'));
+    });
+
+    test('занятая почта отправляет входить, а не пробовать снова', () {
+      expect(const AccountError('email_exists').message,
+          contains('Уже есть аккаунт'));
+    });
+
     test('выключенный гостевой вход объясняется словами', () {
       // Самая частая причина отказа — галка в панели Supabase, а не код.
       expect(const AccountError('anonymous_provider_disabled').message,
           contains('Supabase'));
       expect(read('lib/data/account.dart'), contains('anonymous_provider_disabled'));
+    });
+  });
+
+  group('что гостю нельзя — на сервере, а не только на экране', () {
+    String limits() => read('supabase/migrations/0058_guest_limits.sql');
+
+    test('чужим людям гость писать не может', () {
+      // Стена в приложении — это экран. Анонимный игрок остаётся
+      // обычным authenticated, и обойти её значит послать запрос мимо
+      // приложения. Документация Supabase предупреждает об этом прямо.
+      final sql = limits();
+      for (final table in [
+        'public.match_chat_messages',
+        'public.direct_messages',
+        'public.friendships',
+      ]) {
+        expect(sql, contains('on $table'),
+            reason: '$table открыт гостю на запись');
+      }
+      expect(sql, contains('as restrictive for insert'));
+    });
+
+    test('политики именно ограничивающие', () {
+      // Обычные складываются через ИЛИ: добавить к ним ещё одну
+      // разрешающую бесполезно, запретить может только restrictive.
+      final sql = limits();
+      expect(RegExp(r'as restrictive for').allMatches(sql).length,
+          greaterThanOrEqualTo(4));
+      expect(sql.contains('as permissive'), isFalse);
+    });
+
+    test('игра гостю оставлена', () {
+      // Бои, записи, монеты и серия — то, что он делает сам с собой.
+      // Ограничение здесь отняло бы ровно то, ради чего его и пускают.
+      final sql = limits();
+      for (final table in ['matches', 'rounds', 'voice_recordings', 'user_languages']) {
+        expect(sql.contains(' public.$table'), isFalse,
+            reason: '$table закрыт гостю — Арена станет неиграбельной');
+      }
+    });
+
+    test('старый токен без claim\'а не считается гостевым', () {
+      // У токенов, выписанных до включения анонимного входа, claim'а нет
+      // вовсе: `is false` дало бы NULL, то есть отказ живому игроку.
+      expect(limits(), contains("is not true"));
+      expect(limits().contains("::boolean is false"), isFalse);
     });
   });
 

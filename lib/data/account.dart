@@ -39,6 +39,11 @@ class AccountError implements Exception {
         'invalid_credentials' => 'Неверный логин или пароль',
         'anonymous_provider_disabled' =>
           'Гостевой вход выключен в настройках Supabase',
+        'manual_linking_disabled' =>
+          'В настройках Supabase выключено «Allow manual linking» — '
+              'без него гостевой аккаунт нельзя достроить до настоящего',
+        'email_exists' =>
+          'На эту почту уже есть аккаунт. Войдите в него — «Уже есть аккаунт»',
         _ => 'Не получилось: $code',
       };
 
@@ -107,10 +112,16 @@ class Account {
         : email.trim().toLowerCase();
 
     try {
+      // ПОРЯДОК ВАЖЕН: смена почты у анонимного аккаунта и есть его
+      // превращение в обычный, а пароль имеет смысл только после того,
+      // как оно случилось. Документация Supabase про это прямо: «To add
+      // a password for the anonymous user, the user's email or phone
+      // number needs to be verified first» — подтверждать ничего не
+      // придётся только потому, что в проекте выключено Confirm email.
       await supabase.auth.updateUser(UserAttributes(email: address));
       await supabase.auth.updateUser(UserAttributes(password: password));
     } on AuthException catch (e) {
-      throw AccountError(e.message);
+      throw AccountError(_authCodeOf(e));
     }
   }
 
@@ -145,6 +156,24 @@ class Account {
   }
 
   static Future<void> signOut() => supabase.auth.signOut();
+
+  /// Две причины отказа при достройке аккаунта объясняются не кодом, а
+  /// настройкой проекта или чужим аккаунтом — и обе надо назвать словами,
+  /// иначе искать будут в коде, где ничего нет.
+  static String _authCodeOf(AuthException e) {
+    final code = e.code ?? '';
+    final text = '$code ${e.message}'.toLowerCase();
+    if (text.contains('manual_linking') || text.contains('manual linking')) {
+      return 'manual_linking_disabled';
+    }
+    if (text.contains('identity_already_exists') ||
+        text.contains('email_exists') ||
+        text.contains('already registered') ||
+        text.contains('already been registered')) {
+      return 'email_exists';
+    }
+    return e.message;
+  }
 
   /// Postgres отдаёт наши raise exception целой фразой. Берём из неё
   /// код — по нему переводится сообщение.
