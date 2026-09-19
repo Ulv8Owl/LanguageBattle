@@ -431,7 +431,7 @@ class _ArenaScreenState extends State<ArenaScreen> {
           const SizedBox(height: 9),
           ChMenuRow(
             icon: const ChModeIcon(
-              glyph: ModeGlyph(ModeGlyphKind.mic, size: 26),
+              glyph: ModeGlyph(ModeGlyphKind.mic),
               gradient: [AppColors.gold, Color(0xFFFFE066)],
             ),
             title: s.modeVoice,
@@ -441,9 +441,7 @@ class _ArenaScreenState extends State<ArenaScreen> {
           const SizedBox(height: 9),
           ChMenuRow(
             icon: const ChModeIcon(
-              // ВО ВСЮ ПЛАШКУ: микрофоны обязаны упираться в её края —
-              // обрезанные ими, они и «выглядывают» навстречу друг другу.
-              glyph: ModeGlyph(ModeGlyphKind.micDuo, size: 32),
+              glyph: ModeGlyph(ModeGlyphKind.micDuo, size: 25),
               gradient: [AppColors.gold, Color(0xFFFFE066)],
             ),
             title: s.modeVoiceDuel,
